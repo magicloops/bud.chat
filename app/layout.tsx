@@ -1,11 +1,13 @@
 import type React from "react"
 import "@/app/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AuthProvider } from "@/lib/auth/auth-provider"
+import { Toaster } from "@/components/ui/toaster"
 
 export const metadata = {
-  title: "AI Chat App",
-  description: "Modern AI chat application with shadcn/ui components",
-    generator: 'v0.dev'
+  title: "bud.chat",
+  description: "A branch-first LLM chat interface with conversation forking",
+  generator: 'v0.dev'
 }
 
 export default function RootLayout({
@@ -21,9 +23,12 @@ export default function RootLayout({
           defaultTheme="system"
           enableSystem
           disableTransitionOnChange
-          storageKey="ai-chat-theme"
+          storageKey="bud-chat-theme"
         >
-          {children}
+          <AuthProvider>
+            {children}
+            <Toaster />
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

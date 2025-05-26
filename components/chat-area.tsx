@@ -1,18 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Avatar } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { MoreHorizontal, Sparkles, Leaf, PanelLeftClose, PanelRightClose, Copy, GitBranch, Edit } from "lucide-react"
+import { MoreHorizontal, Sparkles, Leaf, PanelLeftClose, PanelRightClose, Copy, GitBranch, Edit, User, Bot, Loader2 } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useRealtimeMessages } from "@/hooks/use-realtime"
+import { useChatStream } from "@/hooks/use-chat-stream"
+import { Database } from "@/lib/types/database"
+import { useToast } from "@/hooks/use-toast"
+
+type Message = Database['public']['Tables']['message']['Row']
 
 interface ChatAreaProps {
   toggleLeftSidebar: () => void
   toggleRightSidebar: () => void
   leftSidebarOpen: boolean
   rightSidebarOpen: boolean
+  currentConversationId?: string | null
+  currentWorkspaceId?: string | null
+  conversationTitle?: string
 }
 
 export default function ChatArea({
@@ -20,29 +29,197 @@ export default function ChatArea({
   toggleRightSidebar,
   leftSidebarOpen,
   rightSidebarOpen,
+  currentConversationId,
+  currentWorkspaceId,
+  conversationTitle = "New Chat",
 }: ChatAreaProps) {
-  const [messages, setMessages] = useState([
-    {
-      id: "1",
-      role: "assistant",
-      content: "Hi, how can I help you today?",
-      timestamp: "0 sec ago",
-      model: "GPT-4o",
-      name: "My Bud",
-    },
-  ])
-
   const [input, setInput] = useState("")
+  const [streamingContent, setStreamingContent] = useState("")
+  const [optimisticMessages, setOptimisticMessages] = useState<any[]>([])
+  const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
+  
+  const { messages: dbMessages, loading: messagesLoading } = useRealtimeMessages(currentConversationId)
+  
+  const { sendMessage, isStreaming, streamingMessageId } = useChatStream({
+    onToken: (content) => {
+      setStreamingContent(prev => prev + content)
+    },
+    onComplete: (content, messageId) => {
+      // Keep streaming content visible until we see the assistant message in DB
+      // The cleanup will happen when the DB message arrives
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error,
+        variant: "destructive",
+      })
+      setStreamingContent("")
+      setOptimisticMessages([])
+    }
+  })
+
+  // Combine database messages with optimistic messages
+  const allMessages = [...dbMessages, ...optimisticMessages]
+
+  // Clear optimistic messages when conversation changes
+  useEffect(() => {
+    setOptimisticMessages([])
+    setStreamingContent("")
+  }, [currentConversationId])
+
+  // Clean up optimistic messages when real DB messages arrive
+  useEffect(() => {
+    if (dbMessages.length > 0 && optimisticMessages.length > 0) {
+      // If we have a recent user message in DB, remove optimistic user messages
+      const recentDbUserMessage = dbMessages
+        .filter(msg => msg.role === 'user')
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+      
+      if (recentDbUserMessage) {
+        const recentTime = new Date(recentDbUserMessage.created_at).getTime()
+        const now = Date.now()
+        
+        // If user message was created in last 10 seconds, clear optimistic messages
+        if (now - recentTime < 10000) {
+          setOptimisticMessages([])
+        }
+      }
+    }
+  }, [dbMessages, optimisticMessages])
+
+  // Clear streaming content when assistant message appears in DB
+  useEffect(() => {
+    if (streamingContent && streamingMessageId) {
+      const hasAssistantMessage = dbMessages.some(msg => 
+        msg.id === streamingMessageId && msg.role === 'assistant' && msg.content.trim()
+      )
+      
+      if (hasAssistantMessage) {
+        setStreamingContent("")
+      }
+    }
+  }, [dbMessages, streamingContent, streamingMessageId])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      const scrollElement = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]')
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollElement.scrollHeight
+      }
+    }
+  }, [allMessages, streamingContent])
+
+  const handleSendMessage = async () => {
+    if (!input.trim() || !currentConversationId || !currentWorkspaceId || isStreaming) return
+
+    const messageText = input.trim()
+    setInput("")
+    setStreamingContent("")
+
+    // Add optimistic user message immediately
+    const optimisticUserMessage = {
+      id: `temp-user-${Date.now()}`,
+      role: 'user',
+      content: messageText,
+      created_at: new Date().toISOString(),
+      path: '',
+      convo_id: currentConversationId,
+      parent_id: null,
+      metadata: {},
+      revision: 1,
+      supersedes_id: null,
+      token_count: null,
+      usage_ms: null,
+      created_by: '',
+      updated_at: new Date().toISOString()
+    }
+
+    setOptimisticMessages([optimisticUserMessage])
+
+    await sendMessage(currentConversationId, messageText, currentWorkspaceId)
+  }
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendMessage()
+    }
+  }
 
   const copyMessageToClipboard = (content: string) => {
-    navigator.clipboard
-      .writeText(content)
-      .then(() => {
-        console.log("Message copied to clipboard")
+    navigator.clipboard.writeText(content).then(() => {
+      toast({
+        title: "Copied",
+        description: "Message copied to clipboard",
       })
-      .catch((err) => {
-        console.error("Failed to copy message: ", err)
+    }).catch(() => {
+      toast({
+        title: "Error",
+        description: "Failed to copy message",
+        variant: "destructive",
       })
+    })
+  }
+
+  const handleBranchConversation = async (fromMessageId: string) => {
+    if (!currentConversationId) return
+    
+    try {
+      const message = allMessages.find(m => m.id === fromMessageId)
+      if (!message) return
+
+      const response = await fetch(`/api/conversations/${currentConversationId}/fork`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          forkFromPath: message.path,
+          title: `${conversationTitle} (Fork)`
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        toast({
+          title: "Conversation branched",
+          description: `Created new conversation: ${result.forkedConversation.title}`,
+        })
+        // TODO: Navigate to the new conversation
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to branch conversation",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffSecs = Math.floor(diffMs / 1000)
+    const diffMins = Math.floor(diffSecs / 60)
+    const diffHours = Math.floor(diffMins / 60)
+    
+    if (diffSecs < 60) return `${diffSecs} sec ago`
+    if (diffMins < 60) return `${diffMins} min ago`
+    if (diffHours < 24) return `${diffHours} hour ago`
+    return date.toLocaleDateString()
+  }
+
+  if (!currentConversationId) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center">
+          <h3 className="text-lg font-medium text-muted-foreground">No conversation selected</h3>
+          <p className="text-sm text-muted-foreground">Select a conversation from the sidebar to start chatting</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -56,9 +233,9 @@ export default function ChatArea({
               className={`h-4 w-4 transition-transform duration-300 ${!leftSidebarOpen ? "rotate-180" : ""}`}
             />
           </Button>
-          <span className="font-medium">New Chat</span>
+          <span className="font-medium">{conversationTitle}</span>
           <span className="text-muted-foreground">|</span>
-          <span className="text-muted-foreground">GPT-4o</span>
+          <span className="text-muted-foreground">GPT-4</span>
         </div>
         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleRightSidebar}>
           <span className="sr-only">Toggle right sidebar</span>
@@ -69,50 +246,88 @@ export default function ChatArea({
       </div>
 
       {/* Chat Messages */}
-      <ScrollArea className="flex-1 p-4">
-        {messages.map((message) => (
-          <div key={message.id} className="mb-6 group">
-            <div className="flex items-start gap-3">
-              <Avatar className="h-8 w-8 bg-green-50">
-                <Leaf className="h-5 w-5 text-green-500" />
-              </Avatar>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium">
-                    {message.name} ({message.model})
-                  </span>
-                  <span className="text-xs text-muted-foreground">· {message.timestamp}</span>
-                </div>
-                <div className="text-sm">{message.content}</div>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-40">
-                  <DropdownMenuItem onClick={() => copyMessageToClipboard(message.content)}>
-                    <Copy className="mr-2 h-4 w-4" />
-                    <span>Copy</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <GitBranch className="mr-2 h-4 w-4" />
-                    <span>Branch</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Edit className="mr-2 h-4 w-4" />
-                    <span>Edit</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
+        {messagesLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        ))}
+        ) : (
+          <>
+            {allMessages.map((message) => (
+              <div key={message.id} className="mb-6 group">
+                <div className="flex items-start gap-3">
+                  <Avatar className="h-8 w-8">
+                    {message.role === 'user' ? (
+                      <User className="h-5 w-5" />
+                    ) : (
+                      <Bot className="h-5 w-5 text-green-500" />
+                    )}
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium">
+                        {message.role === 'user' ? 'You' : 'Assistant'}
+                        {message.role === 'assistant' && ' (GPT-4)'}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        · {formatTimestamp(message.created_at)}
+                      </span>
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem onClick={() => copyMessageToClipboard(message.content)}>
+                        <Copy className="mr-2 h-4 w-4" />
+                        <span>Copy</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleBranchConversation(message.id)}>
+                        <GitBranch className="mr-2 h-4 w-4" />
+                        <span>Branch</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <Edit className="mr-2 h-4 w-4" />
+                        <span>Edit</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            ))}
+            
+            {/* Streaming Message - only show if not already in DB */}
+            {streamingContent && (!streamingMessageId || !dbMessages.some(msg => msg.id === streamingMessageId)) && (
+              <div className="mb-6 group">
+                <div className="flex items-start gap-3">
+                  <Avatar className="h-8 w-8">
+                    <Bot className="h-5 w-5 text-green-500" />
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium">Assistant (GPT-4)</span>
+                      <span className="text-xs text-muted-foreground">
+                        · {isStreaming ? 'typing...' : 'just now'}
+                      </span>
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">
+                      {streamingContent}
+                      {isStreaming && <span className="animate-pulse">|</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </ScrollArea>
 
       {/* Chat Input */}
@@ -120,22 +335,30 @@ export default function ChatArea({
         <div className="relative">
           <div className="flex items-start gap-3">
             <Avatar className="mt-1 h-8 w-8">
-              <img src="/vibrant-street-market.png" alt="User" />
+              <User className="h-5 w-5" />
             </Avatar>
             <div className="flex-1 border rounded-md p-2 min-h-[80px] focus-within:ring-1 focus-within:ring-ring">
               <Textarea
-                placeholder="Send a message to My Bud"
+                placeholder="Send a message..."
                 className="border-0 focus-visible:ring-0 resize-none p-0 shadow-none min-h-[60px]"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                disabled={isStreaming || !currentConversationId}
               />
             </div>
           </div>
           <Button
             size="sm"
-            className="absolute bottom-3 right-3 h-8 w-8 rounded-full bg-green-100 hover:bg-green-200 text-green-700"
+            className="absolute bottom-3 right-3 h-8 w-8 rounded-full bg-green-100 hover:bg-green-200 text-green-700 disabled:opacity-50"
+            onClick={handleSendMessage}
+            disabled={!input.trim() || isStreaming || !currentConversationId}
           >
-            <Sparkles className="h-4 w-4" />
+            {isStreaming ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
           </Button>
         </div>
       </div>
