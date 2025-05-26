@@ -130,76 +130,60 @@ export async function POST(request: NextRequest) {
 
           let fullContent = ''
           let tokenCount = 0
-          let assistantMessageRecord: any = null
 
+          // Stream content to client without saving to DB yet
           for await (const chunk of response) {
             const content = chunk.choices[0]?.delta?.content || ''
             if (content) {
               fullContent += content
               tokenCount++
               
-              // Create assistant message on first content chunk
-              if (!assistantMessageRecord) {
-                const { data: newAssistantMessage, error: assistantError } = await supabase
-                  .from('message')
-                  .insert({
-                    convo_id: conversationId,
-                    parent_id: userMessageRecord.id,
-                    path: nextAssistantPath,
-                    role: 'assistant',
-                    content: '',
-                    created_by: user.id
-                  })
-                  .select()
-                  .single()
-                
-                if (assistantError) {
-                  console.error('Error creating assistant message:', assistantError)
-                  throw new Error('Failed to create assistant message')
-                }
-                assistantMessageRecord = newAssistantMessage
-              }
-              
               // Send chunk to client
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'token',
-                content,
-                messageId: assistantMessageRecord.id
+                content
               })}\n\n`))
             }
           }
 
-          // Update the assistant message with final content
-          if (assistantMessageRecord) {
-            await supabase
-              .from('message')
-              .update({
-                content: fullContent,
-                token_count: tokenCount
-              })
-              .eq('id', assistantMessageRecord.id)
+          // Now save both messages to DB after streaming is complete
+          const { data: assistantMessageRecord, error: assistantMsgError } = await supabase
+            .from('message')
+            .insert({
+              convo_id: conversationId,
+              parent_id: userMessageRecord.id,
+              path: nextAssistantPath,
+              role: 'assistant',
+              content: fullContent,
+              token_count: tokenCount,
+              created_by: user.id
+            })
+            .select()
+            .single()
+
+          if (assistantMsgError) {
+            console.error('Error creating assistant message:', assistantMsgError)
+            throw new Error('Failed to create assistant message')
           }
 
           // Record usage
-          if (assistantMessageRecord) {
-            await supabase
-              .from('usage')
-              .insert({
-                user_id: user.id,
-                message_id: assistantMessageRecord.id,
-                model: 'gpt-4',
-                prompt_tokens: tokenCount, // Approximate - OpenAI doesn't provide this in streaming
-                completion_tokens: tokenCount,
-                cost_cents: Math.round(tokenCount * 0.003) // Approximate cost calculation
-              })
+          await supabase
+            .from('usage')
+            .insert({
+              user_id: user.id,
+              message_id: assistantMessageRecord.id,
+              model: 'gpt-4',
+              prompt_tokens: tokenCount, // Approximate - OpenAI doesn't provide this in streaming
+              completion_tokens: tokenCount,
+              cost_cents: Math.round(tokenCount * 0.003) // Approximate cost calculation
+            })
 
-            // Send completion signal
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-              type: 'complete',
-              messageId: assistantMessageRecord.id,
-              content: fullContent
-            })}\n\n`))
-          }
+          // Send completion signal
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'complete',
+            messageId: assistantMessageRecord.id,
+            content: fullContent
+          })}\n\n`))
           
           controller.close()
         } catch (error) {

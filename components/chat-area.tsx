@@ -34,73 +34,34 @@ export default function ChatArea({
   conversationTitle = "New Chat",
 }: ChatAreaProps) {
   const [input, setInput] = useState("")
-  const [streamingContent, setStreamingContent] = useState("")
-  const [optimisticMessages, setOptimisticMessages] = useState<any[]>([])
+  const [messages, setMessages] = useState<any[]>([])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamingMessage, setStreamingMessage] = useState<any | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   
-  const { messages: dbMessages, loading: messagesLoading } = useRealtimeMessages(currentConversationId)
-  
-  const { sendMessage, isStreaming, streamingMessageId } = useChatStream({
-    onToken: (content) => {
-      setStreamingContent(prev => prev + content)
-    },
-    onComplete: (content, messageId) => {
-      // Keep streaming content visible until we see the assistant message in DB
-      // The cleanup will happen when the DB message arrives
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: error,
-        variant: "destructive",
-      })
-      setStreamingContent("")
-      setOptimisticMessages([])
-    }
-  })
-
-  // Combine database messages with optimistic messages
-  const allMessages = [...dbMessages, ...optimisticMessages]
-
-  // Clear optimistic messages when conversation changes
+  // Load messages when conversation changes
   useEffect(() => {
-    setOptimisticMessages([])
-    setStreamingContent("")
+    if (currentConversationId) {
+      loadMessages()
+    } else {
+      setMessages([])
+    }
   }, [currentConversationId])
 
-  // Clean up optimistic messages when real DB messages arrive
-  useEffect(() => {
-    if (dbMessages.length > 0 && optimisticMessages.length > 0) {
-      // If we have a recent user message in DB, remove optimistic user messages
-      const recentDbUserMessage = dbMessages
-        .filter(msg => msg.role === 'user')
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
-      
-      if (recentDbUserMessage) {
-        const recentTime = new Date(recentDbUserMessage.created_at).getTime()
-        const now = Date.now()
-        
-        // If user message was created in last 10 seconds, clear optimistic messages
-        if (now - recentTime < 10000) {
-          setOptimisticMessages([])
-        }
+  const loadMessages = async () => {
+    if (!currentConversationId) return
+    
+    try {
+      const response = await fetch(`/api/conversations/${currentConversationId}/messages`)
+      if (response.ok) {
+        const data = await response.json()
+        setMessages(data)
       }
+    } catch (error) {
+      console.error('Error loading messages:', error)
     }
-  }, [dbMessages, optimisticMessages])
-
-  // Clear streaming content when assistant message appears in DB
-  useEffect(() => {
-    if (streamingContent && streamingMessageId) {
-      const hasAssistantMessage = dbMessages.some(msg => 
-        msg.id === streamingMessageId && msg.role === 'assistant' && msg.content.trim()
-      )
-      
-      if (hasAssistantMessage) {
-        setStreamingContent("")
-      }
-    }
-  }, [dbMessages, streamingContent, streamingMessageId])
+  }
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -110,36 +71,108 @@ export default function ChatArea({
         scrollElement.scrollTop = scrollElement.scrollHeight
       }
     }
-  }, [allMessages, streamingContent])
+  }, [messages, streamingMessage])
 
   const handleSendMessage = async () => {
     if (!input.trim() || !currentConversationId || !currentWorkspaceId || isStreaming) return
 
     const messageText = input.trim()
     setInput("")
-    setStreamingContent("")
+    setIsStreaming(true)
 
-    // Add optimistic user message immediately
-    const optimisticUserMessage = {
-      id: `temp-user-${Date.now()}`,
+    // Add user message immediately to UI
+    const userMessage = {
+      id: `user-${Date.now()}`,
       role: 'user',
       content: messageText,
       created_at: new Date().toISOString(),
-      path: '',
-      convo_id: currentConversationId,
-      parent_id: null,
-      metadata: {},
-      revision: 1,
-      supersedes_id: null,
-      token_count: null,
-      usage_ms: null,
-      created_by: '',
-      updated_at: new Date().toISOString()
     }
 
-    setOptimisticMessages([optimisticUserMessage])
+    setMessages(prev => [...prev, userMessage])
 
-    await sendMessage(currentConversationId, messageText, currentWorkspaceId)
+    // Create streaming assistant message
+    const assistantMessage = {
+      id: `assistant-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+    }
+
+    setStreamingMessage(assistantMessage)
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: currentConversationId,
+          message: messageText,
+          workspaceId: currentWorkspaceId,
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.type === 'token' && data.content) {
+                fullContent += data.content
+                setStreamingMessage(prev => prev ? {
+                  ...prev,
+                  content: fullContent
+                } : null)
+              } else if (data.type === 'complete') {
+                // Stream is complete, add final message to messages array
+                const finalAssistantMessage = {
+                  ...assistantMessage,
+                  content: fullContent,
+                  id: data.messageId || assistantMessage.id
+                }
+                
+                setMessages(prev => [...prev, finalAssistantMessage])
+                setStreamingMessage(null)
+              } else if (data.type === 'error') {
+                throw new Error(data.error || 'Unknown error')
+              }
+            } catch (err) {
+              console.error('Error parsing SSE data:', err)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: "destructive",
+      })
+      setStreamingMessage(null)
+    } finally {
+      setIsStreaming(false)
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -168,7 +201,7 @@ export default function ChatArea({
     if (!currentConversationId) return
     
     try {
-      const message = allMessages.find(m => m.id === fromMessageId)
+      const message = messages.find(m => m.id === fromMessageId)
       if (!message) return
 
       const response = await fetch(`/api/conversations/${currentConversationId}/fork`, {
@@ -247,13 +280,8 @@ export default function ChatArea({
 
       {/* Chat Messages */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-        {messagesLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : (
-          <>
-            {allMessages.map((message) => (
+        <>
+          {messages.map((message) => (
               <div key={message.id} className="mb-6 group">
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
@@ -304,8 +332,8 @@ export default function ChatArea({
               </div>
             ))}
             
-            {/* Streaming Message - only show if not already in DB */}
-            {streamingContent && (!streamingMessageId || !dbMessages.some(msg => msg.id === streamingMessageId)) && (
+            {/* Streaming Message */}
+            {streamingMessage && (
               <div className="mb-6 group">
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
@@ -319,7 +347,7 @@ export default function ChatArea({
                       </span>
                     </div>
                     <div className="text-sm whitespace-pre-wrap">
-                      {streamingContent}
+                      {streamingMessage.content}
                       {isStreaming && <span className="animate-pulse">|</span>}
                     </div>
                   </div>
@@ -327,7 +355,6 @@ export default function ChatArea({
               </div>
             )}
           </>
-        )}
       </ScrollArea>
 
       {/* Chat Input */}
