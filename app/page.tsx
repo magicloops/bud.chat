@@ -6,6 +6,7 @@ import { AuthModal } from "@/components/auth/auth-modal"
 import ChatSidebar from "@/components/chat-sidebar"
 import ChatArea from "@/components/chat-area"
 import SettingsPanel from "@/components/settings-panel"
+import { ModelProvider } from "@/contexts/model-context"
 import { Loader2 } from "lucide-react"
 import { Database } from "@/lib/types/database"
 
@@ -72,7 +73,6 @@ export default function ChatApp() {
       updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
     }
     
-    console.log('Conversation changed to:', conversationId, 'Title:', title)
     
     // Use React 18's automatic batching to update everything at once
     setOptimisticMessages(messages || [])
@@ -93,44 +93,51 @@ export default function ChatApp() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-background overflow-hidden">
-      {/* Left Sidebar */}
-      <div
-        className={`transition-all duration-300 ease-in-out ${leftSidebarOpen ? "w-60 opacity-100" : "w-0 opacity-0"} overflow-hidden`}
-      >
-        <div className={`w-60 h-full ${!leftSidebarOpen && "invisible"}`}>
-          <ChatSidebar 
-            selectedConversationId={selectedConversation?.id}
-            onConversationSelect={handleConversationSelect}
-            onConversationUpdate={updateSelectedConversation}
+    <ModelProvider>
+      <div className="flex h-screen w-full bg-background overflow-hidden">
+        
+        {/* Left Sidebar */}
+        <div
+          className={`transition-all duration-300 ease-in-out ${
+            leftSidebarOpen ? "min-w-60 w-60 opacity-100" : "w-0 opacity-0"
+          } overflow-hidden`}
+        >
+          <div className={`min-w-60 w-60 h-full ${!leftSidebarOpen && "invisible"}`}>
+            <ChatSidebar 
+              selectedConversationId={selectedConversation?.id}
+              onConversationSelect={handleConversationSelect}
+              onConversationUpdate={updateSelectedConversation}
+              onConversationChange={handleConversationChange}
+            />
+          </div>
+        </div>
+
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col border-l border-r">
+          <ChatArea
+            toggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
+            toggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
+            leftSidebarOpen={leftSidebarOpen}
+            rightSidebarOpen={rightSidebarOpen}
+            currentConversationId={selectedConversation?.id}
+            currentWorkspaceId={selectedWorkspace?.id}
+            conversationTitle={selectedConversation?.title || "New Chat"}
+            optimisticMessages={optimisticMessages}
             onConversationChange={handleConversationChange}
           />
         </div>
-      </div>
 
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col border-l border-r">
-        <ChatArea
-          toggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
-          toggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
-          leftSidebarOpen={leftSidebarOpen}
-          rightSidebarOpen={rightSidebarOpen}
-          currentConversationId={selectedConversation?.id}
-          currentWorkspaceId={selectedWorkspace?.id}
-          conversationTitle={selectedConversation?.title || "New Chat"}
-          optimisticMessages={optimisticMessages}
-          onConversationChange={handleConversationChange}
-        />
-      </div>
-
-      {/* Settings Panel */}
-      <div
-        className={`transition-all duration-300 ease-in-out ${rightSidebarOpen ? "w-80 opacity-100" : "w-0 opacity-0"} overflow-hidden`}
-      >
-        <div className={`w-80 h-full ${!rightSidebarOpen && "invisible"}`}>
-          <SettingsPanel />
+        {/* Right Sidebar */}
+        <div
+          className={`transition-all duration-300 ease-in-out ${
+            rightSidebarOpen ? "w-80 min-w-80 opacity-100" : "w-0 opacity-0"
+          } overflow-hidden`}
+        >
+          <div className={`min-w-80 w-80 h-full ${!rightSidebarOpen && "invisible"}`}>
+            <SettingsPanel />
+          </div>
         </div>
       </div>
-    </div>
+    </ModelProvider>
   )
 }

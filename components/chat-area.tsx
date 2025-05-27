@@ -11,6 +11,8 @@ import { useRealtimeMessages } from "@/hooks/use-realtime"
 import { useChatStream } from "@/hooks/use-chat-stream"
 import { Database } from "@/lib/types/database"
 import { useToast } from "@/hooks/use-toast"
+import { useModel } from "@/contexts/model-context"
+import { createClient } from "@/lib/supabase/client"
 
 type Message = Database['public']['Tables']['message']['Row']
 
@@ -41,8 +43,10 @@ export default function ChatArea({
   const [messages, setMessages] = useState<any[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMessage, setStreamingMessage] = useState<any | null>(null)
+  const [assistantName, setAssistantName] = useState<string>('Assistant')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+  const { selectedModel } = useModel()
   
   // Load messages when conversation changes
   useEffect(() => {
@@ -54,6 +58,7 @@ export default function ChatArea({
         // For real conversations, still load from API but after setting optimistic messages
         if (!currentConversationId.startsWith('temp-')) {
           loadMessages()
+          loadAssistantName()
         }
         return
       }
@@ -61,11 +66,43 @@ export default function ChatArea({
       // Load from API for real conversations without optimistic messages
       if (!currentConversationId.startsWith('temp-')) {
         loadMessages()
+        loadAssistantName()
       }
     } else {
       setMessages([])
     }
   }, [currentConversationId, optimisticMessages])
+
+  // Listen for message updates (assistant name changes)
+  useEffect(() => {
+    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
+
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`messages:${currentConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'message',
+          filter: `convo_id=eq.${currentConversationId}`
+        },
+        (payload) => {
+          console.log('Message updated via real-time:', payload.new)
+          const updatedMessage = payload.new as any
+          if (updatedMessage.role === 'assistant' && updatedMessage.metadata?.assistantName) {
+            console.log('Updating assistant name from real-time:', updatedMessage.metadata.assistantName)
+            setAssistantName(updatedMessage.metadata.assistantName)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [currentConversationId])
 
   const loadMessages = async () => {
     if (!currentConversationId || currentConversationId.startsWith('temp-')) return
@@ -78,6 +115,36 @@ export default function ChatArea({
       }
     } catch (error) {
       console.error('Error loading messages:', error)
+    }
+  }
+
+  const loadAssistantName = async () => {
+    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
+    
+    try {
+      console.log('Loading assistant name for:', currentConversationId)
+      const response = await fetch(`/api/conversations/${currentConversationId}/messages`)
+      if (response.ok) {
+        const messages = await response.json()
+        console.log('Loaded messages to find assistant name:', messages)
+        
+        // Find the first assistant message with an assistant name
+        const assistantMessage = messages.find((msg: any) => 
+          msg.role === 'assistant' && msg.metadata?.assistantName
+        )
+        
+        if (assistantMessage?.metadata?.assistantName) {
+          console.log('Setting assistant name to:', assistantMessage.metadata.assistantName)
+          setAssistantName(assistantMessage.metadata.assistantName)
+        } else {
+          console.log('No assistant name found in messages, using default')
+          setAssistantName('Assistant')
+        }
+      } else {
+        console.log('Failed to load messages, status:', response.status)
+      }
+    } catch (error) {
+      console.error('Error loading assistant name:', error)
     }
   }
 
@@ -113,6 +180,7 @@ export default function ChatArea({
       id: `assistant-${Date.now()}`,
       role: 'assistant',
       content: '',
+      metadata: { model: selectedModel },
       created_at: new Date().toISOString(),
     }
 
@@ -126,6 +194,7 @@ export default function ChatArea({
           conversationId: currentConversationId,
           message: messageText,
           workspaceId: currentWorkspaceId,
+          model: selectedModel,
         })
       })
 
@@ -171,6 +240,13 @@ export default function ChatArea({
                 
                 setMessages(prev => [...prev, finalAssistantMessage])
                 setStreamingMessage(null)
+                
+                // Check for assistant name update after a short delay
+                setTimeout(async () => {
+                  loadAssistantName()
+                  // Also reload messages to get any updated metadata
+                  loadMessages()
+                }, 1500)
               } else if (data.type === 'error') {
                 throw new Error(data.error || 'Unknown error')
               }
@@ -288,18 +364,48 @@ export default function ChatArea({
     }
   }
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
+  const formatMessageDuration = (currentMessage: any, index: number) => {
+    // For user messages, always show time since sent
+    if (currentMessage.role === 'user') {
+      const date = new Date(currentMessage.created_at)
+      const now = new Date()
+      const diffMs = now.getTime() - date.getTime()
+      const diffSecs = Math.floor(diffMs / 1000)
+      const diffMins = Math.floor(diffSecs / 60)
+      const diffHours = Math.floor(diffMins / 60)
+      
+      if (diffSecs < 60) return `${diffSecs}s ago`
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffHours < 24) return `${diffHours}h ago`
+      return date.toLocaleDateString()
+    }
+    
+    // For assistant messages, show duration from previous message
+    const previousMessage = messages[index - 1]
+    if (!previousMessage) {
+      // If this is the first message and it's from assistant, show time since created
+      const date = new Date(currentMessage.created_at)
+      const now = new Date()
+      const diffMs = now.getTime() - date.getTime()
+      const diffSecs = Math.floor(diffMs / 1000)
+      const diffMins = Math.floor(diffSecs / 60)
+      const diffHours = Math.floor(diffMins / 60)
+      
+      if (diffSecs < 60) return `${diffSecs}s ago`
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffHours < 24) return `${diffHours}h ago`
+      return date.toLocaleDateString()
+    }
+    
+    const currentTime = new Date(currentMessage.updated_at || currentMessage.created_at)
+    const previousTime = new Date(previousMessage.updated_at || previousMessage.created_at)
+    const diffMs = currentTime.getTime() - previousTime.getTime()
     const diffSecs = Math.floor(diffMs / 1000)
     const diffMins = Math.floor(diffSecs / 60)
-    const diffHours = Math.floor(diffMins / 60)
     
-    if (diffSecs < 60) return `${diffSecs} sec ago`
-    if (diffMins < 60) return `${diffMins} min ago`
-    if (diffHours < 24) return `${diffHours} hour ago`
-    return date.toLocaleDateString()
+    if (diffSecs < 1) return '0s'
+    if (diffSecs < 60) return `+${diffSecs}s`
+    return `+${diffMins}m ${diffSecs % 60}s`
   }
 
   if (!currentConversationId) {
@@ -318,20 +424,20 @@ export default function ChatArea({
       {/* Chat Header */}
       <div className="flex items-center justify-between p-4 border-b">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleLeftSidebar}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleLeftSidebar}>
             <span className="sr-only">Toggle left sidebar</span>
             <PanelLeftClose
-              className={`h-4 w-4 transition-transform duration-300 ${!leftSidebarOpen ? "rotate-180" : ""}`}
+              className={`h-5 w-5 transition-transform duration-300 ${!leftSidebarOpen ? "rotate-180" : ""}`}
             />
           </Button>
           <span className="font-medium">{conversationTitle}</span>
           <span className="text-muted-foreground">|</span>
-          <span className="text-muted-foreground">GPT-4</span>
+          <span className="text-muted-foreground">{selectedModel}</span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleRightSidebar}>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleRightSidebar}>
           <span className="sr-only">Toggle right sidebar</span>
           <PanelRightClose
-            className={`h-4 w-4 transition-transform duration-300 ${!rightSidebarOpen ? "rotate-180" : ""}`}
+            className={`h-5 w-5 transition-transform duration-300 ${!rightSidebarOpen ? "rotate-180" : ""}`}
           />
         </Button>
       </div>
@@ -339,7 +445,7 @@ export default function ChatArea({
       {/* Chat Messages */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
         <>
-          {messages.map((message) => (
+          {messages.map((message, index) => (
               <div key={message.id} className="mb-6 group">
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
@@ -352,11 +458,13 @@ export default function ChatArea({
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-medium">
-                        {message.role === 'user' ? 'You' : 'Assistant'}
-                        {message.role === 'assistant' && ' (GPT-4)'}
+                        {message.role === 'user' ? 'You' : assistantName}
                       </span>
+                      {message.role === 'assistant' && message.metadata?.model && message.metadata.model !== 'greeting' && (
+                        <span className="text-xs text-muted-foreground/60">{message.metadata.model}</span>
+                      )}
                       <span className="text-xs text-muted-foreground">
-                        · {formatTimestamp(message.created_at)}
+                        · {formatMessageDuration(message, index)}
                       </span>
                     </div>
                     <div className="text-sm whitespace-pre-wrap">{message.content}</div>
@@ -399,7 +507,10 @@ export default function ChatArea({
                   </Avatar>
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium">Assistant (GPT-4)</span>
+                      <span className="text-sm font-medium">{assistantName}</span>
+                      {streamingMessage.metadata?.model && streamingMessage.metadata.model !== 'greeting' && (
+                        <span className="text-xs text-muted-foreground/60">{streamingMessage.metadata.model}</span>
+                      )}
                       <span className="text-xs text-muted-foreground">
                         · {isStreaming ? 'typing...' : 'just now'}
                       </span>

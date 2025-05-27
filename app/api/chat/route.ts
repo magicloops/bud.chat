@@ -24,7 +24,8 @@ export async function POST(request: NextRequest) {
       conversationId, 
       message: userMessage, 
       parentPath = '',
-      workspaceId 
+      workspaceId,
+      model = 'gpt-4o'
     } = body
 
     // Validate required fields
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
         try {
           // Call OpenAI Responses API
           const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: model,
             messages: conversationHistory,
             stream: true,
           })
@@ -155,6 +156,7 @@ export async function POST(request: NextRequest) {
               path: nextAssistantPath,
               role: 'assistant',
               content: fullContent,
+              metadata: { model: model },
               token_count: tokenCount,
               created_by: user.id
             })
@@ -172,47 +174,85 @@ export async function POST(request: NextRequest) {
             .insert({
               user_id: user.id,
               message_id: assistantMessageRecord.id,
-              model: 'gpt-4',
+              model: model,
               prompt_tokens: tokenCount, // Approximate - OpenAI doesn't provide this in streaming
               completion_tokens: tokenCount,
               cost_cents: Math.round(tokenCount * 0.003) // Approximate cost calculation
             })
 
           // Update conversation title if this is the first exchange and title is "New Chat"
-          const { data: conversation } = await supabase
+          const { data: conversation, error: convQueryError } = await supabase
             .from('conversation')
-            .select('title')
+            .select('title, metadata')
             .eq('id', conversationId)
             .single()
 
-          if (conversation?.title === 'New Chat') {
+          console.log('Checking conversation for title update:', {
+            conversationId,
+            title: conversation?.title,
+            metadata: conversation?.metadata,
+            error: convQueryError
+          })
+
+          if (conversation?.title === 'New Chat' || conversation?.title === null || conversation?.title === undefined) {
             try {
               const titleResponse = await openai.chat.completions.create({
-                model: 'gpt-4',
+                model: model,
                 messages: [
                   {
                     role: 'system',
-                    content: 'Generate a concise, descriptive title (2-5 words) for this conversation based on the user\'s first message. Do not use quotes.'
+                    content: 'Generate a concise, descriptive chat title (2-5 words) and a unique assistant name based on the user\'s first message. Return as JSON with keys "chatTitle" and "assistantName". The assistant name should be creative and relate to the conversation topic.'
                   },
                   {
                     role: 'user',
                     content: userMessage
                   }
                 ],
-                max_tokens: 20,
-                temperature: 0.7
+                max_tokens: 50,
+                temperature: 0.7,
+                response_format: { type: "json_object" }
               })
 
-              const generatedTitle = titleResponse.choices[0]?.message?.content?.trim()
+              const responseText = titleResponse.choices[0]?.message?.content?.trim()
+              console.log('OpenAI response for title generation:', responseText)
               
-              if (generatedTitle) {
-                await supabase
-                  .from('conversation')
-                  .update({ title: generatedTitle })
-                  .eq('id', conversationId)
+              if (responseText) {
+                const parsed = JSON.parse(responseText)
+                const chatTitle = parsed.chatTitle
+                const assistantName = parsed.assistantName
+                
+                console.log('Parsed title data:', { chatTitle, assistantName })
+                
+                if (chatTitle && assistantName) {
+                  // Update conversation title
+                  const { error: updateError } = await supabase
+                    .from('conversation')
+                    .update({ title: chatTitle })
+                    .eq('id', conversationId)
+                  
+                  if (updateError) {
+                    console.error('Error updating conversation title:', updateError)
+                  } else {
+                    console.log('Successfully updated conversation title')
+                  }
+                  
+                  // Store assistant name in the assistant message metadata
+                  const { error: messageUpdateError } = await supabase
+                    .from('message')
+                    .update({ 
+                      metadata: { model: model, assistantName: assistantName }
+                    })
+                    .eq('id', assistantMessageRecord.id)
+                  
+                  if (messageUpdateError) {
+                    console.error('Error updating message with assistant name:', messageUpdateError)
+                  } else {
+                    console.log('Successfully stored assistant name in message metadata')
+                  }
+                }
               }
             } catch (titleError) {
-              console.error('Error generating title:', titleError)
+              console.error('Error generating title and assistant name:', titleError)
               // Don't fail the whole request if title generation fails
             }
           }

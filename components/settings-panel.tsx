@@ -1,17 +1,131 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { ChevronDown, ChevronRight, HelpCircle, Leaf } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { ChevronDown, ChevronRight, HelpCircle, Leaf, Palette } from "lucide-react"
+import { useModel } from "@/contexts/model-context"
+import { useToast } from "@/hooks/use-toast"
 
 export default function SettingsPanel() {
   const [chatSettingsOpen, setChatSettingsOpen] = useState(true)
   const [helpersOpen, setHelpersOpen] = useState(true)
+  const [showThemeDialog, setShowThemeDialog] = useState(false)
+  const [themePrompt, setThemePrompt] = useState("")
+  const [isGeneratingTheme, setIsGeneratingTheme] = useState(false)
+  const { selectedModel, setSelectedModel } = useModel()
+  const { toast } = useToast()
+
+  // Load saved theme on mount
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('customTheme')
+    if (savedTheme) {
+      try {
+        const theme = JSON.parse(savedTheme)
+        const root = document.documentElement
+        Object.entries(theme.cssVariables).forEach(([key, value]) => {
+          root.style.setProperty(key, value as string)
+        })
+      } catch (error) {
+        console.error('Error loading saved theme:', error)
+      }
+    }
+  }, [])
+
+  const generateTheme = async () => {
+    if (!themePrompt.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a theme description",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsGeneratingTheme(true)
+    try {
+      const response = await fetch('/api/generate-theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: themePrompt })
+      })
+
+      if (response.ok) {
+        const themeData = await response.json()
+        
+        // Apply the theme to the document
+        const root = document.documentElement
+        Object.entries(themeData.cssVariables).forEach(([key, value]) => {
+          root.style.setProperty(key, value as string)
+        })
+
+        // Store theme in localStorage
+        localStorage.setItem('customTheme', JSON.stringify(themeData))
+
+        toast({
+          title: "Theme Applied!",
+          description: `Applied ${themeData.name} theme`,
+        })
+        
+        setShowThemeDialog(false)
+        setThemePrompt("")
+      } else {
+        throw new Error('Failed to generate theme')
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to generate theme",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingTheme(false)
+    }
+  }
+
+  const resetTheme = () => {
+    // Remove custom theme
+    localStorage.removeItem('customTheme')
+    
+    // Reset CSS variables to default
+    const root = document.documentElement
+    const defaultTheme = {
+      '--background': '0 0% 100%',
+      '--foreground': '222.2 84% 4.9%',
+      '--card': '0 0% 100%',
+      '--card-foreground': '222.2 84% 4.9%',
+      '--popover': '0 0% 100%',
+      '--popover-foreground': '222.2 84% 4.9%',
+      '--primary': '222.2 47.4% 11.2%',
+      '--primary-foreground': '210 40% 98%',
+      '--secondary': '210 40% 96%',
+      '--secondary-foreground': '222.2 84% 4.9%',
+      '--muted': '210 40% 96%',
+      '--muted-foreground': '215.4 16.3% 46.9%',
+      '--accent': '210 40% 96%',
+      '--accent-foreground': '222.2 84% 4.9%',
+      '--destructive': '0 84.2% 60.2%',
+      '--destructive-foreground': '210 40% 98%',
+      '--border': '214.3 31.8% 91.4%',
+      '--input': '214.3 31.8% 91.4%',
+      '--ring': '222.2 84% 4.9%',
+      '--radius': '0.5rem',
+    }
+    
+    Object.entries(defaultTheme).forEach(([key, value]) => {
+      root.style.setProperty(key, value)
+    })
+
+    toast({
+      title: "Theme Reset",
+      description: "Restored default theme",
+    })
+  }
 
   return (
     <div className="h-full bg-background border-l overflow-hidden flex flex-col">
@@ -48,9 +162,17 @@ export default function SettingsPanel() {
               {/* Chat Emoji */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">Chat Emoji</label>
-                <div className="flex justify-start">
+                <div className="flex justify-start gap-2">
                   <div className="border rounded-md p-4 w-16 h-16 flex items-center justify-center">
                     <Leaf className="h-8 w-8 text-green-500" />
+                  </div>
+                  {/* Secret theme generator */}
+                  <div 
+                    className="border rounded-md p-4 w-16 h-16 flex items-center justify-center cursor-pointer hover:bg-accent transition-colors"
+                    onClick={() => setShowThemeDialog(true)}
+                    title="Secret theme generator"
+                  >
+                    <Palette className="h-8 w-8 text-muted-foreground hover:text-foreground transition-colors" />
                   </div>
                 </div>
               </div>
@@ -69,14 +191,18 @@ export default function SettingsPanel() {
                   <label className="text-sm font-medium">AI Model</label>
                   <HelpCircle className="h-4 w-4 text-muted-foreground" />
                 </div>
-                <Select defaultValue="gpt-4o">
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="o3">OpenAI: o3</SelectItem>
+                    <SelectItem value="o1">OpenAI: o1</SelectItem>
+                    <SelectItem value="o1-mini">OpenAI: o1-mini</SelectItem>
                     <SelectItem value="gpt-4o">OpenAI: GPT-4o</SelectItem>
+                    <SelectItem value="gpt-4o-mini">OpenAI: GPT-4o-mini</SelectItem>
+                    <SelectItem value="gpt-4-turbo">OpenAI: GPT-4 Turbo</SelectItem>
                     <SelectItem value="gpt-4">OpenAI: GPT-4</SelectItem>
-                    <SelectItem value="gpt-3.5-turbo">OpenAI: GPT-3.5 Turbo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -143,6 +269,45 @@ export default function SettingsPanel() {
           </Collapsible>
         </div>
       </ScrollArea>
+
+      {/* Secret Theme Generator Dialog */}
+      <Dialog open={showThemeDialog} onOpenChange={setShowThemeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>🎨 AI Theme Generator</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Describe your ideal theme</label>
+              <Textarea
+                placeholder="e.g., 'Dark cyberpunk with neon accents' or 'Warm sunset colors with soft gradients'"
+                value={themePrompt}
+                onChange={(e) => setThemePrompt(e.target.value)}
+                className="mt-2 min-h-[100px]"
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                onClick={generateTheme}
+                disabled={isGeneratingTheme || !themePrompt.trim()}
+                className="flex-1"
+              >
+                {isGeneratingTheme ? "Generating..." : "Generate Theme"}
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={resetTheme}
+                className="flex-1"
+              >
+                Reset to Default
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Powered by o3 • Themes are applied instantly and saved locally
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

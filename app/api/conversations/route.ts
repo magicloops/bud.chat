@@ -68,14 +68,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Create conversation
+    const conversationData = {
+      workspace_id: workspaceId,
+      title: title || 'New Chat'
+    }
+    console.log('Creating conversation with data:', conversationData)
+    
     const { data: conversation, error: convError } = await supabase
       .from('conversation')
-      .insert({
-        workspace_id: workspaceId,
-        title: title || 'New Chat'
-      })
+      .insert(conversationData)
       .select()
       .single()
+    
+    console.log('Created conversation:', conversation, 'Error:', convError)
 
     if (convError) {
       return new Response('Error creating conversation', { status: 500 })
@@ -108,6 +113,7 @@ export async function POST(request: NextRequest) {
           path: '1',
           role: 'assistant',
           content: 'Hello! How can I assist you today?',
+          metadata: { model: 'greeting' },
           created_by: user.id
         })
 
