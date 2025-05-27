@@ -15,10 +15,10 @@ export async function POST(
     }
 
     const body = await request.json()
-    const { forkFromPath, title } = body
+    const { forkFromMessageId, title } = body
 
-    if (!forkFromPath) {
-      return new Response('forkFromPath is required', { status: 400 })
+    if (!forkFromMessageId) {
+      return new Response('forkFromMessageId is required', { status: 400 })
     }
 
     // Get original conversation and verify access
@@ -43,7 +43,7 @@ export async function POST(
       .from('conversation')
       .insert({
         workspace_id: originalConversation.workspace_id,
-        title: title || `${originalConversation.title} (Fork)`
+        title: title || `${originalConversation.title} 🌱`
       })
       .select()
       .single()
@@ -52,44 +52,50 @@ export async function POST(
       return new Response('Error creating forked conversation', { status: 500 })
     }
 
-    // Get messages to copy (ancestors and self of the fork point)
-    const { data: messagesToCopy, error: msgsError } = await supabase
+    // Get all messages in chronological order
+    const { data: allMessages, error: msgsError } = await supabase
       .from('message')
       .select('*')
       .eq('convo_id', originalConversationId)
-      .order('path')
+      .order('created_at', { ascending: true })
 
     if (msgsError) {
       return new Response('Error fetching messages to copy', { status: 500 })
     }
 
-    // Filter messages that should be copied (ancestors of fork point)
-    const relevantMessages = messagesToCopy?.filter(msg => {
-      // Copy if message path is an ancestor of or equal to the fork point
-      return forkFromPath.startsWith(msg.path) || msg.path.startsWith(forkFromPath)
-    }) || []
+    // Find the fork point message
+    const forkMessage = allMessages?.find(msg => msg.id === forkFromMessageId)
+    if (!forkMessage) {
+      return new Response('Fork point message not found', { status: 404 })
+    }
+
+    // Copy all messages up to and including the fork point (chronologically)
+    const forkMessageIndex = allMessages.indexOf(forkMessage)
+    const relevantMessages = allMessages.slice(0, forkMessageIndex + 1)
 
     // Copy messages to new conversation
     if (relevantMessages.length > 0) {
-      const messagesToInsert = relevantMessages.map(msg => ({
+      const messagesToInsert = relevantMessages.map((msg, index) => ({
         convo_id: newConversation.id,
-        parent_id: null, // Will need to be updated after insert
-        path: msg.path,
+        parent_id: null, // Will be set below
+        path: (index + 1).toString(), // Sequential paths: 1, 2, 3...
         role: msg.role,
         content: msg.content,
         metadata: msg.metadata,
-        revision: msg.revision,
-        supersedes_id: msg.supersedes_id,
+        revision: 1, // Reset revision for new conversation
+        supersedes_id: null, // Clear supersedes relationship
         token_count: msg.token_count,
         usage_ms: msg.usage_ms,
         created_by: user.id
       }))
 
-      const { error: insertError } = await supabase
+      const { data: insertedMessages, error: insertError } = await supabase
         .from('message')
         .insert(messagesToInsert)
+        .select()
 
       if (insertError) {
+        console.error('Error inserting forked messages:', insertError)
         // Clean up the conversation if message copying fails
         await supabase
           .from('conversation')
@@ -99,18 +105,11 @@ export async function POST(
         return new Response('Error copying messages to forked conversation', { status: 500 })
       }
 
-      // Update parent_id relationships in the new conversation
-      // This is a simplified approach - in a production system you'd want to be more careful
-      const { data: newMessages } = await supabase
-        .from('message')
-        .select('*')
-        .eq('convo_id', newConversation.id)
-        .order('path')
-
-      if (newMessages) {
-        for (let i = 1; i < newMessages.length; i++) {
-          const currentMsg = newMessages[i]
-          const parentMsg = newMessages[i - 1]
+      // Update parent_id relationships 
+      if (insertedMessages && insertedMessages.length > 1) {
+        for (let i = 1; i < insertedMessages.length; i++) {
+          const currentMsg = insertedMessages[i]
+          const parentMsg = insertedMessages[i - 1]
           
           await supabase
             .from('message')
@@ -123,7 +122,9 @@ export async function POST(
     return Response.json({
       forkedConversation: newConversation,
       originalConversation: originalConversationId,
-      messagesCopied: relevantMessages.length
+      messagesCopied: relevantMessages.length,
+      forkFromMessageIndex: forkMessageIndex + 1, // +1 for human-readable indexing
+      totalMessages: allMessages?.length || 0
     })
   } catch (error) {
     console.error('Fork conversation error:', error)

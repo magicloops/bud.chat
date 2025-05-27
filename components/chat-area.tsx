@@ -22,6 +22,8 @@ interface ChatAreaProps {
   currentConversationId?: string | null
   currentWorkspaceId?: string | null
   conversationTitle?: string
+  optimisticMessages?: any[]
+  onConversationChange?: (conversationId: string, workspaceId: string, title?: string, optimisticMessages?: any[]) => void
 }
 
 export default function ChatArea({
@@ -32,6 +34,8 @@ export default function ChatArea({
   currentConversationId,
   currentWorkspaceId,
   conversationTitle = "New Chat",
+  optimisticMessages,
+  onConversationChange,
 }: ChatAreaProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<any[]>([])
@@ -43,14 +47,23 @@ export default function ChatArea({
   // Load messages when conversation changes
   useEffect(() => {
     if (currentConversationId) {
-      loadMessages()
+      // Handle optimistic messages for temporary conversations
+      if (currentConversationId.startsWith('temp-') && optimisticMessages) {
+        setMessages(optimisticMessages)
+        return
+      }
+      
+      // Load from API for real conversations
+      if (!currentConversationId.startsWith('temp-')) {
+        loadMessages()
+      }
     } else {
       setMessages([])
     }
-  }, [currentConversationId])
+  }, [currentConversationId, optimisticMessages])
 
   const loadMessages = async () => {
-    if (!currentConversationId) return
+    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
     
     try {
       const response = await fetch(`/api/conversations/${currentConversationId}/messages`)
@@ -201,25 +214,81 @@ export default function ChatArea({
     if (!currentConversationId) return
     
     try {
-      const message = messages.find(m => m.id === fromMessageId)
-      if (!message) return
+      const forkMessage = messages.find(m => m.id === fromMessageId)
+      if (!forkMessage) {
+        console.error('Fork message not found:', fromMessageId)
+        return
+      }
 
+      // Find the index of the fork message to copy messages up to that point
+      const forkIndex = messages.findIndex(m => m.id === fromMessageId)
+      const messagesToCopy = messages.slice(0, forkIndex + 1)
+      
+      if (messagesToCopy.length === 0) {
+        console.error('No messages to copy for fork')
+        return
+      }
+      
+      // Optimistic: Switch immediately with copied messages and temp IDs
+      const tempConversationId = `temp-fork-${Date.now()}`
+      const optimisticTitle = `${conversationTitle} 🌱`
+      
+      // Create optimistic messages with temporary IDs but preserve original timestamps
+      const optimisticMessages = messagesToCopy.map((msg, index) => ({
+        ...msg,
+        id: `temp-${tempConversationId}-${index}`,
+        convo_id: tempConversationId,
+        path: (index + 1).toString(),
+        // Keep original timestamps
+        created_at: msg.created_at,
+        updated_at: msg.updated_at
+      }))
+      
+      // Immediately switch to optimistic conversation
+      if (onConversationChange && currentWorkspaceId) {
+        onConversationChange(tempConversationId, currentWorkspaceId, optimisticTitle, optimisticMessages)
+      }
+
+      console.log('Forking conversation:', {
+        fromMessageId,
+        messagesToCopy: messagesToCopy.length,
+        optimisticMessages: optimisticMessages.length,
+        tempConversationId
+      })
+
+      toast({
+        title: "Conversation branched",
+        description: `Creating new conversation with ${messagesToCopy.length} messages...`,
+      })
+
+      // Make API call in background to create real conversation
       const response = await fetch(`/api/conversations/${currentConversationId}/fork`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          forkFromPath: message.path,
-          title: `${conversationTitle} (Fork)`
+          forkFromMessageId: fromMessageId,
+          title: optimisticTitle
         })
       })
 
       if (response.ok) {
         const result = await response.json()
-        toast({
-          title: "Conversation branched",
-          description: `Created new conversation: ${result.forkedConversation.title}`,
+        
+        console.log('Fork API result:', {
+          newConversationId: result.forkedConversation.id,
+          messagesCopied: result.messagesCopied,
+          preservingMessages: optimisticMessages.length
         })
-        // TODO: Navigate to the new conversation
+        
+        // Update with real conversation ID and data, preserving the messages
+        if (onConversationChange && currentWorkspaceId) {
+          onConversationChange(result.forkedConversation.id, currentWorkspaceId, result.forkedConversation.title, optimisticMessages)
+        }
+        
+        toast({
+          title: "Conversation ready",
+          description: `Successfully forked conversation: ${result.forkedConversation.title}`,
+        })
       }
     } catch (error) {
       toast({

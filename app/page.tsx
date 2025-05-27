@@ -17,16 +17,65 @@ export default function ChatApp() {
   const [rightSidebarOpen, setRightSidebarOpen] = useState(false)
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
+  const [optimisticMessages, setOptimisticMessages] = useState<any[]>([])
   
   const { user, loading } = useAuth()
 
   const handleConversationSelect = (conversation: Conversation, workspace: Workspace) => {
     setSelectedConversation(conversation)
     setSelectedWorkspace(workspace)
+    // Clear optimistic messages when manually selecting a conversation
+    setOptimisticMessages([])
+  }
+
+  // Callback to update selected conversation when it changes in real-time
+  const updateSelectedConversation = (updatedConversation: Conversation) => {
+    if (selectedConversation && selectedConversation.id === updatedConversation.id) {
+      setSelectedConversation(updatedConversation)
+    }
+    
+    // If this is updating a temp conversation with the real one, clear optimistic state
+    if (selectedConversation?.id.startsWith('temp-') && updatedConversation.id !== selectedConversation.id) {
+      // This is the real conversation replacing the temp one
+      const workspace: Workspace = {
+        id: updatedConversation.workspace_id,
+        name: selectedWorkspace?.name || '',
+        owner_id: selectedWorkspace?.owner_id || '',
+        created_at: selectedWorkspace?.created_at || new Date().toISOString(),
+        updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
+      }
+      
+      setOptimisticMessages([]) // Clear optimistic messages
+      handleConversationSelect(updatedConversation, workspace)
+    }
   }
 
   const clearConversationSelection = () => {
     setSelectedConversation(null)
+  }
+
+  const handleConversationChange = (conversationId: string, workspaceId: string, title?: string, messages?: any[]) => {
+    // Create conversation objects
+    const newConversation: Conversation = {
+      id: conversationId,
+      workspace_id: workspaceId,
+      title: title || 'Loading...', // Use provided title or fallback
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+    
+    const workspace: Workspace = {
+      id: workspaceId,
+      name: selectedWorkspace?.name || '',
+      owner_id: selectedWorkspace?.owner_id || '',
+      created_at: selectedWorkspace?.created_at || new Date().toISOString(),
+      updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
+    }
+    
+    // Use React 18's automatic batching to update everything at once
+    setOptimisticMessages(messages || [])
+    setSelectedConversation(newConversation)
+    setSelectedWorkspace(workspace)
   }
 
   if (loading) {
@@ -51,6 +100,7 @@ export default function ChatApp() {
           <ChatSidebar 
             selectedConversationId={selectedConversation?.id}
             onConversationSelect={handleConversationSelect}
+            onConversationUpdate={updateSelectedConversation}
           />
         </div>
       </div>
@@ -65,6 +115,8 @@ export default function ChatApp() {
           currentConversationId={selectedConversation?.id}
           currentWorkspaceId={selectedWorkspace?.id}
           conversationTitle={selectedConversation?.title || "New Chat"}
+          optimisticMessages={optimisticMessages}
+          onConversationChange={handleConversationChange}
         />
       </div>
 

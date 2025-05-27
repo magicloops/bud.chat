@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { Database } from '@/lib/types/database'
 
 type Conversation = Database['public']['Tables']['conversation']['Row']
 
-export function useConversations(workspaceId: string | null) {
+export function useConversations(workspaceId: string | null, onConversationUpdate?: (conversation: Conversation) => void) {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -15,28 +16,71 @@ export function useConversations(workspaceId: string | null) {
       return
     }
 
-    fetchConversations()
-  }, [workspaceId])
+    const supabase = createClient()
 
-  const fetchConversations = async () => {
-    if (!workspaceId) return
-
-    try {
+    // Fetch initial conversations
+    const fetchConversations = async () => {
       setLoading(true)
-      const response = await fetch(`/api/conversations?workspace_id=${workspaceId}`)
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch conversations')
+      const { data, error } = await supabase
+        .from('conversation')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching conversations:', error)
+        setError(error.message)
+      } else {
+        setConversations(data || [])
       }
-      
-      const data = await response.json()
-      setConversations(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
-    } finally {
       setLoading(false)
     }
-  }
+
+    fetchConversations()
+
+    // Set up real-time subscription
+    const channel = supabase
+      .channel(`conversations:${workspaceId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'conversation',
+          filter: `workspace_id=eq.${workspaceId}`
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newConversation = payload.new as Conversation
+            setConversations(prev => {
+              // Prevent duplicates
+              if (prev.some(conv => conv.id === newConversation.id)) {
+                return prev
+              }
+              return [newConversation, ...prev]
+            })
+            onConversationUpdate?.(newConversation)
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedConversation = payload.new as Conversation
+            setConversations(prev => 
+              prev.map(conv => 
+                conv.id === updatedConversation.id ? updatedConversation : conv
+              ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+            )
+            onConversationUpdate?.(updatedConversation)
+          } else if (payload.eventType === 'DELETE') {
+            setConversations(prev => 
+              prev.filter(conv => conv.id !== payload.old.id)
+            )
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [workspaceId])
 
   const createConversation = async (title?: string, systemPrompt?: string) => {
     if (!workspaceId) throw new Error('No workspace selected')
@@ -57,7 +101,7 @@ export function useConversations(workspaceId: string | null) {
       }
 
       const newConversation = await response.json()
-      setConversations(prev => [newConversation, ...prev])
+      // Don't manually add to state - let the real-time subscription handle it
       return newConversation
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create conversation')
@@ -67,15 +111,31 @@ export function useConversations(workspaceId: string | null) {
 
   const deleteConversation = async (conversationId: string) => {
     try {
+      // Optimistic update: remove immediately for instant feedback
+      setConversations(prev => prev.filter(c => c.id !== conversationId))
+      
       const response = await fetch(`/api/conversations/${conversationId}`, {
         method: 'DELETE'
       })
 
       if (!response.ok) {
+        // Revert optimistic update on error - refetch conversations
+        if (workspaceId) {
+          const supabase = createClient()
+          const { data } = await supabase
+            .from('conversation')
+            .select('*')
+            .eq('workspace_id', workspaceId)
+            .order('updated_at', { ascending: false })
+          
+          if (data) {
+            setConversations(data)
+          }
+        }
         throw new Error('Failed to delete conversation')
       }
 
-      setConversations(prev => prev.filter(c => c.id !== conversationId))
+      // Success - the real-time subscription will sync any differences
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete conversation')
       throw err
@@ -87,7 +147,6 @@ export function useConversations(workspaceId: string | null) {
     loading,
     error,
     createConversation,
-    deleteConversation,
-    refetch: fetchConversations
+    deleteConversation
   }
 }

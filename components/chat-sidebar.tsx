@@ -33,9 +33,10 @@ type Conversation = Database['public']['Tables']['conversation']['Row']
 interface ChatSidebarProps {
   selectedConversationId?: string | null
   onConversationSelect: (conversation: Conversation, workspace: Workspace) => void
+  onConversationUpdate?: (conversation: Conversation) => void
 }
 
-export default function ChatSidebar({ selectedConversationId, onConversationSelect }: ChatSidebarProps) {
+export default function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate }: ChatSidebarProps) {
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
   const [newConversationTitle, setNewConversationTitle] = useState("")
   const [newWorkspaceName, setNewWorkspaceName] = useState("")
@@ -47,7 +48,8 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
   
   const { workspaces, loading: workspacesLoading, createWorkspace } = useWorkspaces()
   const { conversations, loading: conversationsLoading, createConversation, deleteConversation } = useConversations(
-    selectedWorkspace?.id || null
+    selectedWorkspace?.id || null,
+    onConversationUpdate
   )
 
   // Auto-select first workspace when workspaces load
@@ -154,7 +156,7 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
   }
 
   return (
-    <div className="w-60 h-full flex flex-col bg-background border-r">
+    <div className="w-60 h-full flex flex-col bg-background border-r overflow-hidden">
       {/* Workspace Selector */}
       <div className="p-3 border-b">
         {workspacesLoading ? (
@@ -238,8 +240,8 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
       </div>
 
       {/* Conversations List */}
-      <ScrollArea className="flex-1">
-        <div className="px-1">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="w-full">
           {conversationsLoading ? (
             <div className="flex items-center justify-center p-4">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -252,34 +254,34 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
             conversations.map((conversation) => (
               <div
                 key={conversation.id}
-                className={`group relative mb-1 ${
+                className={`group mb-1 mx-2 rounded-md hover:bg-accent ${
                   selectedConversationId === conversation.id ? "bg-accent" : ""
                 }`}
               >
-                <Button
-                  variant="ghost"
-                  className="w-full justify-start gap-2 text-sm font-normal pr-8"
-                  onClick={() => selectedWorkspace && onConversationSelect(conversation, selectedWorkspace)}
-                >
-                  <MessageCircle className="h-4 w-4 flex-shrink-0" />
-                  <div className="flex-1 text-left">
-                    <div className="truncate">{conversation.title || "Untitled"}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {formatDate(conversation.updated_at)}
+                <div className="flex items-center max-w-full">
+                  <button
+                    className="flex items-center gap-2 text-sm font-normal py-2 px-3 text-left flex-1 min-w-0 rounded-md"
+                    onClick={() => selectedWorkspace && onConversationSelect(conversation, selectedWorkspace)}
+                  >
+                    <MessageCircle className="h-4 w-4 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate">{conversation.title || "Untitled"}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatDate(conversation.updated_at)}
+                      </div>
                     </div>
-                  </div>
-                </Button>
-                
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
+                  </button>
+                  
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mr-1"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem>
                       <Edit className="mr-2 h-4 w-4" />
@@ -294,11 +296,12 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                </div>
               </div>
             ))
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Bottom Actions */}
       <div className="mt-auto p-2 space-y-1 border-t">
