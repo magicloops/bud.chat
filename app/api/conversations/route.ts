@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
       .from('conversation')
       .insert({
         workspace_id: workspaceId,
-        title: title || 'New Conversation'
+        title: title || 'New Chat'
       })
       .select()
       .single()
@@ -95,6 +95,24 @@ export async function POST(request: NextRequest) {
 
       if (systemMsgError) {
         console.error('Error creating system message:', systemMsgError)
+        // Don't fail the conversation creation for this
+      }
+    }
+
+    // Add default assistant greeting for new conversations
+    if (title === 'New Chat') {
+      const { error: greetingError } = await supabase
+        .from('message')
+        .insert({
+          convo_id: conversation.id,
+          path: '1',
+          role: 'assistant',
+          content: 'Hello! How can I assist you today?',
+          created_by: user.id
+        })
+
+      if (greetingError) {
+        console.error('Error creating greeting message:', greetingError)
         // Don't fail the conversation creation for this
       }
     }

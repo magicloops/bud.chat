@@ -43,7 +43,7 @@ export async function POST(
       .from('conversation')
       .insert({
         workspace_id: originalConversation.workspace_id,
-        title: title || `${originalConversation.title} 🌱`
+        title: title || `🌱 ${originalConversation.title}`
       })
       .select()
       .single()

@@ -47,13 +47,18 @@ export default function ChatArea({
   // Load messages when conversation changes
   useEffect(() => {
     if (currentConversationId) {
-      // Handle optimistic messages for temporary conversations
-      if (currentConversationId.startsWith('temp-') && optimisticMessages) {
+      // Handle optimistic messages (for temp conversations or new conversations with greeting)
+      if (optimisticMessages && optimisticMessages.length > 0) {
         setMessages(optimisticMessages)
+        
+        // For real conversations, still load from API but after setting optimistic messages
+        if (!currentConversationId.startsWith('temp-')) {
+          loadMessages()
+        }
         return
       }
       
-      // Load from API for real conversations
+      // Load from API for real conversations without optimistic messages
       if (!currentConversationId.startsWith('temp-')) {
         loadMessages()
       }
@@ -231,7 +236,7 @@ export default function ChatArea({
       
       // Optimistic: Switch immediately with copied messages and temp IDs
       const tempConversationId = `temp-fork-${Date.now()}`
-      const optimisticTitle = `${conversationTitle} 🌱`
+      const optimisticTitle = `🌱 ${conversationTitle}`
       
       // Create optimistic messages with temporary IDs but preserve original timestamps
       const optimisticMessages = messagesToCopy.map((msg, index) => ({
@@ -249,12 +254,6 @@ export default function ChatArea({
         onConversationChange(tempConversationId, currentWorkspaceId, optimisticTitle, optimisticMessages)
       }
 
-      console.log('Forking conversation:', {
-        fromMessageId,
-        messagesToCopy: messagesToCopy.length,
-        optimisticMessages: optimisticMessages.length,
-        tempConversationId
-      })
 
       toast({
         title: "Conversation branched",
@@ -274,21 +273,11 @@ export default function ChatArea({
       if (response.ok) {
         const result = await response.json()
         
-        console.log('Fork API result:', {
-          newConversationId: result.forkedConversation.id,
-          messagesCopied: result.messagesCopied,
-          preservingMessages: optimisticMessages.length
-        })
         
         // Update with real conversation ID and data, preserving the messages
         if (onConversationChange && currentWorkspaceId) {
           onConversationChange(result.forkedConversation.id, currentWorkspaceId, result.forkedConversation.title, optimisticMessages)
         }
-        
-        toast({
-          title: "Conversation ready",
-          description: `Successfully forked conversation: ${result.forkedConversation.title}`,
-        })
       }
     } catch (error) {
       toast({

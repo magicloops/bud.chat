@@ -34,13 +34,12 @@ interface ChatSidebarProps {
   selectedConversationId?: string | null
   onConversationSelect: (conversation: Conversation, workspace: Workspace) => void
   onConversationUpdate?: (conversation: Conversation) => void
+  onConversationChange?: (conversationId: string, workspaceId: string, title?: string, messages?: any[]) => void
 }
 
-export default function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate }: ChatSidebarProps) {
+export default function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate, onConversationChange }: ChatSidebarProps) {
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
-  const [newConversationTitle, setNewConversationTitle] = useState("")
   const [newWorkspaceName, setNewWorkspaceName] = useState("")
-  const [showNewConversationDialog, setShowNewConversationDialog] = useState(false)
   const [showNewWorkspaceDialog, setShowNewWorkspaceDialog] = useState(false)
   
   const { user, signOut } = useAuth()
@@ -70,14 +69,9 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
     }
 
     try {
-      const conversation = await createConversation(newConversationTitle || "New Conversation")
-      setNewConversationTitle("")
-      setShowNewConversationDialog(false)
+      const conversation = await createConversation("New Chat")
+      // The greeting message is now saved to the database, so just select the conversation
       onConversationSelect(conversation, selectedWorkspace)
-      toast({
-        title: "Success",
-        description: "Conversation created successfully",
-      })
     } catch (error) {
       toast({
         title: "Error",
@@ -112,16 +106,29 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
     e.stopPropagation()
     
     try {
+      // If we're deleting the selected conversation, find the next one to select
+      let nextConversation: Conversation | null = null
+      if (selectedConversationId === conversationId && selectedWorkspace) {
+        const currentIndex = conversations.findIndex(c => c.id === conversationId)
+        if (currentIndex !== -1) {
+          // Try to select the conversation after the deleted one, or before if it's the last one
+          if (currentIndex < conversations.length - 1) {
+            nextConversation = conversations[currentIndex + 1]
+          } else if (currentIndex > 0) {
+            nextConversation = conversations[currentIndex - 1]
+          }
+          // If there's a next conversation, select it immediately
+          if (nextConversation) {
+            onConversationSelect(nextConversation, selectedWorkspace)
+          }
+        }
+      }
+      
       await deleteConversation(conversationId)
       toast({
         title: "Success",
         description: "Conversation deleted successfully",
       })
-      
-      // If we deleted the selected conversation, clear selection
-      if (selectedConversationId === conversationId) {
-        // TODO: Clear selection in parent component
-      }
     } catch (error) {
       toast({
         title: "Error",
@@ -133,10 +140,18 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
+    
+    // Handle invalid dates
+    if (isNaN(date.getTime())) {
+      return 'Recently'
+    }
+    
     const now = new Date()
     const diffMs = now.getTime() - date.getTime()
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
     
+    // Handle negative differences (future dates or clock skew)
+    if (diffDays < 0) return 'Today'
     if (diffDays === 0) return 'Today'
     if (diffDays === 1) return 'Yesterday'
     if (diffDays < 7) return `${diffDays} days ago`
@@ -198,45 +213,15 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
 
       {/* New Conversation Button */}
       <div className="p-3">
-        <Dialog open={showNewConversationDialog} onOpenChange={setShowNewConversationDialog}>
-          <DialogTrigger asChild>
-            <Button variant="outline" className="w-full justify-start gap-2">
-              <Plus size={16} />
-              <span>New conversation</span>
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Conversation</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Input
-                  placeholder="Conversation title (optional)"
-                  value={newConversationTitle}
-                  onChange={(e) => setNewConversationTitle(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateConversation()}
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleCreateConversation}
-                  disabled={!selectedWorkspace}
-                  className="flex-1"
-                >
-                  Create
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => setShowNewConversationDialog(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button 
+          variant="outline" 
+          className="w-full justify-start gap-2"
+          onClick={handleCreateConversation}
+          disabled={!selectedWorkspace}
+        >
+          <Plus size={16} />
+          <span>New conversation</span>
+        </Button>
       </div>
 
       {/* Conversations List */}

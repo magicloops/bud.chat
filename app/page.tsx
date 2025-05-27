@@ -72,6 +72,8 @@ export default function ChatApp() {
       updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
     }
     
+    console.log('Conversation changed to:', conversationId, 'Title:', title)
+    
     // Use React 18's automatic batching to update everything at once
     setOptimisticMessages(messages || [])
     setSelectedConversation(newConversation)
@@ -101,6 +103,7 @@ export default function ChatApp() {
             selectedConversationId={selectedConversation?.id}
             onConversationSelect={handleConversationSelect}
             onConversationUpdate={updateSelectedConversation}
+            onConversationChange={handleConversationChange}
           />
         </div>
       </div>

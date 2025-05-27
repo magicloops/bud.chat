@@ -178,6 +178,45 @@ export async function POST(request: NextRequest) {
               cost_cents: Math.round(tokenCount * 0.003) // Approximate cost calculation
             })
 
+          // Update conversation title if this is the first exchange and title is "New Chat"
+          const { data: conversation } = await supabase
+            .from('conversation')
+            .select('title')
+            .eq('id', conversationId)
+            .single()
+
+          if (conversation?.title === 'New Chat') {
+            try {
+              const titleResponse = await openai.chat.completions.create({
+                model: 'gpt-4',
+                messages: [
+                  {
+                    role: 'system',
+                    content: 'Generate a concise, descriptive title (2-5 words) for this conversation based on the user\'s first message. Do not use quotes.'
+                  },
+                  {
+                    role: 'user',
+                    content: userMessage
+                  }
+                ],
+                max_tokens: 20,
+                temperature: 0.7
+              })
+
+              const generatedTitle = titleResponse.choices[0]?.message?.content?.trim()
+              
+              if (generatedTitle) {
+                await supabase
+                  .from('conversation')
+                  .update({ title: generatedTitle })
+                  .eq('id', conversationId)
+              }
+            } catch (titleError) {
+              console.error('Error generating title:', titleError)
+              // Don't fail the whole request if title generation fails
+            }
+          }
+
           // Send completion signal
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'complete',
