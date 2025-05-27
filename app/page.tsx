@@ -99,10 +99,10 @@ export default function ChatApp() {
         {/* Left Sidebar */}
         <div
           className={`transition-all duration-300 ease-in-out ${
-            leftSidebarOpen ? "min-w-60 w-60 opacity-100" : "w-0 opacity-0"
+            leftSidebarOpen ? "w-60 min-w-0 opacity-100" : "w-0 opacity-0"
           } overflow-hidden`}
         >
-          <div className={`min-w-60 w-60 h-full ${!leftSidebarOpen && "invisible"}`}>
+          <div className={`w-full h-full ${!leftSidebarOpen && "invisible"}`}>
             <ChatSidebar 
               selectedConversationId={selectedConversation?.id}
               onConversationSelect={handleConversationSelect}
@@ -113,7 +113,7 @@ export default function ChatApp() {
         </div>
 
         {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col border-l border-r">
+        <div className="flex-1 flex flex-col border-l border-r min-w-0">
           <ChatArea
             toggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
             toggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
@@ -130,10 +130,10 @@ export default function ChatApp() {
         {/* Right Sidebar */}
         <div
           className={`transition-all duration-300 ease-in-out ${
-            rightSidebarOpen ? "w-80 min-w-80 opacity-100" : "w-0 opacity-0"
+            rightSidebarOpen ? "w-80 min-w-0 opacity-100" : "w-0 opacity-0"
           } overflow-hidden`}
         >
-          <div className={`min-w-80 w-80 h-full ${!rightSidebarOpen && "invisible"}`}>
+          <div className={`w-full h-full ${!rightSidebarOpen && "invisible"}`}>
             <SettingsPanel />
           </div>
         </div>

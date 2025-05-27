@@ -443,10 +443,10 @@ export default function ChatArea({
       </div>
 
       {/* Chat Messages */}
-      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
+      <ScrollArea className="flex-1 px-4" ref={scrollAreaRef}>
         <>
           {messages.map((message, index) => (
-              <div key={message.id} className="mb-6 group">
+              <div key={message.id} className={`mb-6 group ${index === 0 ? "pt-4" : ""}`}>
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
                     {message.role === 'user' ? (
