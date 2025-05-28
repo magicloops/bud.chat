@@ -2,6 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Override highlight.js styles for dark mode */
+.dark .hljs {
+  background: hsl(var(--muted)) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+.dark .hljs-keyword,
+.dark .hljs-selector-tag,
+.dark .hljs-built_in,
+.dark .hljs-name,
+.dark .hljs-tag {
+  color: #ff6b6b !important;
+}
+
+.dark .hljs-string,
+.dark .hljs-attr {
+  color: #4ecdc4 !important;
+}
+
+.dark .hljs-comment,
+.dark .hljs-quote {
+  color: #6c7b7f !important;
+  font-style: italic;
+}
+
+.dark .hljs-number,
+.dark .hljs-literal {
+  color: #4ecdc4 !important;
+}
+
+/* Light mode adjustments */
+.hljs {
+  background: hsl(var(--muted)) !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

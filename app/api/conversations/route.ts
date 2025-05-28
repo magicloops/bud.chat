@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { workspaceId, title, systemPrompt } = body
+    const { workspaceId, title, systemPrompt, initialMessages } = body
 
     if (!workspaceId) {
       return new Response('workspaceId is required', { status: 400 })
@@ -104,22 +104,33 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Add default assistant greeting for new conversations
-    if (title === 'New Chat') {
-      const { error: greetingError } = await supabase
-        .from('message')
-        .insert({
-          convo_id: conversation.id,
-          path: '1',
-          role: 'assistant',
-          content: 'Hello! How can I assist you today?',
-          metadata: { model: 'greeting' },
-          created_by: user.id
-        })
+    // Add initial messages if provided
+    if (initialMessages && initialMessages.length > 0) {
+      let pathCounter = 1
+      
+      // If we have a system prompt, messages start from path 2
+      if (systemPrompt) {
+        pathCounter = 2
+      }
+      
+      for (const message of initialMessages) {
+        const { error: messageError } = await supabase
+          .from('message')
+          .insert({
+            convo_id: conversation.id,
+            path: pathCounter.toString(),
+            role: message.role,
+            content: message.content,
+            metadata: message.metadata || {},
+            created_by: user.id
+          })
 
-      if (greetingError) {
-        console.error('Error creating greeting message:', greetingError)
-        // Don't fail the conversation creation for this
+        if (messageError) {
+          console.error(`Error creating initial message ${pathCounter}:`, messageError)
+          // Don't fail the conversation creation for this
+        }
+        
+        pathCounter++
       }
     }
 

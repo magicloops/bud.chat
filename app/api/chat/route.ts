@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
                 messages: [
                   {
                     role: 'system',
-                    content: 'Generate a concise, descriptive chat title (2-5 words) and a unique assistant name based on the user\'s first message. Return as JSON with keys "chatTitle" and "assistantName". The assistant name should be creative and relate to the conversation topic.'
+                    content: 'Generate a concise, descriptive chat title (2-5 words) and a unique assistant name based on the user\'s first message. Return as JSON with keys "chatTitle" and "assistantName". The assistant name should be a single real name (like `Emily` or `Charles`) while being creative and relate to the conversation topic.'
                   },
                   {
                     role: 'user',
@@ -224,30 +224,19 @@ export async function POST(request: NextRequest) {
                 console.log('Parsed title data:', { chatTitle, assistantName })
                 
                 if (chatTitle && assistantName) {
-                  // Update conversation title
+                  // Update conversation title and assistant name in metadata
                   const { error: updateError } = await supabase
                     .from('conversation')
-                    .update({ title: chatTitle })
+                    .update({ 
+                      title: chatTitle,
+                      metadata: { assistantName: assistantName }
+                    })
                     .eq('id', conversationId)
                   
                   if (updateError) {
-                    console.error('Error updating conversation title:', updateError)
+                    console.error('Error updating conversation title and assistant name:', updateError)
                   } else {
-                    console.log('Successfully updated conversation title')
-                  }
-                  
-                  // Store assistant name in the assistant message metadata
-                  const { error: messageUpdateError } = await supabase
-                    .from('message')
-                    .update({ 
-                      metadata: { model: model, assistantName: assistantName }
-                    })
-                    .eq('id', assistantMessageRecord.id)
-                  
-                  if (messageUpdateError) {
-                    console.error('Error updating message with assistant name:', messageUpdateError)
-                  } else {
-                    console.log('Successfully stored assistant name in message metadata')
+                    console.log('Successfully updated conversation title and assistant name')
                   }
                 }
               }

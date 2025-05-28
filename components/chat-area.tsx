@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Avatar } from "@/components/ui/avatar"
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -12,7 +12,9 @@ import { useChatStream } from "@/hooks/use-chat-stream"
 import { Database } from "@/lib/types/database"
 import { useToast } from "@/hooks/use-toast"
 import { useModel } from "@/contexts/model-context"
+import { useAuth } from "@/lib/auth/auth-provider"
 import { createClient } from "@/lib/supabase/client"
+import MarkdownRenderer from "./markdown-renderer"
 
 type Message = Database['public']['Tables']['message']['Row']
 
@@ -24,8 +26,12 @@ interface ChatAreaProps {
   currentConversationId?: string | null
   currentWorkspaceId?: string | null
   conversationTitle?: string
+  conversationMetadata?: any
   optimisticMessages?: any[]
   onConversationChange?: (conversationId: string, workspaceId: string, title?: string, optimisticMessages?: any[]) => void
+  onConversationUpdate?: (conversation: any) => void
+  onStreamingComplete?: () => void
+  isLoadingConversation?: boolean
 }
 
 export default function ChatArea({
@@ -36,117 +42,61 @@ export default function ChatArea({
   currentConversationId,
   currentWorkspaceId,
   conversationTitle = "New Chat",
+  conversationMetadata,
   optimisticMessages,
   onConversationChange,
+  onConversationUpdate,
+  onStreamingComplete,
+  isLoadingConversation = false,
 }: ChatAreaProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<any[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
+
   const [streamingMessage, setStreamingMessage] = useState<any | null>(null)
-  const [assistantName, setAssistantName] = useState<string>('Assistant')
+  const [assistantName, setAssistantName] = useState<string>(
+    conversationMetadata?.assistantName || 'Assistant'
+  )
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const { selectedModel } = useModel()
+  const { user } = useAuth()
   
-  // Load messages when conversation changes
+  // Update assistant name when conversation metadata changes
   useEffect(() => {
-    if (currentConversationId) {
-      // Handle optimistic messages (for temp conversations or new conversations with greeting)
-      if (optimisticMessages && optimisticMessages.length > 0) {
-        setMessages(optimisticMessages)
-        
-        // For real conversations, still load from API but after setting optimistic messages
-        if (!currentConversationId.startsWith('temp-')) {
-          loadMessages()
-          loadAssistantName()
-        }
-        return
-      }
-      
-      // Load from API for real conversations without optimistic messages
-      if (!currentConversationId.startsWith('temp-')) {
-        loadMessages()
-        loadAssistantName()
-      }
-    } else {
-      setMessages([])
-    }
-  }, [currentConversationId, optimisticMessages])
-
-  // Listen for message updates (assistant name changes)
+    setAssistantName(conversationMetadata?.assistantName || 'Assistant')
+  }, [conversationMetadata])
+  
+  // Simplified message loading - only use optimistic messages or clear
   useEffect(() => {
-    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
-
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`messages:${currentConversationId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'message',
-          filter: `convo_id=eq.${currentConversationId}`
-        },
-        (payload) => {
-          console.log('Message updated via real-time:', payload.new)
-          const updatedMessage = payload.new as any
-          if (updatedMessage.role === 'assistant' && updatedMessage.metadata?.assistantName) {
-            console.log('Updating assistant name from real-time:', updatedMessage.metadata.assistantName)
-            setAssistantName(updatedMessage.metadata.assistantName)
-          }
-        }
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [currentConversationId])
-
-  const loadMessages = async () => {
-    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
+    console.log('💬 ChatArea effect:', { 
+      currentConversationId, 
+      optimisticMessagesLength: optimisticMessages?.length,
+      isLoadingConversation
+    })
     
-    try {
-      const response = await fetch(`/api/conversations/${currentConversationId}/messages`)
-      if (response.ok) {
-        const data = await response.json()
-        setMessages(data)
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error)
+    // Use optimistic messages if provided
+    if (optimisticMessages && optimisticMessages.length > 0) {
+      console.log('✅ Using optimistic messages:', optimisticMessages.length)
+      setMessages(optimisticMessages)
+      return
     }
-  }
-
-  const loadAssistantName = async () => {
-    if (!currentConversationId || currentConversationId.startsWith('temp-')) return
     
-    try {
-      console.log('Loading assistant name for:', currentConversationId)
-      const response = await fetch(`/api/conversations/${currentConversationId}/messages`)
-      if (response.ok) {
-        const messages = await response.json()
-        console.log('Loaded messages to find assistant name:', messages)
-        
-        // Find the first assistant message with an assistant name
-        const assistantMessage = messages.find((msg: any) => 
-          msg.role === 'assistant' && msg.metadata?.assistantName
-        )
-        
-        if (assistantMessage?.metadata?.assistantName) {
-          console.log('Setting assistant name to:', assistantMessage.metadata.assistantName)
-          setAssistantName(assistantMessage.metadata.assistantName)
-        } else {
-          console.log('No assistant name found in messages, using default')
-          setAssistantName('Assistant')
-        }
-      } else {
-        console.log('Failed to load messages, status:', response.status)
+    // Clear messages if no conversation or still loading
+    if (!currentConversationId || isLoadingConversation) {
+      if (!currentConversationId) {
+        console.log('🧹 Clearing messages - no conversation')
+        setMessages([])
       }
-    } catch (error) {
-      console.error('Error loading assistant name:', error)
+      return
     }
-  }
+    
+    // If we reach here with a conversation ID but no optimistic messages,
+    // just wait - the parent will provide them when SWR loads
+  }, [currentConversationId, optimisticMessages, isLoadingConversation])
+
+
+
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -159,7 +109,7 @@ export default function ChatArea({
   }, [messages, streamingMessage])
 
   const handleSendMessage = async () => {
-    if (!input.trim() || !currentConversationId || !currentWorkspaceId || isStreaming) return
+    if (!input.trim() || !currentWorkspaceId || isStreaming) return
 
     const messageText = input.trim()
     setInput("")
@@ -187,11 +137,50 @@ export default function ChatArea({
     setStreamingMessage(assistantMessage)
 
     try {
+      // If no conversation exists, create one first
+      let conversationId = currentConversationId
+      if (!conversationId) {
+        // Prepare initial messages (only greeting and system messages, NOT user message)
+        const initialMessages = []
+        
+        // Add greeting message if it exists
+        const greetingMessage = messages.find(m => m.metadata?.isGreeting)
+        if (greetingMessage) {
+          initialMessages.push({
+            role: greetingMessage.role,
+            content: greetingMessage.content,
+            metadata: greetingMessage.metadata
+          })
+        }
+
+        const createResponse = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspaceId: currentWorkspaceId,
+            title: 'New Chat',
+            initialMessages: initialMessages.length > 0 ? initialMessages : undefined
+          })
+        })
+        
+        if (!createResponse.ok) {
+          throw new Error('Failed to create conversation')
+        }
+        
+        const newConversation = await createResponse.json()
+        conversationId = newConversation.id
+        
+        // Notify parent about the new conversation
+        if (onConversationChange) {
+          onConversationChange(conversationId, currentWorkspaceId, 'New Chat', [])
+        }
+      }
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          conversationId: currentConversationId,
+          conversationId: conversationId,
           message: messageText,
           workspaceId: currentWorkspaceId,
           model: selectedModel,
@@ -241,12 +230,13 @@ export default function ChatArea({
                 setMessages(prev => [...prev, finalAssistantMessage])
                 setStreamingMessage(null)
                 
-                // Check for assistant name update after a short delay
-                setTimeout(async () => {
-                  loadAssistantName()
-                  // Also reload messages to get any updated metadata
-                  loadMessages()
-                }, 1500)
+                // Notify parent that streaming has completed successfully
+                if (onStreamingComplete) {
+                  onStreamingComplete()
+                }
+                
+                // Real-time subscriptions will handle conversation updates automatically
+                // No need for manual refresh calls
               } else if (data.type === 'error') {
                 throw new Error(data.error || 'Unknown error')
               }
@@ -266,6 +256,10 @@ export default function ChatArea({
       setStreamingMessage(null)
     } finally {
       setIsStreaming(false)
+      // Notify parent that streaming has completed
+      if (onStreamingComplete) {
+        onStreamingComplete()
+      }
     }
   }
 
@@ -408,7 +402,9 @@ export default function ChatArea({
     return `+${diffMins}m ${diffSecs % 60}s`
   }
 
-  if (!currentConversationId) {
+  // Only show "no conversation" if we don't have a conversation ID AND don't have a workspace ID
+  // If we have a workspace ID but no conversation ID, we're starting a new conversation
+  if (!currentConversationId && !currentWorkspaceId) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
@@ -450,12 +446,21 @@ export default function ChatArea({
                 <div className="flex items-start gap-3">
                   <Avatar className="h-8 w-8">
                     {message.role === 'user' ? (
-                      <User className="h-5 w-5" />
+                      <>
+                        {user?.user_metadata?.avatar_url ? (
+                          <AvatarImage src={user.user_metadata.avatar_url} alt="User" />
+                        ) : null}
+                        <AvatarFallback>
+                          {user?.email?.charAt(0).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </>
                     ) : (
-                      <Bot className="h-5 w-5 text-green-500" />
+                      <AvatarFallback>
+                        <Bot className="h-5 w-5 text-green-500" />
+                      </AvatarFallback>
                     )}
                   </Avatar>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-medium">
                         {message.role === 'user' ? 'You' : assistantName}
@@ -467,7 +472,7 @@ export default function ChatArea({
                         · {formatMessageDuration(message, index)}
                       </span>
                     </div>
-                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                    <MarkdownRenderer content={message.content} />
                   </div>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -505,7 +510,7 @@ export default function ChatArea({
                   <Avatar className="h-8 w-8">
                     <Bot className="h-5 w-5 text-green-500" />
                   </Avatar>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-medium">{assistantName}</span>
                       {streamingMessage.metadata?.model && streamingMessage.metadata.model !== 'greeting' && (
@@ -515,10 +520,16 @@ export default function ChatArea({
                         · {isStreaming ? 'typing...' : 'just now'}
                       </span>
                     </div>
-                    <div className="text-sm whitespace-pre-wrap">
-                      {streamingMessage.content}
-                      {isStreaming && <span className="animate-pulse">|</span>}
+                    <div className="relative">
+                      {isStreaming && !streamingMessage?.content && (
+                        <span className="animate-bounce animate-pulse text-muted-foreground/60">|</span>
+                      )}
+                      <MarkdownRenderer content={streamingMessage.content} />
                     </div>
+                  </div>
+                  {/* Placeholder for dropdown menu to prevent layout shift */}
+                  <div className="h-6 w-6 opacity-0">
+                    {/* Hidden placeholder that matches dropdown button dimensions */}
                   </div>
                 </div>
               </div>
@@ -531,7 +542,12 @@ export default function ChatArea({
         <div className="relative">
           <div className="flex items-start gap-3">
             <Avatar className="mt-1 h-8 w-8">
-              <User className="h-5 w-5" />
+              {user?.user_metadata?.avatar_url ? (
+                <AvatarImage src={user.user_metadata.avatar_url} alt="User" />
+              ) : null}
+              <AvatarFallback>
+                {user?.email?.charAt(0).toUpperCase() || 'U'}
+              </AvatarFallback>
             </Avatar>
             <div className="flex-1 border rounded-md p-2 min-h-[80px] focus-within:ring-1 focus-within:ring-ring">
               <Textarea
@@ -540,7 +556,7 @@ export default function ChatArea({
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
-                disabled={isStreaming || !currentConversationId}
+                disabled={isStreaming || (!currentConversationId && !currentWorkspaceId)}
               />
             </div>
           </div>
@@ -548,7 +564,7 @@ export default function ChatArea({
             size="sm"
             className="absolute bottom-3 right-3 h-8 w-8 rounded-full bg-green-100 hover:bg-green-200 text-green-700 disabled:opacity-50"
             onClick={handleSendMessage}
-            disabled={!input.trim() || isStreaming || !currentConversationId}
+            disabled={!input.trim() || isStreaming || (!currentConversationId && !currentWorkspaceId)}
           >
             {isStreaming ? (
               <Loader2 className="h-4 w-4 animate-spin" />

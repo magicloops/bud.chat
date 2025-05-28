@@ -1,83 +1,36 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth/auth-provider"
 import { AuthModal } from "@/components/auth/auth-modal"
 import ChatSidebar from "@/components/chat-sidebar"
-import ChatArea from "@/components/chat-area"
-import SettingsPanel from "@/components/settings-panel"
 import { ModelProvider } from "@/contexts/model-context"
-import { Loader2 } from "lucide-react"
+import { Loader2, MessageSquare, Plus } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Database } from "@/lib/types/database"
 
 type Workspace = Database['public']['Tables']['workspace']['Row']
 type Conversation = Database['public']['Tables']['conversation']['Row']
 
-export default function ChatApp() {
+export default function HomePage() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(false)
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
-  const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
-  const [optimisticMessages, setOptimisticMessages] = useState<any[]>([])
-  
   const { user, loading } = useAuth()
+  const router = useRouter()
 
   const handleConversationSelect = (conversation: Conversation, workspace: Workspace) => {
-    setSelectedConversation(conversation)
-    setSelectedWorkspace(workspace)
-    // Clear optimistic messages when manually selecting a conversation
-    setOptimisticMessages([])
+    // Navigate to the selected conversation
+    router.push(`/${conversation.id}`)
   }
 
-  // Callback to update selected conversation when it changes in real-time
-  const updateSelectedConversation = (updatedConversation: Conversation) => {
-    if (selectedConversation && selectedConversation.id === updatedConversation.id) {
-      setSelectedConversation(updatedConversation)
-    }
-    
-    // If this is updating a temp conversation with the real one, clear optimistic state
-    if (selectedConversation?.id.startsWith('temp-') && updatedConversation.id !== selectedConversation.id) {
-      // This is the real conversation replacing the temp one
-      const workspace: Workspace = {
-        id: updatedConversation.workspace_id,
-        name: selectedWorkspace?.name || '',
-        owner_id: selectedWorkspace?.owner_id || '',
-        created_at: selectedWorkspace?.created_at || new Date().toISOString(),
-        updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
-      }
-      
-      setOptimisticMessages([]) // Clear optimistic messages
-      handleConversationSelect(updatedConversation, workspace)
-    }
-  }
-
-  const clearConversationSelection = () => {
-    setSelectedConversation(null)
+  const handleNewConversation = () => {
+    // Navigate to new conversation route
+    router.push('/new')
   }
 
   const handleConversationChange = (conversationId: string, workspaceId: string, title?: string, messages?: any[]) => {
-    // Create conversation objects
-    const newConversation: Conversation = {
-      id: conversationId,
-      workspace_id: workspaceId,
-      title: title || 'Loading...', // Use provided title or fallback
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }
-    
-    const workspace: Workspace = {
-      id: workspaceId,
-      name: selectedWorkspace?.name || '',
-      owner_id: selectedWorkspace?.owner_id || '',
-      created_at: selectedWorkspace?.created_at || new Date().toISOString(),
-      updated_at: selectedWorkspace?.updated_at || new Date().toISOString()
-    }
-    
-    
-    // Use React 18's automatic batching to update everything at once
-    setOptimisticMessages(messages || [])
-    setSelectedConversation(newConversation)
-    setSelectedWorkspace(workspace)
+    // Navigate to the new conversation
+    router.push(`/${conversationId}`)
   }
 
   if (loading) {
@@ -104,37 +57,38 @@ export default function ChatApp() {
         >
           <div className={`w-full h-full ${!leftSidebarOpen && "invisible"}`}>
             <ChatSidebar 
-              selectedConversationId={selectedConversation?.id}
+              selectedConversationId={undefined}
               onConversationSelect={handleConversationSelect}
-              onConversationUpdate={updateSelectedConversation}
+              onConversationUpdate={() => {}}
               onConversationChange={handleConversationChange}
             />
           </div>
         </div>
 
-        {/* Main Chat Area */}
+        {/* Main Welcome Area */}
         <div className="flex-1 flex flex-col border-l border-r min-w-0">
-          <ChatArea
-            toggleLeftSidebar={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            toggleRightSidebar={() => setRightSidebarOpen(!rightSidebarOpen)}
-            leftSidebarOpen={leftSidebarOpen}
-            rightSidebarOpen={rightSidebarOpen}
-            currentConversationId={selectedConversation?.id}
-            currentWorkspaceId={selectedWorkspace?.id}
-            conversationTitle={selectedConversation?.title || "New Chat"}
-            optimisticMessages={optimisticMessages}
-            onConversationChange={handleConversationChange}
-          />
-        </div>
+          <div className="flex items-center justify-between p-4 border-b">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}>
+                <span className="sr-only">Toggle sidebar</span>
+                <MessageSquare className="h-5 w-5" />
+              </Button>
+              <span className="font-medium">Welcome to Bud Chat</span>
+            </div>
+          </div>
 
-        {/* Right Sidebar */}
-        <div
-          className={`transition-all duration-300 ease-in-out ${
-            rightSidebarOpen ? "w-80 min-w-0 opacity-100" : "w-0 opacity-0"
-          } overflow-hidden`}
-        >
-          <div className={`w-full h-full ${!rightSidebarOpen && "invisible"}`}>
-            <SettingsPanel />
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center max-w-md mx-auto p-8">
+              <MessageSquare className="h-16 w-16 mx-auto mb-6 text-muted-foreground" />
+              <h1 className="text-2xl font-semibold mb-4">Start a new conversation</h1>
+              <p className="text-muted-foreground mb-8">
+                Select a conversation from the sidebar or start a new one to begin chatting with AI.
+              </p>
+              <Button onClick={handleNewConversation} className="gap-2">
+                <Plus className="h-4 w-4" />
+                New Conversation
+              </Button>
+            </div>
           </div>
         </div>
       </div>

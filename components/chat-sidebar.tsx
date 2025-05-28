@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback, memo } from "react"
+import { useRouter } from "next/navigation"
+import { mutate } from 'swr'
 import { Avatar } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -30,6 +32,103 @@ import { Database } from "@/lib/types/database"
 type Workspace = Database['public']['Tables']['workspace']['Row']
 type Conversation = Database['public']['Tables']['conversation']['Row']
 
+// Memoized conversation item component to prevent unnecessary re-renders
+const ConversationItem = memo(function ConversationItem({ 
+  conversation, 
+  isSelected, 
+  onConversationClick, 
+  onDeleteConversation,
+  onStartRename,
+  formattedDate,
+  isDropdownActive,
+  onDropdownToggle,
+  onConversationHover
+}: {
+  conversation: Conversation
+  isSelected: boolean
+  onConversationClick: (id: string) => void
+  onDeleteConversation: (id: string) => void
+  onStartRename: (conversation: Conversation) => void
+  formattedDate: string
+  isDropdownActive: boolean
+  onDropdownToggle: (id: string, isOpen: boolean) => void
+  onConversationHover: (id: string) => void
+}) {
+  const handleClick = useCallback(() => {
+    onConversationClick(conversation.id)
+  }, [onConversationClick, conversation.id])
+
+  const handleDelete = useCallback(() => {
+    onDeleteConversation(conversation.id)
+  }, [onDeleteConversation, conversation.id])
+
+  const handleRename = useCallback(() => {
+    onStartRename(conversation)
+  }, [onStartRename, conversation])
+
+  const handleDropdownChange = useCallback((isOpen: boolean) => {
+    onDropdownToggle(conversation.id, isOpen)
+  }, [onDropdownToggle, conversation.id])
+
+  const handleHover = useCallback(() => {
+    onConversationHover(conversation.id)
+  }, [onConversationHover, conversation.id])
+
+  return (
+    <div
+      className={`group mb-1 mx-2 rounded-md hover:bg-accent ${
+        isSelected ? "bg-accent" : ""
+      }`}
+    >
+      <div className="flex items-center max-w-full">
+        <button
+          className="flex items-center gap-2 text-sm font-normal py-2 px-3 text-left flex-1 min-w-0 rounded-md"
+          onClick={handleClick}
+          onMouseEnter={handleHover}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="truncate">{conversation.title || "Untitled"}</div>
+            <div className="text-xs text-muted-foreground">
+              {formattedDate}
+            </div>
+          </div>
+        </button>
+        
+        {/* Only render dropdown when it's the active one - saves tons of performance */}
+        {isSelected && (
+        <DropdownMenu open={isDropdownActive} onOpenChange={handleDropdownChange}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mr-1"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          {/* Only render content when dropdown is active */}
+          {isDropdownActive && (
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleRename}>
+                <Edit className="mr-2 h-4 w-4" />
+                <span>Rename</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem 
+                onClick={handleDelete}
+                className="text-red-600"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          )}
+        </DropdownMenu>
+        )}
+      </div>
+    </div>
+  )
+})
+
 interface ChatSidebarProps {
   selectedConversationId?: string | null
   onConversationSelect: (conversation: Conversation, workspace: Workspace) => void
@@ -37,19 +136,27 @@ interface ChatSidebarProps {
   onConversationChange?: (conversationId: string, workspaceId: string, title?: string, messages?: any[]) => void
 }
 
-export default function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate, onConversationChange }: ChatSidebarProps) {
+function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate, onConversationChange }: ChatSidebarProps) {
   const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
   const [newWorkspaceName, setNewWorkspaceName] = useState("")
   const [showNewWorkspaceDialog, setShowNewWorkspaceDialog] = useState(false)
+  const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null)
+  const [renamingConversation, setRenamingConversation] = useState<{ id: string; title: string } | null>(null)
   
   const { user, signOut } = useAuth()
   const { toast } = useToast()
+  const router = useRouter()
   
   const { workspaces, loading: workspacesLoading, createWorkspace } = useWorkspaces()
   const { conversations, loading: conversationsLoading, createConversation, deleteConversation } = useConversations(
     selectedWorkspace?.id || null,
     onConversationUpdate
   )
+
+  // Memoize conversation click handler to prevent re-creating on every render
+  const handleConversationClick = useCallback((conversationId: string) => {
+    router.push(`/${conversationId}`)
+  }, [router])
 
   // Auto-select first workspace when workspaces load
   useEffect(() => {
@@ -58,27 +165,9 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
     }
   }, [workspaces, selectedWorkspace])
 
-  const handleCreateConversation = async () => {
-    if (!selectedWorkspace) {
-      toast({
-        title: "Error",
-        description: "Please select a workspace first",
-        variant: "destructive",
-      })
-      return
-    }
-
-    try {
-      const conversation = await createConversation("New Chat")
-      // The greeting message is now saved to the database, so just select the conversation
-      onConversationSelect(conversation, selectedWorkspace)
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to create conversation",
-        variant: "destructive",
-      })
-    }
+  const handleCreateConversation = () => {
+    // Navigate to new conversation route
+    router.push('/new')
   }
 
   const handleCreateWorkspace = async () => {
@@ -102,8 +191,9 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
     }
   }
 
-  const handleDeleteConversation = async (conversationId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleDeleteConversation = useCallback(async (conversationId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    setActiveDropdownId(null)
     
     try {
       // If we're deleting the selected conversation, find the next one to select
@@ -117,9 +207,12 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
           } else if (currentIndex > 0) {
             nextConversation = conversations[currentIndex - 1]
           }
-          // If there's a next conversation, select it immediately
+          // If there's a next conversation, navigate to it
           if (nextConversation) {
-            onConversationSelect(nextConversation, selectedWorkspace)
+            router.push(`/${nextConversation.id}`)
+          } else {
+            // No conversations left, go to home page
+            router.push('/')
           }
         }
       }
@@ -136,9 +229,69 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
         variant: "destructive",
       })
     }
-  }
+  }, [selectedConversationId, selectedWorkspace, conversations, router, deleteConversation, toast])
 
-  const formatDate = (dateString: string) => {
+  const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to rename conversation')
+      }
+
+      setRenamingConversation(null)
+      toast({
+        title: "Success",
+        description: "Conversation renamed successfully",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to rename conversation",
+        variant: "destructive",
+      })
+    }
+  }, [toast])
+
+  const handleStartRename = useCallback((conversation: Conversation) => {
+    setActiveDropdownId(null)
+    setRenamingConversation({ id: conversation.id, title: conversation.title || '' })
+  }, [])
+
+  const handleDropdownToggle = useCallback((conversationId: string, isOpen: boolean) => {
+    setActiveDropdownId(isOpen ? conversationId : null)
+  }, [])
+
+  const handleConversationHover = useCallback(async (conversationId: string) => {
+    // Prefetch both the route and the conversation data using SWR
+    console.log('🚀 Prefetching conversation with SWR:', conversationId)
+    
+    // Route prefetch (for component loading)
+    router.prefetch(`/${conversationId}`)
+    
+    // Data prefetch using SWR's mutate - this will cache the data properly
+    const swrKey = `/api/conversations/${conversationId}?include_messages=true`
+    try {
+      await mutate(swrKey, async () => {
+        const response = await fetch(swrKey)
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        const data = await response.json()
+        console.log('✅ SWR cached conversation data:', data?.messages?.length || 0, 'messages')
+        return data
+      }, { revalidate: false }) // Don't revalidate, just cache
+    } catch (error) {
+      console.log('⚠️ SWR prefetch failed (this is okay):', error)
+    }
+  }, [router])
+
+  // Memoize date formatting to avoid recalculating on every render
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString)
     
     // Handle invalid dates
@@ -156,7 +309,15 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
     if (diffDays === 1) return 'Yesterday'
     if (diffDays < 7) return `${diffDays} days ago`
     return date.toLocaleDateString()
-  }
+  }, [])
+
+  // Memoize conversations with pre-calculated formatted dates
+  const conversationsWithFormattedDates = useMemo(() => {
+    return conversations.map(conversation => ({
+      ...conversation,
+      formattedDate: formatDate(conversation.updated_at)
+    }))
+  }, [conversations, formatDate])
 
   const handleSignOut = async () => {
     try {
@@ -236,53 +397,19 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
               No conversations yet. Create your first conversation!
             </div>
           ) : (
-            conversations.map((conversation) => (
-              <div
+            conversationsWithFormattedDates.map((conversation) => (
+              <ConversationItem
                 key={conversation.id}
-                className={`group mb-1 mx-2 rounded-md hover:bg-accent ${
-                  selectedConversationId === conversation.id ? "bg-accent" : ""
-                }`}
-              >
-                <div className="flex items-center max-w-full">
-                  <button
-                    className="flex items-center gap-2 text-sm font-normal py-2 px-3 text-left flex-1 min-w-0 rounded-md"
-                    onClick={() => selectedWorkspace && onConversationSelect(conversation, selectedWorkspace)}
-                  >
-                    <MessageCircle className="h-4 w-4 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate">{conversation.title || "Untitled"}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatDate(conversation.updated_at)}
-                      </div>
-                    </div>
-                  </button>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mr-1"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem>
-                      <Edit className="mr-2 h-4 w-4" />
-                      <span>Rename</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={(e) => handleDeleteConversation(conversation.id, e)}
-                      className="text-red-600"
-                    >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      <span>Delete</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                </div>
-              </div>
+                conversation={conversation}
+                isSelected={selectedConversationId === conversation.id}
+                onConversationClick={handleConversationClick}
+                onDeleteConversation={handleDeleteConversation}
+                onStartRename={handleStartRename}
+                formattedDate={conversation.formattedDate}
+                isDropdownActive={activeDropdownId === conversation.id}
+                onDropdownToggle={handleDropdownToggle}
+                onConversationHover={handleConversationHover}
+              />
             ))
           )}
         </div>
@@ -350,6 +477,48 @@ export default function ChatSidebar({ selectedConversationId, onConversationSele
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Rename Conversation Dialog */}
+      <Dialog open={!!renamingConversation} onOpenChange={(open) => !open && setRenamingConversation(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Conversation</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Input
+                placeholder="Conversation name"
+                value={renamingConversation?.title || ''}
+                onChange={(e) => setRenamingConversation(prev => prev ? { ...prev, title: e.target.value } : null)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && renamingConversation) {
+                    handleRenameConversation(renamingConversation.id, renamingConversation.title)
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                onClick={() => renamingConversation && handleRenameConversation(renamingConversation.id, renamingConversation.title)}
+                disabled={!renamingConversation?.title.trim()}
+                className="flex-1"
+              >
+                Rename
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setRenamingConversation(null)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
+
+export default memo(ChatSidebar)

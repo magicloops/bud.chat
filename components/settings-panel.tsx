@@ -13,6 +13,7 @@ import { useModel } from "@/contexts/model-context"
 import { useToast } from "@/hooks/use-toast"
 
 export default function SettingsPanel() {
+  const [budSettingsOpen, setBudSettingsOpen] = useState(true)
   const [chatSettingsOpen, setChatSettingsOpen] = useState(true)
   const [helpersOpen, setHelpersOpen] = useState(true)
   const [showThemeDialog, setShowThemeDialog] = useState(false)
@@ -132,11 +133,11 @@ export default function SettingsPanel() {
       <ScrollArea className="h-full flex-1 overflow-auto">
         <div className="p-4 space-y-6">
           {/* Bud Settings */}
-          <Collapsible>
+          <Collapsible open={budSettingsOpen} onOpenChange={setBudSettingsOpen}>
             <CollapsibleTrigger asChild>
               <Button variant="ghost" className="flex w-full items-center justify-between p-0 h-auto">
                 <div className="flex items-center gap-2">
-                  <ChevronRight className={`h-5 w-5 transition-transform ${open ? "rotate-90" : ""}`} />
+                  <ChevronRight className={`h-5 w-5 transition-transform ${budSettingsOpen ? "rotate-90" : ""}`} />
                   <span className="text-lg font-semibold">Bud Settings</span>
                 </div>
                 <HelpCircle className="h-4 w-4 text-muted-foreground" />

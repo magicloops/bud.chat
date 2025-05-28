@@ -50,29 +50,49 @@ export function useConversations(workspaceId: string | null, onConversationUpdat
           filter: `workspace_id=eq.${workspaceId}`
         },
         (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newConversation = payload.new as Conversation
-            setConversations(prev => {
-              // Prevent duplicates
-              if (prev.some(conv => conv.id === newConversation.id)) {
-                return prev
-              }
-              return [newConversation, ...prev]
-            })
-            onConversationUpdate?.(newConversation)
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedConversation = payload.new as Conversation
-            setConversations(prev => 
-              prev.map(conv => 
-                conv.id === updatedConversation.id ? updatedConversation : conv
-              ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-            )
-            onConversationUpdate?.(updatedConversation)
-          } else if (payload.eventType === 'DELETE') {
-            setConversations(prev => 
-              prev.filter(conv => conv.id !== payload.old.id)
-            )
-          }
+          // Batch state updates to reduce re-renders
+          requestAnimationFrame(() => {
+            if (payload.eventType === 'INSERT') {
+              const newConversation = payload.new as Conversation
+              setConversations(prev => {
+                // Prevent duplicates
+                if (prev.some(conv => conv.id === newConversation.id)) {
+                  return prev
+                }
+                return [newConversation, ...prev]
+              })
+              onConversationUpdate?.(newConversation)
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedConversation = payload.new as Conversation
+              setConversations(prev => {
+                // Check if the conversation actually changed to avoid unnecessary updates
+                const existingConv = prev.find(conv => conv.id === updatedConversation.id)
+                if (existingConv && existingConv.updated_at === updatedConversation.updated_at) {
+                  return prev // No change, avoid re-render
+                }
+                
+                // More efficient: update the specific conversation and move to front if newer
+                const updated = prev.map(conv => 
+                  conv.id === updatedConversation.id ? updatedConversation : conv
+                )
+                
+                // Only sort if the updated conversation should be at the top
+                const updatedIndex = updated.findIndex(conv => conv.id === updatedConversation.id)
+                if (updatedIndex > 0) {
+                  // Move to front if it's not already there and is newer
+                  const [updatedItem] = updated.splice(updatedIndex, 1)
+                  return [updatedItem, ...updated]
+                }
+                
+                return updated
+              })
+              onConversationUpdate?.(updatedConversation)
+            } else if (payload.eventType === 'DELETE') {
+              setConversations(prev => 
+                prev.filter(conv => conv.id !== payload.old.id)
+              )
+            }
+          })
         }
       )
       .subscribe()
