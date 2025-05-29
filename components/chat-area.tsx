@@ -58,6 +58,7 @@ export default function ChatArea({
     conversationMetadata?.assistantName || 'Assistant'
   )
   const scrollAreaRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const { toast } = useToast()
   const { selectedModel } = useModel()
   const { user } = useAuth()
@@ -79,6 +80,17 @@ export default function ChatArea({
     if (optimisticMessages && optimisticMessages.length > 0) {
       console.log('✅ Using optimistic messages:', optimisticMessages.length)
       setMessages(optimisticMessages)
+      
+      // Auto-focus input when conversation loads
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          console.log('🎯 Attempting to focus input after conversation load:', inputRef.current)
+          if (inputRef.current) {
+            inputRef.current.focus()
+            console.log('✅ Input focused after conversation load')
+          }
+        }, 100)
+      })
       return
     }
     
@@ -94,6 +106,21 @@ export default function ChatArea({
     // If we reach here with a conversation ID but no optimistic messages,
     // just wait - the parent will provide them when SWR loads
   }, [currentConversationId, optimisticMessages, isLoadingConversation])
+  
+  // Auto-focus input when conversation changes (for new conversations)
+  useEffect(() => {
+    if (currentConversationId || currentWorkspaceId) {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          console.log('🎯 Attempting to focus input after conversation change:', inputRef.current)
+          if (inputRef.current) {
+            inputRef.current.focus()
+            console.log('✅ Input focused after conversation change')
+          }
+        }, 100)
+      })
+    }
+  }, [currentConversationId, currentWorkspaceId])
 
 
 
@@ -170,9 +197,9 @@ export default function ChatArea({
         const newConversation = await createResponse.json()
         conversationId = newConversation.id
         
-        // Notify parent about the new conversation
+        // Notify parent about the new conversation (don't pass messages to avoid overwriting current state)
         if (onConversationChange) {
-          onConversationChange(conversationId, currentWorkspaceId, 'New Chat', [])
+          onConversationChange(conversationId, currentWorkspaceId, 'New Chat')
         }
       }
 
@@ -230,6 +257,17 @@ export default function ChatArea({
                 setMessages(prev => [...prev, finalAssistantMessage])
                 setStreamingMessage(null)
                 
+                // Refocus input after successful streaming
+                requestAnimationFrame(() => {
+                  setTimeout(() => {
+                    console.log('🎯 Attempting to focus input after streaming success:', inputRef.current)
+                    if (inputRef.current) {
+                      inputRef.current.focus()
+                      console.log('✅ Input focused after streaming success')
+                    }
+                  }, 100)
+                })
+                
                 // Notify parent that streaming has completed successfully
                 if (onStreamingComplete) {
                   onStreamingComplete()
@@ -256,6 +294,18 @@ export default function ChatArea({
       setStreamingMessage(null)
     } finally {
       setIsStreaming(false)
+      
+      // Refocus input after streaming completes
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          console.log('🎯 Attempting to focus input after streaming cleanup:', inputRef.current)
+          if (inputRef.current) {
+            inputRef.current.focus()
+            console.log('✅ Input focused after streaming cleanup')
+          }
+        }, 100)
+      })
+      
       // Notify parent that streaming has completed
       if (onStreamingComplete) {
         onStreamingComplete()
@@ -551,12 +601,13 @@ export default function ChatArea({
             </Avatar>
             <div className="flex-1 border rounded-md p-2 min-h-[80px] focus-within:ring-1 focus-within:ring-ring">
               <Textarea
+                ref={inputRef}
                 placeholder="Send a message..."
                 className="border-0 focus-visible:ring-0 resize-none p-0 shadow-none min-h-[60px]"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyPress}
-                disabled={isStreaming || (!currentConversationId && !currentWorkspaceId)}
+                disabled={!currentConversationId && !currentWorkspaceId}
               />
             </div>
           </div>

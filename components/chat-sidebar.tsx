@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback, memo } from "react"
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { mutate } from 'swr'
 import { Avatar } from "@/components/ui/avatar"
@@ -166,8 +166,12 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
   }, [workspaces, selectedWorkspace])
 
   const handleCreateConversation = () => {
-    // Navigate to new conversation route
-    router.push('/new')
+    // Navigate to new conversation route with workspace ID
+    if (selectedWorkspace) {
+      router.push(`/new?workspace=${selectedWorkspace.id}`)
+    } else {
+      router.push('/new')
+    }
   }
 
   const handleCreateWorkspace = async () => {
@@ -266,28 +270,54 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
     setActiveDropdownId(isOpen ? conversationId : null)
   }, [])
 
+  // Track prefetched conversations to avoid duplicate fetches
+  const prefetchedConversations = useRef<Set<string>>(new Set())
+  const hoverTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  
   const handleConversationHover = useCallback(async (conversationId: string) => {
-    // Prefetch both the route and the conversation data using SWR
-    console.log('🚀 Prefetching conversation with SWR:', conversationId)
-    
-    // Route prefetch (for component loading)
-    router.prefetch(`/${conversationId}`)
-    
-    // Data prefetch using SWR's mutate - this will cache the data properly
-    const swrKey = `/api/conversations/${conversationId}?include_messages=true`
-    try {
-      await mutate(swrKey, async () => {
-        const response = await fetch(swrKey)
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`)
-        }
-        const data = await response.json()
-        console.log('✅ SWR cached conversation data:', data?.messages?.length || 0, 'messages')
-        return data
-      }, { revalidate: false }) // Don't revalidate, just cache
-    } catch (error) {
-      console.log('⚠️ SWR prefetch failed (this is okay):', error)
+    // Clear any existing timeout for this conversation
+    const existingTimeout = hoverTimeouts.current.get(conversationId)
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
     }
+    
+    // Set a new timeout to prefetch after 150ms of stable hover
+    const timeout = setTimeout(async () => {
+      // Always prefetch the route (this is cheap and Next.js handles deduplication)
+      router.prefetch(`/${conversationId}`)
+      
+      // Check if we've already prefetched this conversation
+      if (prefetchedConversations.current.has(conversationId)) {
+        console.log('💾 Already prefetched:', conversationId, '- skipping fetch')
+        return
+      }
+      
+      console.log('🚀 Prefetching conversation (first time):', conversationId)
+      
+      const swrKey = `/api/conversations/${conversationId}?include_messages=true`
+      
+      try {
+        await mutate(swrKey, async () => {
+          const response = await fetch(swrKey)
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`)
+          }
+          const data = await response.json()
+          console.log('✅ SWR cached conversation data:', data?.messages?.length || 0, 'messages')
+          return data
+        }, { revalidate: false })
+        
+        // Mark as prefetched
+        prefetchedConversations.current.add(conversationId)
+      } catch (error) {
+        console.log('⚠️ SWR prefetch failed (this is okay):', error)
+      }
+      
+      // Clean up the timeout reference
+      hoverTimeouts.current.delete(conversationId)
+    }, 150)
+    
+    hoverTimeouts.current.set(conversationId, timeout)
   }, [router])
 
   // Memoize date formatting to avoid recalculating on every render
@@ -356,7 +386,14 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
               {workspaces.map((workspace) => (
                 <DropdownMenuItem
                   key={workspace.id}
-                  onClick={() => setSelectedWorkspace(workspace)}
+                  onClick={() => {
+                    // Only navigate if switching to a different workspace
+                    if (selectedWorkspace?.id !== workspace.id) {
+                      setSelectedWorkspace(workspace)
+                      // Navigate to chat home when switching workspaces to show empty chat screen
+                      router.push('/chat')
+                    }
+                  }}
                   className={selectedWorkspace?.id === workspace.id ? "bg-accent" : ""}
                 >
                   <Building className="mr-2 h-4 w-4" />

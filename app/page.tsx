@@ -25,6 +25,7 @@ export default function HomePage() {
 
   const handleNewConversation = () => {
     // Navigate to new conversation route
+    // Note: The sidebar will handle passing the workspace ID via URL params
     router.push('/new')
   }
 

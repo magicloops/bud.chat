@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/auth/auth-provider"
 import { AuthModal } from "@/components/auth/auth-modal"
 import ChatArea from "@/components/chat-area"
@@ -36,6 +36,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
   
   const { user, loading } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toggleLeftSidebar, toggleRightSidebar, leftSidebarOpen, rightSidebarOpen } = useChatLayout()
   
   // SWR for conversation data - only fetch for existing conversations
@@ -96,11 +97,24 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     if (conversationId === 'new') {
       const setupNewConversation = async () => {
         try {
+          // Check if workspace ID is provided in URL
+          const workspaceIdFromUrl = searchParams.get('workspace')
+          
           const response = await fetch('/api/workspaces')
           if (response.ok) {
             const workspaces = await response.json()
             if (workspaces.length > 0) {
-              setSelectedWorkspace(workspaces[0])
+              // Use workspace from URL if provided, otherwise use first workspace
+              let targetWorkspace = workspaces[0]
+              if (workspaceIdFromUrl) {
+                const urlWorkspace = workspaces.find(w => w.id === workspaceIdFromUrl)
+                if (urlWorkspace) {
+                  targetWorkspace = urlWorkspace
+                }
+              }
+              
+              console.log('📁 Setting up new conversation with workspace:', targetWorkspace.name)
+              setSelectedWorkspace(targetWorkspace)
               setOptimisticMessages([
                 {
                   id: 'greeting-message',
@@ -167,7 +181,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       console.log('🚫 No data after SWR completed')
       setIsLoading(false)
     }
-  }, [conversationId, user, conversationData, conversationError, swrLoading, router])
+  }, [conversationId, user, conversationData, conversationError, swrLoading, router, searchParams])
 
   const handleConversationSelect = (conversation: Conversation, workspace: Workspace) => {
     // Navigate to the conversation URL
@@ -197,18 +211,18 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     if (messages) {
       console.log('Using provided messages for conversation change:', messages.length)
       setOptimisticMessages(messages)
-      
-      // Create a temporary conversation object for the UI
-      const tempConversation = {
-        id: newConversationId,
-        title: title || 'New Chat',
-        workspace_id: workspaceId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        metadata: {}
-      }
-      setSelectedConversation(tempConversation)
     }
+    
+    // Always create a temporary conversation object for the UI when conversation changes
+    const tempConversation = {
+      id: newConversationId,
+      title: title || 'New Chat',
+      workspace_id: workspaceId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      metadata: {}
+    }
+    setSelectedConversation(tempConversation)
     
     // Update URL silently using history API
     if (typeof window !== 'undefined') {
