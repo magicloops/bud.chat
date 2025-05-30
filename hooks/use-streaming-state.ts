@@ -34,6 +34,7 @@ export function useStreamingState() {
   }, [])
   
   // Throttled version for high-frequency updates (every 50ms max)
+  /*
   const throttledUpdate = useRef<NodeJS.Timeout>()
   const throttledUpdateStreamingMessage = useCallback((content: string) => {
     if (throttledUpdate.current) {
@@ -44,6 +45,7 @@ export function useStreamingState() {
       updateStreamingMessage(content)
     }, 16) // ~60fps
   }, [updateStreamingMessage])
+  */
   
   const completeStreaming = useCallback((onComplete?: (finalMessage: StreamingMessage) => void) => {
     const currentStreamingMessage = streamingMessageRef.current
@@ -67,7 +69,7 @@ export function useStreamingState() {
     streamingMessage,
     isStreaming,
     startStreaming,
-    updateStreamingMessage: throttledUpdateStreamingMessage,
+    updateStreamingMessage,
     completeStreaming,
     cancelStreaming
   }

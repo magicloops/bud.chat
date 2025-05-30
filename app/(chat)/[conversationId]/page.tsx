@@ -300,6 +300,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }
     
     // Always create a temporary conversation object for the UI when conversation changes
+    /*
     const tempConversation = {
       id: newConversationId,
       title: title || 'New Chat',
@@ -309,6 +310,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       metadata: metadata || selectedConversation?.metadata || {}
     }
     setSelectedConversation(tempConversation)
+    */
     
     // Update URL silently using history API
     if (typeof window !== 'undefined') {
