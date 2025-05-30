@@ -122,6 +122,13 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // First, send the user message ID so frontend can update its local state
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'userMessage',
+            messageId: userMessageRecord.id,
+            content: userMessage
+          })}\n\n`))
+          
           // Call OpenAI Responses API
           const response = await openai.chat.completions.create({
             model: model,

@@ -24,7 +24,7 @@ import {
 } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuth } from "@/lib/auth/auth-provider"
-import { useWorkspaces } from "@/hooks/use-workspaces"
+import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { useConversations } from "@/hooks/use-conversations"
 import { useToast } from "@/hooks/use-toast"
 import { Database } from "@/lib/types/database"
@@ -137,7 +137,7 @@ interface ChatSidebarProps {
 }
 
 function ChatSidebar({ selectedConversationId, onConversationSelect, onConversationUpdate, onConversationChange }: ChatSidebarProps) {
-  const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
+  const { selectedWorkspace, setSelectedWorkspace, workspaces, loading: workspacesLoading, createWorkspace } = useWorkspaceContext()
   const [newWorkspaceName, setNewWorkspaceName] = useState("")
   const [showNewWorkspaceDialog, setShowNewWorkspaceDialog] = useState(false)
   const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null)
@@ -146,8 +146,6 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
   const { user, signOut } = useAuth()
   const { toast } = useToast()
   const router = useRouter()
-  
-  const { workspaces, loading: workspacesLoading, createWorkspace } = useWorkspaces()
   const { conversations, loading: conversationsLoading, createConversation, deleteConversation } = useConversations(
     selectedWorkspace?.id || null,
     onConversationUpdate
@@ -158,20 +156,11 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
     router.push(`/${conversationId}`)
   }, [router])
 
-  // Auto-select first workspace when workspaces load
-  useEffect(() => {
-    if (workspaces.length > 0 && !selectedWorkspace) {
-      setSelectedWorkspace(workspaces[0])
-    }
-  }, [workspaces, selectedWorkspace])
+  // Auto-select workspace when workspaces load
 
   const handleCreateConversation = () => {
-    // Navigate to new conversation route with workspace ID
-    if (selectedWorkspace) {
-      router.push(`/new?workspace=${selectedWorkspace.id}`)
-    } else {
-      router.push('/new')
-    }
+    // Navigate to new conversation route
+    router.push('/new')
   }
 
   const handleCreateWorkspace = async () => {
@@ -390,8 +379,8 @@ function ChatSidebar({ selectedConversationId, onConversationSelect, onConversat
                     // Only navigate if switching to a different workspace
                     if (selectedWorkspace?.id !== workspace.id) {
                       setSelectedWorkspace(workspace)
-                      // Navigate to chat home when switching workspaces to show empty chat screen
-                      router.push('/chat')
+                      // Navigate to home when switching workspaces to reset conversation
+                      router.push('/')
                     }
                   }}
                   className={selectedWorkspace?.id === workspace.id ? "bg-accent" : ""}

@@ -1,16 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/lib/auth/auth-provider"
+import { useWorkspaceContext } from "@/contexts/workspace-context"
 import { AuthModal } from "@/components/auth/auth-modal"
 import ChatArea from "@/components/chat-area"
 import { useChatLayout } from "@/contexts/chat-layout-context"
+import { useChatState } from "@/hooks/use-chat-state"
 import { Loader2 } from "lucide-react"
 import { Database } from "@/lib/types/database"
+import { createClient } from "@/lib/supabase/client"
 import useSWR from 'swr'
 
-type Workspace = Database['public']['Tables']['workspace']['Row']
 type Conversation = Database['public']['Tables']['conversation']['Row']
 
 // SWR fetcher function
@@ -28,19 +30,36 @@ interface ConversationPageProps {
 
 export default function ConversationPage({ params }: ConversationPageProps) {
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
-  const [selectedWorkspace, setSelectedWorkspace] = useState<Workspace | null>(null)
   const [optimisticMessages, setOptimisticMessages] = useState<any[]>([])
   const [conversationId, setConversationId] = useState<string>('')
   const [actualConversationId, setActualConversationId] = useState<string>('')
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   
   const { user, loading } = useAuth()
+  const { selectedWorkspace } = useWorkspaceContext()
   const router = useRouter()
   const searchParams = useSearchParams()
   const { toggleLeftSidebar, toggleRightSidebar, leftSidebarOpen, rightSidebarOpen } = useChatLayout()
   
-  // SWR for conversation data - only fetch for existing conversations
-  const shouldFetch = conversationId && conversationId !== 'new'
+  // Stabilize optimisticMessages to prevent unnecessary re-renders
+  const stableOptimisticMessages = useMemo(() => optimisticMessages, [JSON.stringify(optimisticMessages)])
+  
+  // Sync messages back to page state when they're updated
+  const handleMessagesUpdate = useCallback((updatedMessages: any[]) => {
+    setOptimisticMessages(updatedMessages)
+  }, [])
+  
+  // Stable chat state management
+  const chatState = useChatState({
+    conversationId: actualConversationId === 'new' ? undefined : actualConversationId,
+    optimisticMessages: stableOptimisticMessages,
+    workspaceId: selectedWorkspace?.id,
+    onMessagesUpdate: handleMessagesUpdate
+  })
+  
+  
+  // SWR for conversation data - only fetch for existing conversations (not temp forks)
+  const shouldFetch = conversationId && conversationId !== 'new' && !conversationId.startsWith('temp-fork-')
   const swrKey = shouldFetch ? `/api/conversations/${conversationId}?include_messages=true` : null
   const { data: conversationData, error: conversationError, isLoading: swrLoading } = useSWR(swrKey, fetcher, {
     revalidateOnFocus: false,
@@ -48,15 +67,6 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     dedupingInterval: 60000, // Cache for 1 minute
   })
   
-  console.log('🔍 SWR state:', { 
-    conversationId, 
-    shouldFetch, 
-    swrKey,
-    swrLoading, 
-    hasData: !!conversationData,
-    hasError: !!conversationError,
-    currentIsLoading: isLoading
-  })
 
   // Load conversation ID from params
   useEffect(() => {
@@ -93,38 +103,30 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       return
     }
 
-    // Handle new conversation setup
-    if (conversationId === 'new') {
+    // Handle new conversation setup - only if truly new (not forked/temp)
+    if (conversationId === 'new' && actualConversationId === 'new') {
       const setupNewConversation = async () => {
         try {
-          // Check if workspace ID is provided in URL
-          const workspaceIdFromUrl = searchParams.get('workspace')
-          
-          const response = await fetch('/api/workspaces')
-          if (response.ok) {
-            const workspaces = await response.json()
-            if (workspaces.length > 0) {
-              // Use workspace from URL if provided, otherwise use first workspace
-              let targetWorkspace = workspaces[0]
-              if (workspaceIdFromUrl) {
-                const urlWorkspace = workspaces.find(w => w.id === workspaceIdFromUrl)
-                if (urlWorkspace) {
-                  targetWorkspace = urlWorkspace
-                }
+          // Use workspace from context
+          if (selectedWorkspace) {
+            console.log('📁 Setting up new conversation with workspace:', selectedWorkspace.name, 'ID:', selectedWorkspace.id)
+            setSelectedConversation({
+              id: 'new',
+              title: 'New Chat',
+              workspace_id: selectedWorkspace.id,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              metadata: {}
+            })
+            setOptimisticMessages([
+              {
+                id: 'greeting-message',
+                role: 'assistant',
+                content: 'Hello! How can I assist you today?',
+                created_at: new Date().toISOString(),
+                metadata: { isGreeting: true }
               }
-              
-              console.log('📁 Setting up new conversation with workspace:', targetWorkspace.name)
-              setSelectedWorkspace(targetWorkspace)
-              setOptimisticMessages([
-                {
-                  id: 'greeting-message',
-                  role: 'assistant',
-                  content: 'Hello! How can I assist you today?',
-                  created_at: new Date().toISOString(),
-                  metadata: { isGreeting: true }
-                }
-              ])
-            }
+            ])
           }
         } catch (error) {
           console.error('Error setting up new conversation:', error)
@@ -137,15 +139,32 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }
 
     // Handle existing conversations with SWR data
-    console.log('🔄 SWR state:', { 
-      hasData: !!conversationData, 
-      hasError: !!conversationError, 
-      isLoading: swrLoading,
-      conversationId 
-    })
 
     if (conversationData && !conversationError) {
-      console.log('✅ Using SWR cached data:', conversationData.messages?.length || 0, 'messages')
+      console.log('🔄 SWR DATA OVERRIDE CHECK - Server:', conversationData.messages?.length || 0, 'Local:', optimisticMessages.length)
+      
+      // Don't override optimistic messages if we're in a temp/forked conversation
+      if (actualConversationId && actualConversationId.startsWith('temp-')) {
+        return
+      }
+      
+      // Don't override if we have more recent local messages (during streaming/optimistic updates)
+      if (optimisticMessages.length > (conversationData.messages?.length || 0)) {
+        console.log('🛡️ PRESERVING LOCAL MESSAGES - Local:', optimisticMessages.length, 'Server:', conversationData.messages?.length || 0)
+        // Still update conversation metadata but preserve messages
+        const loadedConversation: Conversation = {
+          id: conversationData.id,
+          title: conversationData.title,
+          metadata: conversationData.metadata,
+          created_at: conversationData.created_at,
+          updated_at: conversationData.updated_at,
+          workspace_id: conversationData.workspace?.id
+        }
+        setSelectedConversation(loadedConversation)
+        setIsLoading(false)
+        return
+      }
+      
       
       const loadedConversation: Conversation = {
         id: conversationData.id,
@@ -165,7 +184,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       }
 
       setSelectedConversation(loadedConversation)
-      setSelectedWorkspace(workspace)
+      console.log('🚨 SWR OVERRIDING LOCAL MESSAGES - Was:', optimisticMessages.length, 'Now:', conversationData.messages?.length || 0)
       setOptimisticMessages(conversationData.messages || [])
       setIsLoading(false)
     } else if (conversationError) {
@@ -182,6 +201,56 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       setIsLoading(false)
     }
   }, [conversationId, user, conversationData, conversationError, swrLoading, router, searchParams])
+
+  // Real-time subscription for current conversation updates (title changes, metadata, etc.)
+  useEffect(() => {
+    if (!actualConversationId || actualConversationId === 'new' || !user) return
+
+    console.log('🔔 Setting up real-time subscription for conversation:', actualConversationId)
+    const supabase = createClient()
+    
+    const channel = supabase
+      .channel(`conversation-updates-${actualConversationId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'conversation',
+          filter: `id=eq.${actualConversationId}`
+        },
+        (payload) => {
+          console.log('🔄 Real-time conversation update received:', {
+            id: payload.new.id,
+            title: payload.new.title,
+            metadata: payload.new.metadata,
+            updated_at: payload.new.updated_at
+          })
+          const updatedConversation = payload.new as Conversation
+          
+          // Update the selected conversation with new data (including title and metadata)
+          setSelectedConversation(prevConversation => {
+            if (!prevConversation || prevConversation.id !== updatedConversation.id) {
+              return updatedConversation
+            }
+            
+            // Merge the updates to preserve any local state
+            return {
+              ...prevConversation,
+              ...updatedConversation
+            }
+          })
+          
+          console.log('✅ Updated local conversation data with title:', updatedConversation.title)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      console.log('🔔 Cleaning up real-time subscription for conversation:', actualConversationId)
+      supabase.removeChannel(channel)
+    }
+  }, [actualConversationId, user]) // Use actualConversationId to track the real conversation ID
 
   const handleConversationSelect = (conversation: Conversation, workspace: Workspace) => {
     // Navigate to the conversation URL
@@ -200,17 +269,34 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     }
   }
 
-  const handleConversationChange = (newConversationId: string, workspaceId: string, title?: string, messages?: any[]) => {
-    console.log('handleConversationChange called with:', newConversationId, 'current conversationId:', conversationId)
+  const handleConversationChange = (newConversationId: string, workspaceId: string, title?: string, messages?: any[], metadata?: any) => {
+    console.log('🔄 CONVERSATION CHANGE:', conversationId, '->', newConversationId, 'Local messages:', optimisticMessages.length)
     
-    // Always use hot-swap to avoid interrupting streaming or causing UI refreshes
-    console.log('Hot-swapping conversation ID to:', newConversationId)
+    // Only update conversationId for real conversation IDs (not temp ones)
+    if (!newConversationId.startsWith('temp-')) {
+      setConversationId(newConversationId)
+    }
     setActualConversationId(newConversationId)
     
     // If messages are provided (e.g., from branching), use them immediately
     if (messages) {
-      console.log('Using provided messages for conversation change:', messages.length)
+      console.log('📨 Using provided messages for conversation change:', messages.length)
       setOptimisticMessages(messages)
+    } else {
+      // Only clear messages when switching to a completely different conversation
+      // Don't clear when transitioning from 'new' to real ID (same conversation)
+      const isTransitionFromNew = conversationId === 'new' || !conversationId
+      const isSwitchingConversations = !newConversationId.startsWith('temp-') && 
+                                       newConversationId !== 'new' && 
+                                       newConversationId !== conversationId && 
+                                       !isTransitionFromNew
+      
+      if (isSwitchingConversations) {
+        console.log('📭 Switching to different conversation - clearing optimistic messages')
+        setOptimisticMessages([])
+      } else {
+        console.log('📭 No messages provided but preserving existing state (transition or same conversation)')
+      }
     }
     
     // Always create a temporary conversation object for the UI when conversation changes
@@ -220,7 +306,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       workspace_id: workspaceId,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      metadata: {}
+      metadata: metadata || selectedConversation?.metadata || {}
     }
     setSelectedConversation(tempConversation)
     
@@ -235,7 +321,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     console.log('Streaming completed')
   }
 
-  if (loading || isLoading) {
+  // Only show loading if we don't have any messages and are actually loading data
+  const shouldShowLoading = (loading || isLoading) && optimisticMessages.length === 0
+  
+  if (shouldShowLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -247,9 +336,10 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     return <AuthModal />
   }
 
+  console.log('🎯 Rendering ChatArea with workspace ID:', selectedWorkspace?.id, 'workspace name:', selectedWorkspace?.name)
+  
   return (
     <ChatArea
-      key={conversationId === 'new' ? 'new-conversation' : actualConversationId}
       toggleLeftSidebar={toggleLeftSidebar}
       toggleRightSidebar={toggleRightSidebar}
       leftSidebarOpen={leftSidebarOpen}
@@ -258,7 +348,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
       currentWorkspaceId={selectedWorkspace?.id}
       conversationTitle={selectedConversation?.title || "New Chat"}
       conversationMetadata={selectedConversation?.metadata}
-      optimisticMessages={optimisticMessages}
+      chatState={chatState}
       onConversationChange={handleConversationChange}
       onConversationUpdate={updateSelectedConversation}
       onStreamingComplete={handleStreamingComplete}

@@ -1,6 +1,48 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
 
+// Sort messages by parent-child relationships for proper display order
+function sortMessagesByParentChain(messages: any[]): any[] {
+  if (messages.length === 0) return []
+  
+  try {
+    const messageMap = new Map(messages.map(msg => [msg.id, msg]))
+    const sorted: any[] = []
+    const visited = new Set<string>()
+    
+    // Find root messages (parent_id is null or undefined)
+    const rootMessages = messages.filter(msg => !msg.parent_id)
+    
+    // For each root, build the chain
+    for (const root of rootMessages) {
+      const chain = []
+      let current = root
+      const chainVisited = new Set<string>()
+      
+      while (current && !visited.has(current.id) && !chainVisited.has(current.id)) {
+        chainVisited.add(current.id)
+        visited.add(current.id)
+        chain.push(current)
+        
+        // Find child message (message with this message as parent)
+        const child = messages.find(msg => msg.parent_id === current.id)
+        current = child
+      }
+      
+      sorted.push(...chain)
+    }
+    
+    // Add any remaining messages that weren't part of chains (preserve original order)
+    const remaining = messages.filter(msg => !visited.has(msg.id))
+    sorted.push(...remaining)
+    
+    return sorted
+  } catch (error) {
+    console.warn('Error in server-side message sorting, falling back to original order:', error)
+    return messages
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -51,9 +93,12 @@ export async function GET(
         return new Response('Error fetching messages', { status: 500 })
       }
 
+      // Sort messages by parent-child relationships instead of timestamp
+      const sortedMessages = sortMessagesByParentChain(messages || [])
+
       return Response.json({
         ...conversation,
-        messages: messages || []
+        messages: sortedMessages
       })
     }
 

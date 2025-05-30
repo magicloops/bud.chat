@@ -2,6 +2,7 @@ import type React from "react"
 import "@/app/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/lib/auth/auth-provider"
+import { WorkspaceProvider } from "@/contexts/workspace-context"
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata = {
@@ -26,7 +27,9 @@ export default function RootLayout({
           storageKey="bud-chat-theme"
         >
           <AuthProvider>
-            {children}
+            <WorkspaceProvider>
+              {children}
+            </WorkspaceProvider>
             <Toaster />
           </AuthProvider>
         </ThemeProvider>
