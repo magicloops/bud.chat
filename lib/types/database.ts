@@ -9,194 +9,245 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      workspace: {
+      users: {
+        Row: {
+          id: string
+          email: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      workspaces: {
         Row: {
           id: string
           name: string
-          owner_id: string | null
+          owner_user_id: string | null
           created_at: string
-          updated_at: string
         }
         Insert: {
           id?: string
           name: string
-          owner_id?: string | null
+          owner_user_id?: string | null
           created_at?: string
-          updated_at?: string
         }
         Update: {
           id?: string
           name?: string
-          owner_id?: string | null
+          owner_user_id?: string | null
           created_at?: string
-          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "workspace_owner_id_fkey"
-            columns: ["owner_id"]
+            foreignKeyName: "workspaces_owner_user_id_fkey"
+            columns: ["owner_user_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
           }
         ]
       }
-      conversation: {
+      workspace_members: {
         Row: {
-          id: string
           workspace_id: string
-          title: string | null
-          created_at: string
-          updated_at: string
+          user_id: string
+          role: string
         }
         Insert: {
-          id?: string
           workspace_id: string
-          title?: string | null
-          created_at?: string
-          updated_at?: string
+          user_id: string
+          role?: string
         }
         Update: {
-          id?: string
           workspace_id?: string
-          title?: string | null
-          created_at?: string
-          updated_at?: string
+          user_id?: string
+          role?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conversation_workspace_id_fkey"
+            foreignKeyName: "workspace_members_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "workspace"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
-      message: {
-        Row: {
-          id: string
-          convo_id: string | null
-          parent_id: string | null
-          path: string
-          role: Database["public"]["Enums"]["role"]
-          content: string
-          metadata: Json
-          revision: number | null
-          supersedes_id: string | null
-          token_count: number | null
-          usage_ms: number | null
-          created_by: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          convo_id?: string | null
-          parent_id?: string | null
-          path: string
-          role: Database["public"]["Enums"]["role"]
-          content: string
-          metadata?: Json
-          revision?: number | null
-          supersedes_id?: string | null
-          token_count?: number | null
-          usage_ms?: number | null
-          created_by?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          convo_id?: string | null
-          parent_id?: string | null
-          path?: string
-          role?: Database["public"]["Enums"]["role"]
-          content?: string
-          metadata?: Json
-          revision?: number | null
-          supersedes_id?: string | null
-          token_count?: number | null
-          usage_ms?: number | null
-          created_by?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "message_convo_id_fkey"
-            columns: ["convo_id"]
-            isOneToOne: false
-            referencedRelation: "conversation"
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "message_parent_id_fkey"
-            columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "message"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_supersedes_id_fkey"
-            columns: ["supersedes_id"]
-            isOneToOne: false
-            referencedRelation: "message"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "message_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
-      usage: {
-        Row: {
-          id: string
-          user_id: string | null
-          message_id: string | null
-          model: string
-          prompt_tokens: number
-          completion_tokens: number
-          cost_cents: number
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          user_id?: string | null
-          message_id?: string | null
-          model: string
-          prompt_tokens?: number
-          completion_tokens?: number
-          cost_cents?: number
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string | null
-          message_id?: string | null
-          model?: string
-          prompt_tokens?: number
-          completion_tokens?: number
-          cost_cents?: number
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "usage_user_id_fkey"
+            foreignKeyName: "workspace_members_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id"]
+          }
+        ]
+      }
+      buds: {
+        Row: {
+          id: string
+          owner_user_id: string | null
+          workspace_id: string | null
+          name: string
+          default_json: Json
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          owner_user_id?: string | null
+          workspace_id?: string | null
+          name: string
+          default_json: Json
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          owner_user_id?: string | null
+          workspace_id?: string | null
+          name?: string
+          default_json?: Json
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "buds_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "usage_message_id_fkey"
+            foreignKeyName: "buds_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      conversations: {
+        Row: {
+          id: string
+          workspace_id: string
+          root_msg_id: string | null
+          bud_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          root_msg_id?: string | null
+          bud_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          workspace_id?: string
+          root_msg_id?: string | null
+          bud_id?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_bud_id_fkey"
+            columns: ["bud_id"]
+            isOneToOne: false
+            referencedRelation: "buds"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      messages: {
+        Row: {
+          id: string
+          conversation_id: string
+          order_key: string
+          role: Database["public"]["Enums"]["role"]
+          content: string
+          json_meta: Json
+          version: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          order_key: string
+          role: Database["public"]["Enums"]["role"]
+          content: string
+          json_meta?: Json
+          version?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          order_key?: string
+          role?: Database["public"]["Enums"]["role"]
+          content?: string
+          json_meta?: Json
+          version?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      message_revisions: {
+        Row: {
+          id: string
+          message_id: string
+          rev: number
+          role: string | null
+          content: string | null
+          meta: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          rev: number
+          role?: string | null
+          content?: string | null
+          meta?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          rev?: number
+          role?: string | null
+          content?: string | null
+          meta?: Json | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_revisions_message_id_fkey"
             columns: ["message_id"]
             isOneToOne: false
-            referencedRelation: "message"
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           }
         ]
@@ -209,7 +260,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      role: "system" | "user" | "assistant" | "tool"
+      role: "system" | "user" | "assistant"
     }
     CompositeTypes: {
       [_ in never]: never

@@ -18,16 +18,14 @@ export async function GET(request: NextRequest) {
     }
 
     const { data: conversations, error } = await supabase
-      .from('conversation')
+      .from('conversations')
       .select(`
         id,
-        title,
         created_at,
-        updated_at,
         workspace_id
       `)
       .eq('workspace_id', workspaceId)
-      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false })
 
     if (error) {
       return new Response('Error fetching conversations', { status: 500 })
@@ -55,27 +53,26 @@ export async function POST(request: NextRequest) {
       return new Response('workspaceId is required', { status: 400 })
     }
 
-    // Verify user owns the workspace
-    const { data: workspace, error: workspaceError } = await supabase
-      .from('workspace')
-      .select('id, owner_id')
-      .eq('id', workspaceId)
-      .eq('owner_id', user.id)
+    // Verify user is a member of the workspace
+    const { data: membership, error: membershipError } = await supabase
+      .from('workspace_members')
+      .select('workspace_id, role')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', user.id)
       .single()
 
-    if (workspaceError || !workspace) {
+    if (membershipError || !membership) {
       return new Response('Workspace not found or access denied', { status: 404 })
     }
 
     // Create conversation
     const conversationData = {
-      workspace_id: workspaceId,
-      title: title || 'New Chat'
+      workspace_id: workspaceId
     }
     console.log('Creating conversation with data:', conversationData)
     
     const { data: conversation, error: convError } = await supabase
-      .from('conversation')
+      .from('conversations')
       .insert(conversationData)
       .select()
       .single()
@@ -89,13 +86,13 @@ export async function POST(request: NextRequest) {
     // Add system message if provided
     if (systemPrompt) {
       const { error: systemMsgError } = await supabase
-        .from('message')
+        .from('messages')
         .insert({
-          convo_id: conversation.id,
-          path: '1',
+          conversation_id: conversation.id,
+          order_key: 'a0',
           role: 'system',
           content: systemPrompt,
-          created_by: user.id
+          json_meta: {}
         })
 
       if (systemMsgError) {
@@ -106,31 +103,28 @@ export async function POST(request: NextRequest) {
 
     // Add initial messages if provided
     if (initialMessages && initialMessages.length > 0) {
-      let pathCounter = 1
-      
-      // If we have a system prompt, messages start from path 2
-      if (systemPrompt) {
-        pathCounter = 2
-      }
+      let lastOrderKey = systemPrompt ? 'a0' : undefined
       
       for (const message of initialMessages) {
+        const { generateKeyAfter } = await import('fractional-indexing')
+        const orderKey = generateKeyAfter(lastOrderKey)
+        
         const { error: messageError } = await supabase
-          .from('message')
+          .from('messages')
           .insert({
-            convo_id: conversation.id,
-            path: pathCounter.toString(),
+            conversation_id: conversation.id,
+            order_key: orderKey,
             role: message.role,
             content: message.content,
-            metadata: message.metadata || {},
-            created_by: user.id
+            json_meta: message.metadata || {}
           })
 
         if (messageError) {
-          console.error(`Error creating initial message ${pathCounter}:`, messageError)
+          console.error(`Error creating initial message:`, messageError)
           // Don't fail the conversation creation for this
         }
         
-        pathCounter++
+        lastOrderKey = orderKey
       }
     }
 
