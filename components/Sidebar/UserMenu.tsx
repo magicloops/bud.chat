@@ -1,0 +1,83 @@
+'use client'
+
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { 
+  User, 
+  Settings, 
+  LogOut, 
+  ChevronUp 
+} from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+
+export function UserMenu() {
+  const router = useRouter()
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleSignOut = async () => {
+    try {
+      setIsLoading(true)
+      const supabase = createClient()
+      await supabase.auth.signOut()
+      router.push('/auth')
+    } catch (error) {
+      console.error('Error signing out:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSettings = () => {
+    // TODO: Implement settings
+    console.log('Open settings')
+  }
+
+  const handleProfile = () => {
+    // TODO: Implement profile
+    console.log('Open profile')
+  }
+
+  return (
+    <div className="flex items-center justify-between">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" className="w-full justify-between p-2">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
+                <User className="h-3 w-3 text-primary-foreground" />
+              </div>
+              <span className="text-sm">User</span>
+            </div>
+            <ChevronUp className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onClick={handleProfile}>
+            <User className="h-4 w-4 mr-2" />
+            Profile
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleSettings}>
+            <Settings className="h-4 w-4 mr-2" />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={handleSignOut} disabled={isLoading}>
+            <LogOut className="h-4 w-4 mr-2" />
+            {isLoading ? 'Signing out...' : 'Sign out'}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      
+      <ThemeToggle />
+    </div>
+  )
+}

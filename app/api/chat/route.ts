@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { Database } from '@/lib/types/database'
 import OpenAI from 'openai'
 import { NextRequest } from 'next/server'
-import { generateKeyAfter } from 'fractional-indexing'
+import { generateKeyBetween } from 'fractional-indexing'
 
 type Message = Database['public']['Tables']['messages']['Row']
 
@@ -89,9 +89,9 @@ export async function POST(request: NextRequest) {
     })
 
     // Generate next order keys using fractional indexing
-    const lastOrderKey = messages?.length ? messages[messages.length - 1].order_key : undefined
-    const nextUserOrderKey = generateKeyAfter(lastOrderKey)
-    const nextAssistantOrderKey = generateKeyAfter(nextUserOrderKey)
+    const lastOrderKey = messages?.length ? messages[messages.length - 1].order_key : null
+    const nextUserOrderKey = generateKeyBetween(lastOrderKey, null)
+    const nextAssistantOrderKey = generateKeyBetween(nextUserOrderKey, null)
 
     // Insert user message
     const { data: userMessageRecord, error: userMsgError } = await supabase

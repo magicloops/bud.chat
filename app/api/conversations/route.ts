@@ -17,6 +17,19 @@ export async function GET(request: NextRequest) {
       return new Response('workspace_id is required', { status: 400 })
     }
 
+    // Check if user has access to workspace through membership
+    const { data: membership, error: membershipError } = await supabase
+      .from('workspace_members')
+      .select('workspace_id, role')
+      .eq('workspace_id', workspaceId)
+      .eq('user_id', user.id)
+      .single()
+
+    if (membershipError || !membership) {
+      console.error('Membership check failed:', membershipError)
+      return new Response('Workspace not found or access denied', { status: 404 })
+    }
+
     const { data: conversations, error } = await supabase
       .from('conversations')
       .select(`
@@ -28,12 +41,14 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (error) {
-      return new Response('Error fetching conversations', { status: 500 })
+      console.error('Error fetching conversations:', error)
+      return new Response(`Error fetching conversations: ${error.message}`, { status: 500 })
     }
 
     return Response.json(conversations)
   } catch (error) {
-    return new Response('Internal server error', { status: 500 })
+    console.error('Error in conversations GET:', error)
+    return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 })
   }
 }
 
@@ -106,8 +121,8 @@ export async function POST(request: NextRequest) {
       let lastOrderKey = systemPrompt ? 'a0' : undefined
       
       for (const message of initialMessages) {
-        const { generateKeyAfter } = await import('fractional-indexing')
-        const orderKey = generateKeyAfter(lastOrderKey)
+        const { generateKeyBetween } = await import('fractional-indexing')
+        const orderKey = generateKeyBetween(lastOrderKey, null)
         
         const { error: messageError } = await supabase
           .from('messages')

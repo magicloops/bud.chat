@@ -36,7 +36,7 @@ lib/
   types.ts              # shared DTO & store types
 
 state/
-  chatStore.ts          # Zustand/Valtio + immer
+  chatStore.ts          # Zustand 
   queryClient.ts        # TanStack Query singleton
 
 components/

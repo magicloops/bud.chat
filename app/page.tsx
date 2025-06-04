@@ -1,37 +1,28 @@
-"use client"
+'use client'
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/lib/auth/auth-provider"
-import { AuthModal } from "@/components/auth/auth-modal"
-import ChatSidebar from "@/components/chat-sidebar"
-import { ModelProvider } from "@/contexts/model-context"
-import { Loader2, MessageSquare, Plus } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Database } from "@/lib/types/database"
-
-type Workspace = Database['public']['Tables']['workspace']['Row']
-type Conversation = Database['public']['Tables']['conversation']['Row']
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/lib/auth/auth-provider'
+import { AuthModal } from '@/components/auth/auth-modal'
+import { Sidebar } from '@/components/Sidebar'
+import { useUIState, useSetSelectedConversation, useSetSidebarOpen } from '@/state/chatStore'
+import { Button } from '@/components/ui/button'
+import { MessageSquare, Plus } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 export default function HomePage() {
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const { user, loading } = useAuth()
   const router = useRouter()
-
-  const handleConversationSelect = (conversation: Conversation, workspace: Workspace) => {
-    // Navigate to the selected conversation
-    router.push(`/${conversation.id}`)
-  }
+  const uiState = useUIState()
+  const setSelectedConversation = useSetSelectedConversation()
+  const setSidebarOpen = useSetSidebarOpen()
 
   const handleNewConversation = () => {
-    // Navigate to new conversation route
-    // Note: The sidebar will handle passing the workspace ID via URL params
+    setSelectedConversation(null)
     router.push('/new')
   }
 
-  const handleConversationChange = (conversationId: string, workspaceId: string, title?: string, messages?: any[]) => {
-    // Navigate to the new conversation
-    router.push(`/${conversationId}`)
+  const toggleSidebar = () => {
+    setSidebarOpen(!uiState.sidebarOpen)
   }
 
   if (loading) {
@@ -47,52 +38,56 @@ export default function HomePage() {
   }
 
   return (
-    <ModelProvider>
-      <div className="flex h-screen w-full bg-background overflow-hidden">
-        
-        {/* Left Sidebar */}
-        <div
-          className={`transition-all duration-300 ease-in-out ${
-            leftSidebarOpen ? "w-60 min-w-0 opacity-100" : "w-0 opacity-0"
-          } overflow-hidden`}
-        >
-          <div className={`w-full h-full ${!leftSidebarOpen && "invisible"}`}>
-            <ChatSidebar 
-              selectedConversationId={undefined}
-              onConversationSelect={handleConversationSelect}
-              onConversationUpdate={() => {}}
-              onConversationChange={handleConversationChange}
-            />
+    <div className="flex h-screen w-full bg-background overflow-hidden">
+      {/* Sidebar */}
+      <div className={`
+        transition-all duration-300 ease-in-out 
+        ${uiState.sidebarOpen ? 'opacity-100' : 'opacity-0 w-0'}
+        overflow-hidden
+      `}>
+        <Sidebar className="h-full" />
+      </div>
+
+      {/* Main Welcome Area */}
+      <div className="flex-1 flex flex-col border-l min-w-0">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-8 w-8" 
+              onClick={toggleSidebar}
+            >
+              <MessageSquare className="h-5 w-5" />
+            </Button>
+            <span className="font-medium">Welcome to bud.chat</span>
           </div>
         </div>
 
-        {/* Main Welcome Area */}
-        <div className="flex-1 flex flex-col border-l border-r min-w-0">
-          <div className="flex items-center justify-between p-4 border-b">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}>
-                <span className="sr-only">Toggle sidebar</span>
-                <MessageSquare className="h-5 w-5" />
-              </Button>
-              <span className="font-medium">Welcome to Bud Chat</span>
-            </div>
-          </div>
-
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-md mx-auto p-8">
-              <MessageSquare className="h-16 w-16 mx-auto mb-6 text-muted-foreground" />
-              <h1 className="text-2xl font-semibold mb-4">Start a new conversation</h1>
-              <p className="text-muted-foreground mb-8">
-                Select a conversation from the sidebar or start a new one to begin chatting with AI.
-              </p>
-              <Button onClick={handleNewConversation} className="gap-2">
+        {/* Welcome Content */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-8">
+            <MessageSquare className="h-16 w-16 mx-auto mb-6 text-muted-foreground" />
+            <h1 className="text-2xl font-semibold mb-4">Start a new conversation</h1>
+            <p className="text-muted-foreground mb-8">
+              Begin chatting with AI and explore ideas through branching conversations. 
+              Your conversations are automatically saved and organized by workspace.
+            </p>
+            
+            <div className="space-y-4">
+              <Button onClick={handleNewConversation} className="gap-2" size="lg">
                 <Plus className="h-4 w-4" />
                 New Conversation
               </Button>
+              
+              <div className="text-sm text-muted-foreground/80">
+                <p>💡 Pro tip: You can branch any conversation to explore different directions</p>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </ModelProvider>
+    </div>
   )
 }
