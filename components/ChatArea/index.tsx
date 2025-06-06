@@ -38,7 +38,8 @@ export function ChatArea({ conversationId, workspaceId, className }: ChatAreaPro
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header - could add conversation title, status, etc. */}
       <div className="flex-shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-between p-4">
+        <div className="flex items-center justify-center p-4 relative">
+          {/* Centered title */}
           <div>
             {isNewConversation ? (
               <h1 className="text-lg font-semibold">New Conversation</h1>
@@ -49,8 +50,8 @@ export function ChatArea({ conversationId, workspaceId, className }: ChatAreaPro
             )}
           </div>
           
-          {/* Status indicators */}
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {/* Status indicators - positioned absolutely to the right */}
+          <div className="absolute right-4 flex items-center gap-2 text-sm text-muted-foreground">
             {chat?.streaming && (
               <div className="flex items-center gap-1">
                 <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />

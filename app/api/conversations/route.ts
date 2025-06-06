@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const workspaceId = searchParams.get('workspace_id')
+    const includeFirstMessage = searchParams.get('include_first_message') === 'true'
 
     if (!workspaceId) {
       return new Response('workspace_id is required', { status: 400 })
@@ -30,19 +31,61 @@ export async function GET(request: NextRequest) {
       return new Response('Workspace not found or access denied', { status: 404 })
     }
 
-    const { data: conversations, error } = await supabase
-      .from('conversations')
-      .select(`
-        id,
-        created_at,
-        workspace_id
-      `)
-      .eq('workspace_id', workspaceId)
-      .order('created_at', { ascending: false })
+    let conversations
+    if (includeFirstMessage) {
+      // Get conversations with their first user message for titles
+      const { data: conversationsData, error } = await supabase
+        .from('conversations')
+        .select(`
+          id,
+          created_at,
+          workspace_id
+        `)
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('Error fetching conversations:', error)
-      return new Response(`Error fetching conversations: ${error.message}`, { status: 500 })
+      if (error) {
+        console.error('Error fetching conversations:', error)
+        return new Response(`Error fetching conversations: ${error.message}`, { status: 500 })
+      }
+
+      // For each conversation, get the first user message
+      const conversationsWithMessages = await Promise.all(
+        conversationsData.map(async (conv) => {
+          const { data: firstMessage } = await supabase
+            .from('messages')
+            .select('content, role')
+            .eq('conversation_id', conv.id)
+            .eq('role', 'user')
+            .order('order_key', { ascending: true })
+            .limit(1)
+            .single()
+
+          return {
+            ...conv,
+            first_message: firstMessage
+          }
+        })
+      )
+
+      conversations = conversationsWithMessages
+    } else {
+      const { data: conversationsData, error } = await supabase
+        .from('conversations')
+        .select(`
+          id,
+          created_at,
+          workspace_id
+        `)
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error fetching conversations:', error)
+        return new Response(`Error fetching conversations: ${error.message}`, { status: 500 })
+      }
+
+      conversations = conversationsData
     }
 
     return Response.json(conversations)

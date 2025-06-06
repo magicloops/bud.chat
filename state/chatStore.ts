@@ -57,6 +57,7 @@ interface ChatStore {
   setSelectedConversation: (id: ConversationId | null) => void
   setSelectedWorkspace: (id: WorkspaceId | null) => void
   setSidebarOpen: (open: boolean) => void
+  setRightSidebarOpen: (open: boolean) => void
   setComposerDraft: (draft: string) => void
   setComposerSubmitting: (submitting: boolean) => void
   
@@ -72,6 +73,7 @@ export const useChatStore = create<ChatStore>()(
         chats: {},
         ui: {
           sidebarOpen: true,
+          rightSidebarOpen: false,
           selectedWorkspace: null,
           selectedConversation: null,
           composer: {
@@ -445,6 +447,10 @@ export const useChatStore = create<ChatStore>()(
         setSidebarOpen: (open) => set((state) => {
           state.ui.sidebarOpen = open
         }),
+
+        setRightSidebarOpen: (open) => set((state) => {
+          state.ui.rightSidebarOpen = open
+        }),
         
         setComposerDraft: (draft) => set((state) => {
           state.ui.composer.draft = draft
@@ -469,7 +475,9 @@ export const useChatStore = create<ChatStore>()(
         partialize: (state) => ({
           ui: {
             selectedWorkspace: state.ui.selectedWorkspace,
-            sidebarOpen: state.ui.sidebarOpen,
+            // Don't persist sidebar states for faster responsiveness
+            // sidebarOpen: state.ui.sidebarOpen,
+            // rightSidebarOpen: state.ui.rightSidebarOpen,
             composer: {
               draft: state.ui.composer.draft,
               isSubmitting: false, // Don't persist submitting state
@@ -520,6 +528,7 @@ export const useChatError = (messageId: MessageId) =>
 export const useSetSelectedConversation = () => useChatStore((state) => state.setSelectedConversation)
 export const useSetSelectedWorkspace = () => useChatStore((state) => state.setSelectedWorkspace)
 export const useSetSidebarOpen = () => useChatStore((state) => state.setSidebarOpen)
+export const useSetRightSidebarOpen = () => useChatStore((state) => state.setRightSidebarOpen)
 export const useSetComposerDraft = () => useChatStore((state) => state.setComposerDraft)
 export const useSetComposerSubmitting = () => useChatStore((state) => state.setComposerSubmitting)
 export const useSendOptimisticMessage = () => useChatStore((state) => state.sendOptimisticMessage)

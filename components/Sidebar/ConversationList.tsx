@@ -51,7 +51,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       try {
         setConversationsLoading(workspaceId, true)
         
-        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}`)
+        // Include first message in the query to get conversation titles
+        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}&include_first_message=true`)
         if (response.ok) {
           const conversationsData = await response.json()
           setConversations(workspaceId, conversationsData)
@@ -134,17 +135,27 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   }
 
   return (
-    <div className="p-2 space-y-1">
+    <div className="p-2 space-y-1 min-h-0 w-full max-w-full">
       {conversations.map((conversation) => {
         const isSelected = uiState.selectedConversation === conversation.id
         const createdAt = new Date(conversation.created_at)
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true })
         
+        // Get title from first message content or fallback
+        const getConversationTitle = () => {
+          if (conversation.first_message?.content) {
+            // Truncate to first 50 characters for title
+            const content = conversation.first_message.content.slice(0, 50)
+            return content.length === 50 ? content + '...' : content
+          }
+          return `Chat ${new Date(conversation.created_at).toLocaleDateString()}`
+        }
+        
         return (
           <div
             key={conversation.id}
             className={cn(
-              "group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50",
+              "group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden",
               isSelected && "bg-muted"
             )}
             onClick={() => handleConversationSelect(conversation.id)}
@@ -152,12 +163,11 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium truncate">
-                  {/* TODO: Get conversation title from first message */}
-                  Conversation
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium truncate flex-1 min-w-0">
+                  {getConversationTitle()}
                 </p>
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button

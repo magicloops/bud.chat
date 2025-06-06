@@ -8,11 +8,15 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { ChevronDown, ChevronRight, HelpCircle, Leaf, Palette } from "lucide-react"
+import { ChevronDown, ChevronRight, HelpCircle, Leaf, Palette, PanelRightClose } from "lucide-react"
 import { useModel } from "@/contexts/model-context"
 import { useToast } from "@/hooks/use-toast"
 
-export default function SettingsPanel() {
+interface SettingsPanelProps {
+  onClose: () => void
+}
+
+export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [budSettingsOpen, setBudSettingsOpen] = useState(true)
   const [chatSettingsOpen, setChatSettingsOpen] = useState(true)
   const [helpersOpen, setHelpersOpen] = useState(true)
@@ -130,6 +134,21 @@ export default function SettingsPanel() {
 
   return (
     <div className="h-full bg-background border-l overflow-hidden flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="h-8 w-8"
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </Button>
+          <h2 className="font-semibold text-lg">Settings</h2>
+        </div>
+      </div>
+
       <ScrollArea className="h-full flex-1 overflow-auto">
         <div className="p-4 space-y-6">
           {/* Bud Settings */}

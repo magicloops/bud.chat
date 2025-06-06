@@ -837,23 +837,20 @@ export default function ChatArea({
     <>
       {/* Chat Header */}
       <div className="flex items-center justify-between p-4 border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleLeftSidebar}>
-            <span className="sr-only">Toggle left sidebar</span>
-            <PanelLeftClose
-              className={`h-5 w-5 transition-transform duration-300 ${!leftSidebarOpen ? "rotate-180" : ""}`}
-            />
-          </Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleLeftSidebar}>
+          <span className="sr-only">Toggle left sidebar</span>
+          <PanelLeftClose
+            className={`h-5 w-5 transition-transform duration-300 ${!leftSidebarOpen ? "rotate-180" : ""}`}
+          />
+        </Button>
+        
+        <div className="flex items-center gap-2 absolute left-1/2 transform -translate-x-1/2">
           <span className="font-medium">{conversationTitle}</span>
           <span className="text-muted-foreground">|</span>
           <span className="text-muted-foreground">{selectedModel}</span>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleRightSidebar}>
-          <span className="sr-only">Toggle right sidebar</span>
-          <PanelRightClose
-            className={`h-5 w-5 transition-transform duration-300 ${!rightSidebarOpen ? "rotate-180" : ""}`}
-          />
-        </Button>
+        
+        <div className="w-8" /> {/* Spacer to balance the layout */}
       </div>
 
       {/* Chat Messages */}

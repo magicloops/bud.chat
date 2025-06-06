@@ -77,6 +77,7 @@ export interface BudConfig {
 // UI State
 export interface UIState {
   sidebarOpen: boolean
+  rightSidebarOpen: boolean
   selectedWorkspace: WorkspaceId | null
   selectedConversation: ConversationId | null
   composer: {

@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConversationList } from './ConversationList'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import { UserMenu } from './UserMenu'
-import { useUIState, useSetSelectedWorkspace, useSetSelectedConversation, useSetSidebarOpen } from '@/state/chatStore'
+import { useUIState, useSetSelectedWorkspace, useSetSelectedConversation } from '@/state/chatStore'
 import { 
   useWorkspaces, 
   useSetWorkspaces, 
@@ -18,19 +18,18 @@ import { useRouter } from 'next/navigation'
 
 interface SidebarProps {
   className?: string
+  onClose: () => void
 }
 
-export function Sidebar({ className }: SidebarProps) {
+export function Sidebar({ className, onClose }: SidebarProps) {
   const router = useRouter()
   const uiState = useUIState()
   const setSelectedWorkspace = useSetSelectedWorkspace()
   const setSelectedConversation = useSetSelectedConversation()
-  const setSidebarOpen = useSetSidebarOpen()
   const setWorkspaces = useSetWorkspaces()
   const setWorkspacesLoading = useSetWorkspacesLoading()
   const workspaces = useWorkspaces()
   
-  const [isCollapsed, setIsCollapsed] = useState(false)
   const hasLoadedWorkspaces = useRef(false)
 
   // Load workspaces on mount
@@ -88,34 +87,15 @@ export function Sidebar({ className }: SidebarProps) {
   }
 
   const toggleSidebar = () => {
-    const newState = !uiState.sidebarOpen
-    setIsCollapsed(newState)
-    setSidebarOpen(newState)
+    onClose()
   }
 
   const selectedWorkspace = workspaces.find(w => w.id === uiState.selectedWorkspace)
 
-  if (isCollapsed) {
-    return (
-      <div className={cn("w-12 border-r bg-muted/30 flex flex-col", className)}>
-        <div className="p-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleSidebar}
-            className="w-8 h-8"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className={cn("w-80 border-r bg-muted/30 flex flex-col", className)}>
+    <div className={cn("w-60 border-r bg-muted/30 flex flex-col h-full", className)}>
       {/* Header */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
           <h1 className="font-semibold text-lg">bud.chat</h1>
           <div className="flex gap-1">
@@ -142,21 +122,23 @@ export function Sidebar({ className }: SidebarProps) {
         <WorkspaceSelector />
       </div>
 
-      {/* Conversations */}
+      {/* Conversations - Constrained scroll area */}
       <div className="flex-1 min-h-0">
-        <ScrollArea className="h-full">
-          {selectedWorkspace ? (
+        {selectedWorkspace ? (
+          <ScrollArea className="h-full w-full max-w-full">
             <ConversationList workspaceId={selectedWorkspace.id} />
-          ) : (
+          </ScrollArea>
+        ) : (
+          <div className="flex items-center justify-center h-full">
             <div className="p-4 text-center text-muted-foreground">
               <p>Select a workspace to view conversations</p>
             </div>
-          )}
-        </ScrollArea>
+          </div>
+        )}
       </div>
 
-      {/* Footer */}
-      <div className="p-4 border-t">
+      {/* Footer - Always visible at bottom */}
+      <div className="p-4 border-t flex-shrink-0 mt-auto">
         <UserMenu />
       </div>
     </div>
