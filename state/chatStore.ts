@@ -295,7 +295,7 @@ export const useChatStore = create<ChatStore>()(
         },
         
         branchOptimisticChat: ({ originalConversationId, fromMessageId, workspaceId }) => {
-          const newChatId = generateTempId()
+          const newChatId = `temp-branch-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
           const originalChat = get().chats[originalConversationId]
           
           if (!originalChat) {

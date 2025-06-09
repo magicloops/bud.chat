@@ -75,12 +75,12 @@ export function ChatComposer({
       
       // If no conversation ID, we need to create a new conversation first
       if (!actualConversationId) {
-        const { userMessageId } = createOptimisticChat({
+        const { chatId, userMessageId } = createOptimisticChat({
           workspaceId,
           initialMessage: messageContent,
         })
         
-        actualConversationId = getChat(uiState.selectedConversation!)?.meta.id
+        actualConversationId = chatId
         
         if (!actualConversationId) {
           throw new Error('Failed to create conversation')
@@ -96,19 +96,12 @@ export function ChatComposer({
           throw new Error(result.error || 'Failed to create conversation')
         }
         
-        // Update optimistic conversation with real ID
-        updateChatMeta(actualConversationId, {
+        // Migrate the optimistic conversation to the real ID
+        const migrateConversation = useChatStore.getState().migrateConversation
+        migrateConversation(actualConversationId, result.data!.conversationId, {
           id: result.data!.conversationId,
           isOptimistic: false,
         })
-        
-        // Update optimistic user message with real ID
-        if (result.data!.userMessageId && userMessageId) {
-          updateMessage(actualConversationId, userMessageId, {
-            id: result.data!.userMessageId,
-            isOptimistic: false,
-          } as any)
-        }
         
         // Use the real conversation ID for streaming
         actualConversationId = result.data!.conversationId

@@ -41,28 +41,47 @@ export interface BranchChatResponse {
  */
 export async function createChat(args: CreateChatArgs): Promise<ActionResponse<CreateChatResponse>> {
   try {
+    console.log('🎯 createChat called with args:', args)
     const supabase = await createClient()
     
     const { data: { user }, error: authError } = await supabase.auth.getUser()
+    console.log('🎯 Auth check:', { user: !!user, authError: !!authError })
     if (authError || !user) {
       return { success: false, error: 'Unauthorized' }
     }
 
     const { workspaceId, budId, systemPrompt, initialMessage } = args
 
-    // Verify workspace membership
-    const { data: membership } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', workspaceId)
-      .eq('user_id', user.id)
+    // Verify workspace membership  
+    console.log('🎯 Checking workspace membership for:', workspaceId)
+    const { data: workspace, error: workspaceError } = await supabase
+      .from('workspaces')
+      .select(`
+        id,
+        workspace_members!workspace_members_workspace_id_fkey (
+          user_id,
+          role
+        )
+      `)
+      .eq('id', workspaceId)
       .single()
 
-    if (!membership) {
+    console.log('🎯 Workspace check result:', { 
+      workspace: !!workspace, 
+      workspaceError: workspaceError?.message,
+      members: workspace?.workspace_members?.length 
+    })
+
+    const isMember = workspace?.workspace_members?.some(
+      (member: any) => member.user_id === user.id
+    )
+    console.log('🎯 Is member?', isMember)
+    if (!isMember) {
       return { success: false, error: 'Access denied' }
     }
 
     // Create conversation
+    console.log('🎯 Creating conversation...')
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .insert({
@@ -72,8 +91,15 @@ export async function createChat(args: CreateChatArgs): Promise<ActionResponse<C
       .select()
       .single()
 
+    console.log('🎯 Conversation creation result:', { 
+      conversation: !!conversation, 
+      convError: convError?.message,
+      convErrorCode: convError?.code
+    })
+
     if (convError || !conversation) {
-      return { success: false, error: 'Failed to create conversation' }
+      console.log('🎯 Full conversation error:', convError)
+      return { success: false, error: `Failed to create conversation: ${convError?.message || 'Unknown error'}` }
     }
 
     let userMessageId: MessageId | undefined

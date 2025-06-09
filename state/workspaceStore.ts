@@ -304,6 +304,7 @@ export const useWorkspaceLoading = (workspaceId: WorkspaceId) =>
 // Individual action hooks - the proper Zustand way
 export const useSetWorkspaces = () => useWorkspaceStore((state) => state.setWorkspaces)
 export const useSetConversations = () => useWorkspaceStore((state) => state.setConversations)
+export const useAddConversation = () => useWorkspaceStore((state) => state.addConversation)
 export const useRemoveConversation = () => useWorkspaceStore((state) => state.removeConversation)
 export const useSetWorkspacesLoading = () => useWorkspaceStore((state) => state.setWorkspacesLoading)
 export const useSetConversationsLoading = () => useWorkspaceStore((state) => state.setConversationsLoading)

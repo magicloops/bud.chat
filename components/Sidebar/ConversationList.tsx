@@ -152,8 +152,6 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
               isSelected && "bg-muted"
             )}
           >
-            <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-            
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium truncate flex-1 min-w-0">

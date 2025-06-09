@@ -5,21 +5,28 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  console.log('🍴 Fork route hit!')
   try {
     const { id: originalConversationId } = await params
+    console.log('🍴 Original conversation ID:', originalConversationId)
     const supabase = await createClient()
     
     const { data: { user }, error: authError } = await supabase.auth.getUser()
+    console.log('🍴 Auth check:', { user: !!user, authError: !!authError })
     if (authError || !user) {
+      console.log('🍴 Returning 401 Unauthorized')
       return new Response('Unauthorized', { status: 401 })
     }
 
     const body = await request.json()
+    console.log('🍴 Request body:', body)
     const { forkFromMessageId, title } = body
 
     if (!forkFromMessageId) {
+      console.log('🍴 Missing forkFromMessageId')
       return new Response('forkFromMessageId is required', { status: 400 })
     }
+    console.log('🍴 Fork from message ID:', forkFromMessageId)
 
     // Validate message ID format (basic validation)
     if (typeof forkFromMessageId !== 'string' || forkFromMessageId.trim() === '') {
@@ -32,25 +39,67 @@ export async function POST(
     }
 
     // Get original conversation and verify access
+    console.log('🍴 Fetching original conversation...')
+    
+    // First check if conversation exists at all
+    const { data: convCheck, error: checkError } = await supabase
+      .from('conversations')
+      .select('id, workspace_id')
+      .eq('id', originalConversationId)
+    
+    console.log('🍴 Conversation check:', { 
+      count: convCheck?.length, 
+      checkError: checkError?.message,
+      conversationId: originalConversationId 
+    })
+    
     const { data: originalConversation, error: convError } = await supabase
-      .from('conversation')
+      .from('conversations')
       .select(`
         *,
         workspace:workspace_id (
           id,
-          owner_id
+          workspace_members!workspace_members_workspace_id_fkey (
+            user_id,
+            role
+          )
         )
       `)
       .eq('id', originalConversationId)
-      .single()
+      .maybeSingle()
+    
+    console.log('🍴 Original conversation result:', { 
+      found: !!originalConversation, 
+      error: !!convError,
+      convError: convError?.message 
+    })
 
-    if (convError || !originalConversation || originalConversation.workspace?.owner_id !== user.id) {
-      return new Response('Conversation not found or access denied', { status: 404 })
+    if (convError || !originalConversation) {
+      console.log('🍴 Conversation not found:', {
+        convError: !!convError,
+        originalConversation: !!originalConversation,
+        convErrorMessage: convError?.message
+      })
+      return new Response('Conversation not found', { status: 404 })
+    }
+
+    // Check if user is a member of the workspace
+    const isMember = originalConversation.workspace?.workspace_members?.some(
+      (member: any) => member.user_id === user.id
+    )
+    if (!isMember) {
+      console.log('🍴 Access denied - not a workspace member:', {
+        userId: user.id,
+        workspaceId: originalConversation.workspace?.id,
+        members: originalConversation.workspace?.workspace_members?.map((m: any) => m.user_id)
+      })
+      return new Response('Access denied', { status: 403 })
     }
 
     // Create new conversation for the fork
+    console.log('🍴 Creating new conversation...')
     const { data: newConversation, error: newConvError } = await supabase
-      .from('conversation')
+      .from('conversations')
       .insert({
         workspace_id: originalConversation.workspace_id,
         title: title || `🌱 ${originalConversation.title}`,
@@ -60,56 +109,44 @@ export async function POST(
       .single()
 
     if (newConvError) {
+      console.log('🍴 Error creating new conversation:', newConvError)
       return new Response('Error creating forked conversation', { status: 500 })
     }
+    
+    console.log('🍴 New conversation created:', newConversation.id)
 
     // Get all messages for the conversation (no sorting needed)
+    console.log('🍴 Fetching messages...')
     const { data: allMessages, error: msgsError } = await supabase
-      .from('message')
+      .from('messages')
       .select('*')
-      .eq('convo_id', originalConversationId)
+      .eq('conversation_id', originalConversationId)
 
     if (msgsError) {
+      console.log('🍴 Error fetching messages:', msgsError)
       return new Response('Error fetching messages to copy', { status: 500 })
     }
+    
+    console.log('🍴 Messages fetched:', allMessages?.length || 0)
 
     // Find the fork point message
+    console.log('🍴 Looking for fork message:', forkFromMessageId)
     const forkMessage = allMessages?.find(msg => msg.id === forkFromMessageId)
     if (!forkMessage) {
-      console.error('Fork point message not found:', {
+      console.error('🍴 Fork point message not found:', {
         forkFromMessageId,
         availableMessageIds: allMessages?.map(m => m.id) || [],
         totalMessages: allMessages?.length || 0
       })
       return new Response('Fork point message not found in conversation', { status: 404 })
     }
+    
+    console.log('🍴 Fork message found:', forkMessage.role)
 
-    // Build message chain from root to fork point using parent relationships
-    const buildMessageChain = (messages: any[], targetMessageId: string): any[] => {
-      const messageMap = new Map(messages.map(msg => [msg.id, msg]))
-      const chain: any[] = []
-      
-      // Start from target message and walk backwards through parent chain
-      let currentMessage = messageMap.get(targetMessageId)
-      const visited = new Set<string>()
-      
-      while (currentMessage && !visited.has(currentMessage.id)) {
-        visited.add(currentMessage.id)
-        chain.unshift(currentMessage) // Add to beginning to build forward chain
-        
-        // Move to parent message
-        if (currentMessage.parent_id) {
-          currentMessage = messageMap.get(currentMessage.parent_id)
-        } else {
-          // Reached root message (parent_id is null)
-          break
-        }
-      }
-      
-      return chain
-    }
-
-    const relevantMessages = buildMessageChain(allMessages, forkFromMessageId)
+    // Get messages up to and including the fork point, sorted by order_key
+    const sortedMessages = allMessages.sort((a, b) => a.order_key.localeCompare(b.order_key))
+    const forkIndex = sortedMessages.findIndex(m => m.id === forkFromMessageId)
+    const relevantMessages = sortedMessages.slice(0, forkIndex + 1)
     
     console.log('Fork operation details:', {
       originalConversationId,
@@ -119,9 +156,9 @@ export async function POST(
       chainLength: relevantMessages.length
     })
     
-    console.log('Messages to copy (parent-child chain):', {
+    console.log('Messages to copy (ordered by order_key):', {
       messagesToCopy: relevantMessages.length,
-      messageChain: relevantMessages.map(m => ({ id: m.id, role: m.role, parent_id: m.parent_id }))
+      messageChain: relevantMessages.map(m => ({ id: m.id, role: m.role, order_key: m.order_key }))
     })
 
     // Initialize insertedMessages for return value
@@ -130,21 +167,15 @@ export async function POST(
     // Copy messages to new conversation, preserving the parent-child chain structure
     if (relevantMessages.length > 0) {
       const messagesToInsert = relevantMessages.map((msg, index) => ({
-        convo_id: newConversation.id,
-        parent_id: null, // Will be set after insertion to maintain chain
-        path: (index + 1).toString(), // Sequential paths based on chain order
+        conversation_id: newConversation.id,
+        order_key: msg.order_key, // Keep original order keys for proper sequencing
         role: msg.role,
         content: msg.content,
-        metadata: msg.metadata,
-        revision: 1, // Reset revision for new conversation
-        supersedes_id: null, // Clear supersedes relationship
-        token_count: msg.token_count,
-        usage_ms: msg.usage_ms,
-        created_by: user.id
+        json_meta: msg.json_meta || {}
       }))
 
       const { data: insertedMessagesResult, error: insertError } = await supabase
-        .from('message')
+        .from('messages')
         .insert(messagesToInsert)
         .select()
 
@@ -154,43 +185,28 @@ export async function POST(
         console.error('Error inserting forked messages:', insertError)
         // Clean up the conversation if message copying fails
         await supabase
-          .from('conversation')
+          .from('conversations')
           .delete()
           .eq('id', newConversation.id)
         
         return new Response('Error copying messages to forked conversation', { status: 500 })
       }
 
-      // Rebuild the parent-child chain relationships in the new conversation
-      if (insertedMessages && insertedMessages.length > 1) {
-        console.log('🔗 Rebuilding parent-child chain for', insertedMessages.length, 'messages')
-        
-        for (let i = 1; i < insertedMessages.length; i++) {
-          const currentMsg = insertedMessages[i]
-          const parentMsg = insertedMessages[i - 1]
-          
-          console.log(`🔗 Setting parent: ${currentMsg.id} -> ${parentMsg.id}`)
-          
-          await supabase
-            .from('message')
-            .update({ parent_id: parentMsg.id })
-            .eq('id', currentMsg.id)
-        }
-        
-        console.log('✅ Parent-child chain rebuilt successfully')
-      }
+      console.log('🍴 Messages copied successfully, order preserved by order_key')
     }
 
-    return Response.json({
+    const response = {
       forkedConversation: newConversation,
       originalConversation: originalConversationId,
       messagesCopied: relevantMessages.length,
       forkFromMessageId: forkFromMessageId, // The message ID that was forked from
       totalMessages: allMessages?.length || 0,
       insertedMessages: insertedMessages // Return the new messages with their IDs
-    })
+    }
+    console.log('🍴 Returning success response:', { messagesCopied: response.messagesCopied, newConvId: response.forkedConversation.id })
+    return Response.json(response)
   } catch (error) {
-    console.error('Fork conversation error:', error)
+    console.error('🍴 Fork conversation error:', error)
     return new Response('Internal server error', { status: 500 })
   }
 }
