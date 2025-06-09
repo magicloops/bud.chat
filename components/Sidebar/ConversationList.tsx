@@ -9,7 +9,7 @@ import {
   useRemoveConversation,
   useSetConversationsLoading
 } from '@/state/workspaceStore'
-import { useUIState, useSetSelectedConversation } from '@/state/chatStore'
+import { usePathname } from 'next/navigation'
 import { WorkspaceId, ConversationId } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { 
@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { formatDistanceToNow } from 'date-fns'
 
 interface ConversationListProps {
@@ -35,13 +36,15 @@ interface ConversationListProps {
 
 export function ConversationList({ workspaceId }: ConversationListProps) {
   const router = useRouter()
+  const pathname = usePathname()
   const conversations = useWorkspaceConversations(workspaceId)
   const setConversations = useSetConversations()
   const removeConversation = useRemoveConversation()
   const setConversationsLoading = useSetConversationsLoading()
   const isLoading = useWorkspaceLoading(workspaceId)
-  const uiState = useUIState()
-  const setSelectedConversation = useSetSelectedConversation()
+  
+  // Extract current conversation ID from URL
+  const currentConversationId = pathname.split('/').pop()
 
   // Load conversations for the workspace
   useEffect(() => {
@@ -68,11 +71,6 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     loadConversations()
   }, [workspaceId, setConversations, setConversationsLoading])
 
-  const handleConversationSelect = useCallback((conversationId: ConversationId) => {
-    setSelectedConversation(conversationId)
-    router.push(`/${conversationId}`)
-  }, [setSelectedConversation, router])
-
   const handleConversationDelete = useCallback(async (conversationId: ConversationId, e: React.MouseEvent) => {
     e.stopPropagation()
     
@@ -88,9 +86,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       if (response.ok) {
         removeConversation(conversationId)
         
-        // If this was the selected conversation, clear selection
-        if (uiState.selectedConversation === conversationId) {
-          setSelectedConversation(null)
+        // If this was the selected conversation, navigate to new
+        if (currentConversationId === conversationId) {
           router.push('/new')
         }
       } else {
@@ -99,7 +96,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     } catch (error) {
       console.error('Failed to delete conversation:', error)
     }
-  }, [removeConversation, setSelectedConversation, uiState.selectedConversation, router])
+  }, [removeConversation, currentConversationId, router])
 
   const handleConversationBranch = useCallback((conversationId: ConversationId, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -136,7 +133,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   return (
     <div className="p-2 space-y-1 min-h-0 w-full max-w-full">
       {conversations.map((conversation) => {
-        const isSelected = uiState.selectedConversation === conversation.id
+        const isSelected = currentConversationId === conversation.id
         const createdAt = new Date(conversation.created_at)
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true })
         
@@ -146,13 +143,14 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         }
         
         return (
-          <div
+          <Link
             key={conversation.id}
+            href={`/${conversation.id}`}
+            prefetch={false}
             className={cn(
-              "group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden",
+              "group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden block",
               isSelected && "bg-muted"
             )}
-            onClick={() => handleConversationSelect(conversation.id)}
           >
             <MessageSquare className="h-4 w-4 text-muted-foreground flex-shrink-0" />
             
@@ -194,7 +192,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
                 {timeAgo}
               </p>
             </div>
-          </div>
+          </Link>
         )
       })}
     </div>

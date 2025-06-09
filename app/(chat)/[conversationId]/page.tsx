@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, use, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChatArea } from '@/components/ChatArea'
-import { useUIState, useSetSelectedConversation, useAddMessage, useSetChat, useChat } from '@/state/chatStore'
+import { useSetChat, useChat, useChatStore } from '@/state/chatStore'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { AuthModal } from '@/components/auth/auth-modal'
 import { Loader2 } from 'lucide-react'
@@ -15,115 +15,62 @@ interface ConversationPageProps {
 
 export default function ConversationPage({ params }: ConversationPageProps) {
   const { user, loading: authLoading } = useAuth()
-  const setSelectedConversation = useSetSelectedConversation()
-  const addMessage = useAddMessage()
-  const setChat = useSetChat()
-  const uiState = useUIState()
   
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  // Use React 18's use() hook for synchronous params resolution
+  const resolvedParams = use(params)
+  const conversationId = resolvedParams.conversationId
+  
+  // Store selectors - NO selectedConversation management here
+  const setChat = useSetChat()
+  const selectedWorkspace = useChatStore((state) => state.ui.selectedWorkspace)
   const existingChat = useChat(conversationId || '')
 
-  // Load conversation ID from params
-  useEffect(() => {
-    const loadParams = async () => {
-      const resolvedParams = await params
-      setConversationId(resolvedParams.conversationId)
-    }
-    loadParams()
-  }, [params])
-
-  // Fetch conversation data
+  // Only fetch if we absolutely don't have the data
+  const shouldFetch = !!conversationId && 
+                     conversationId !== 'new' && 
+                     !!user && 
+                     !existingChat
+  
   const { data: conversationData, isLoading: conversationLoading } = useQuery({
     queryKey: ['conversation', conversationId],
     queryFn: async () => {
-      if (!conversationId || conversationId === 'new') return null
-      
-      console.log('🔍 Fetching conversation data for:', conversationId)
       const response = await fetch(`/api/conversations/${conversationId}?include_messages=true`)
       if (!response.ok) {
         throw new Error('Failed to fetch conversation')
       }
       return response.json()
     },
-    enabled: !!conversationId && 
-             conversationId !== 'new' && 
-             !!user && 
-             !existingChat, // Only fetch if we don't have the conversation at all
-    staleTime: 30000, // Don't refetch for 30 seconds
+    enabled: shouldFetch,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    // Prevent refetch on window focus, reconnect, etc.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchOnMount: false,
   })
 
-  // Load conversation into store when data is available
+  // Load conversation data when available
   useEffect(() => {
-    if (!conversationId) return
-
-    console.log('🔄 Conversation page effect running:', {
-      conversationId,
-      hasConversationData: !!conversationData,
-      existingChatExists: !!existingChat,
-      isStreaming: existingChat?.streaming
-    })
-
-    // Set selected conversation
-    setSelectedConversation(conversationId)
-
-    // Load conversation data into store
-    if (conversationData) {
-      // Check if conversation is already in store and streaming
-      const isCurrentlyStreaming = existingChat?.streaming
-      
-      if (isCurrentlyStreaming) {
-        console.log('⚠️ Skipping conversation data load - currently streaming')
-        // Don't overwrite streaming state, just update metadata
-        setChat(conversationId, {
-          ...existingChat,
-          meta: {
-            ...existingChat.meta,
-            id: conversationData.id,
-            workspace_id: conversationData.workspace_id,
-            created_at: conversationData.created_at,
-            bud_id: conversationData.bud_id,
-            isOptimistic: false
-          }
-        })
-      } else {
-        console.log('📥 Loading conversation data from server')
-        // Create chat state from server data
-        const chatState = {
-          meta: {
-            id: conversationData.id,
-            workspace_id: conversationData.workspace_id,
-            created_at: conversationData.created_at,
-            bud_id: conversationData.bud_id,
-          },
-          messages: conversationData.messages?.map((m: any) => m.id) || [],
-          byId: Object.fromEntries(
-            conversationData.messages?.map((m: any) => [m.id, m]) || []
-          ),
-          streaming: false,
-        }
-
-        setChat(conversationId, chatState)
-      }
-    } else if (conversationId === 'new') {
-      // For new conversations, create a default greeting
-      const greetingMessage = {
-        id: 'greeting-temp',
-        conversation_id: 'new',
-        order_key: 'a0',
-        role: 'assistant' as const,
-        content: 'Hello! How can I assist you today?',
-        json_meta: { isGreeting: true },
-        version: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        isOptimistic: true,
-      }
-
-      // Don't create a persistent chat state for 'new' - let the composer handle it
+    if (!conversationData || existingChat) return
+    
+    const chatState = {
+      meta: {
+        id: conversationData.id,
+        workspace_id: conversationData.workspace_id,
+        created_at: conversationData.created_at,
+        bud_id: conversationData.bud_id,
+      },
+      messages: conversationData.messages?.map((m: any) => m.id) || [],
+      byId: Object.fromEntries(
+        conversationData.messages?.map((m: any) => [m.id, m]) || []
+      ),
+      streaming: false,
     }
-  }, [conversationId, conversationData, setSelectedConversation, setChat])
+    
+    setChat(conversationId, chatState)
+  }, [conversationData, existingChat, conversationId, setChat])
 
-  const isLoading = authLoading || !conversationId || (conversationLoading && conversationId !== 'new')
+  const isLoading = authLoading || !conversationId || (conversationLoading && conversationId !== 'new' && !existingChat)
 
   if (isLoading) {
     return (
@@ -137,7 +84,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
     return <AuthModal />
   }
 
-  if (!uiState.selectedWorkspace) {
+  if (!selectedWorkspace) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center text-muted-foreground">
@@ -150,7 +97,7 @@ export default function ConversationPage({ params }: ConversationPageProps) {
   return (
     <ChatArea
       conversationId={conversationId === 'new' ? undefined : conversationId}
-      workspaceId={uiState.selectedWorkspace}
+      workspaceId={selectedWorkspace}
     />
   )
 }

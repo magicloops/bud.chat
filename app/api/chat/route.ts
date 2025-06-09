@@ -62,7 +62,7 @@ Title:`
 
     // Call OpenAI to generate the title
     const titleResponse = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4.1-nano',
       messages: [
         {
           role: 'user',

@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { MessageList } from '@/components/MessageList'
 import { ChatComposer } from '@/components/ChatComposer'
-import { useChat, useUIState, useSetSelectedConversation, useChatStore } from '@/state/chatStore'
+import { useChat, useChatStore } from '@/state/chatStore'
 import { ConversationId, WorkspaceId } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -14,23 +14,13 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId, workspaceId, className }: ChatAreaProps) {
-  const setSelectedConversation = useSetSelectedConversation()
-  const uiState = useUIState()
-  
   // Use granular selectors to prevent unnecessary re-renders during streaming
   const chatMeta = useChatStore((state) => state.chats[conversationId || '']?.meta)
   const isStreaming = useChatStore((state) => state.chats[conversationId || '']?.streaming || false)
 
-  // Set the selected conversation when the component mounts
-  useEffect(() => {
-    if (conversationId && conversationId !== uiState.selectedConversation) {
-      setSelectedConversation(conversationId)
-    }
-  }, [conversationId, uiState.selectedConversation, setSelectedConversation])
-
   // Handle new conversation case (/new route)
   const isNewConversation = !conversationId
-  const displayConversationId = conversationId || uiState.selectedConversation
+  const displayConversationId = conversationId
 
   const handleMessageSent = (messageId: string) => {
     // Message sent successfully, no additional action needed

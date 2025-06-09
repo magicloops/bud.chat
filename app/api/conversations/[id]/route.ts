@@ -114,6 +114,7 @@ export async function DELETE(
       .single()
 
     if (convError || !conversation) {
+      console.error('DELETE: Conversation lookup error:', convError, 'conversationId:', conversationId)
       return new Response('Conversation not found', { status: 404 })
     }
 
@@ -124,14 +125,26 @@ export async function DELETE(
       return new Response('Access denied', { status: 403 })
     }
 
-    // Delete the conversation (messages will be cascade deleted)
+    // Delete messages first, then conversation (no cascade delete configured)
+    const { error: messagesDeleteError } = await supabase
+      .from('messages')
+      .delete()
+      .eq('conversation_id', conversationId)
+
+    if (messagesDeleteError) {
+      console.error('Error deleting messages:', messagesDeleteError)
+      return new Response(`Error deleting messages: ${messagesDeleteError.message}`, { status: 500 })
+    }
+
+    // Now delete the conversation
     const { error: deleteError } = await supabase
       .from('conversations')
       .delete()
       .eq('id', conversationId)
 
     if (deleteError) {
-      return new Response('Error deleting conversation', { status: 500 })
+      console.error('Delete conversation error details:', deleteError)
+      return new Response(`Error deleting conversation: ${deleteError.message}`, { status: 500 })
     }
 
     return new Response('Conversation deleted successfully', { status: 200 })

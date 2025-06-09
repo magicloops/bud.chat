@@ -227,7 +227,6 @@ export function useStreaming({ chatId, onComplete, onError, onConversationCreate
         // Append token to streaming message using temp assistant ID
         if (data.content && tempMessageRef?.tempAssistantMessageId) {
           const currentChatId = currentChatIdRef.current || streamChatId
-          console.log('Appending token:', { messageId: tempMessageRef.tempAssistantMessageId, content: data.content.substring(0, 20) })
           appendStreamDelta(currentChatId, {
             id: tempMessageRef.tempAssistantMessageId,
             content: data.content,
