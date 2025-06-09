@@ -1,26 +1,43 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { useStartStreaming, useAppendStreamDelta, useFinishStreaming, useAddError, useUpdateMessage, useAddMessage } from '@/state/chatStore'
+import { useStartStreaming, useAppendStreamDelta, useFinishStreaming, useFinishStreamingWithIdUpdate, useAddError, useUpdateMessage, useAddMessage, useMigrateConversation, useCreateTempChat } from '@/state/chatStore'
 import { ConversationId, MessageId, StreamEvent } from '@/lib/types'
 
 interface UseStreamingOptions {
   chatId: ConversationId
   onComplete?: (messageId: MessageId, content: string) => void
   onError?: (error: string) => void
+  onConversationCreated?: (newConversationId: ConversationId) => void
 }
 
-export function useStreaming({ chatId, onComplete, onError }: UseStreamingOptions) {
+export function useStreaming({ chatId, onComplete, onError, onConversationCreated }: UseStreamingOptions) {
   const eventSourceRef = useRef<EventSource | null>(null)
+  const currentChatIdRef = useRef<ConversationId | null>(null)
   const startStreaming = useStartStreaming()
   const appendStreamDelta = useAppendStreamDelta()
   const finishStreaming = useFinishStreaming()
+  const finishStreamingWithIdUpdate = useFinishStreamingWithIdUpdate()
   const addError = useAddError()
   const updateMessage = useUpdateMessage()
   const addMessage = useAddMessage()
+  const migrateConversation = useMigrateConversation()
+  const createTempChat = useCreateTempChat()
   
-  const connect = useCallback((streamChatId: ConversationId, content: string, model = 'gpt-4o') => {
+  const connect = useCallback((streamChatId: ConversationId, content: string, model = 'gpt-4o', workspaceId?: string) => {
     // Close existing connection
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
+    }
+    
+    // Generate temporary conversation ID if this is a new conversation
+    const isNewConversation = streamChatId === 'new'
+    const actualStreamChatId = isNewConversation ? `temp-conv-${Date.now()}` : streamChatId
+    
+    // Track the current chat ID for event handling
+    currentChatIdRef.current = actualStreamChatId
+    
+    // Create temporary chat if it's a new conversation
+    if (isNewConversation) {
+      createTempChat(actualStreamChatId, workspaceId || '1')
     }
     
     // Add optimistic user and assistant messages immediately for better UX
@@ -36,7 +53,7 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
     
     const optimisticUserMessage = {
       id: tempUserMessageId,
-      conversation_id: streamChatId,
+      conversation_id: actualStreamChatId,
       order_key: userOrderKey,
       role: 'user',
       content,
@@ -49,7 +66,7 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
     
     const optimisticAssistantMessage = {
       id: tempAssistantMessageId,
-      conversation_id: streamChatId,
+      conversation_id: actualStreamChatId,
       order_key: assistantOrderKey,
       role: 'assistant',
       content: '',
@@ -65,22 +82,32 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
       assistantMessage: { id: optimisticAssistantMessage.id, content: optimisticAssistantMessage.content, orderKey: optimisticAssistantMessage.order_key }
     })
     
-    addMessage(streamChatId, optimisticUserMessage)
-    addMessage(streamChatId, optimisticAssistantMessage)
+    addMessage(actualStreamChatId, optimisticUserMessage)
+    addMessage(actualStreamChatId, optimisticAssistantMessage)
     
     // Start streaming state immediately for better UX
-    startStreaming(streamChatId, tempAssistantMessageId)
+    startStreaming(actualStreamChatId, tempAssistantMessageId)
     
-    // Store the temp IDs for replacement later
-    const tempMessageRef = { tempUserMessageId, tempAssistantMessageId }
+    // Store the temp IDs and conversation info for replacement later
+    const tempMessageRef = { 
+      tempUserMessageId, 
+      tempAssistantMessageId,
+      originalChatId: streamChatId,
+      actualChatId: actualStreamChatId
+    }
     
-    // Create new streaming connection with POST
-    fetch(`/api/stream/${streamChatId}`, {
+    // Create new streaming connection with POST to chat API
+    fetch(`/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ content, model }),
+      body: JSON.stringify({ 
+        conversationId: streamChatId, // Keep original (could be "new")
+        message: content, 
+        workspaceId: workspaceId || '1', // Fallback to '1' if not provided
+        model 
+      }),
     }).then(response => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -106,7 +133,7 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
               if (line.startsWith('data: ')) {
                 try {
                   const data = JSON.parse(line.slice(6))
-                  handleStreamEvent(data, streamChatId, tempMessageRef)
+                  handleStreamEvent(data, actualStreamChatId, tempMessageRef)
                 } catch (e) {
                   console.error('Error parsing stream data:', e)
                 }
@@ -128,8 +155,40 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
     })
   }, [addError, onError])
   
-  const handleStreamEvent = useCallback((data: any, streamChatId: ConversationId, tempMessageRef?: { tempUserMessageId: string, tempAssistantMessageId: string }) => {
+  const handleStreamEvent = useCallback((data: any, streamChatId: ConversationId, tempMessageRef?: { tempUserMessageId: string, tempAssistantMessageId: string, originalChatId: string, actualChatId: string }) => {
     switch (data.type) {
+      case 'userMessage':
+        // User message created - update with real ID and conversation ID
+        console.log('User message created:', data)
+        
+        // If this was a new conversation, migrate the temp conversation to the real ID
+        if (data.conversationId && tempMessageRef?.originalChatId === 'new' && data.conversationId !== streamChatId) {
+          console.log('Migrating conversation from temp to real ID:', {
+            tempChatId: streamChatId,
+            realChatId: data.conversationId
+          })
+          
+          // Migrate the entire conversation
+          migrateConversation(streamChatId, data.conversationId, {
+            workspace_id: data.workspace_id || tempMessageRef.actualChatId.split('-')[2] // fallback
+          })
+          
+          // Update the current chat ID for future events
+          currentChatIdRef.current = data.conversationId
+          
+          onConversationCreated?.(data.conversationId)
+        }
+        
+        // Use the current chat ID (which might have been updated by migration)
+        const currentChatId = currentChatIdRef.current || streamChatId
+        if (data.messageId && tempMessageRef?.tempUserMessageId) {
+          updateMessage(currentChatId, tempMessageRef.tempUserMessageId, {
+            id: data.messageId,
+            isOptimistic: false,
+          })
+        }
+        break
+        
       case 'messagesCreated':
         // Both messages created successfully
         console.log('Messages created:', data)
@@ -165,21 +224,42 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
         break
         
       case 'token':
-        // Append token to streaming message
-        if (data.content && data.messageId) {
-          console.log('Appending token:', { messageId: data.messageId, content: data.content.substring(0, 20) })
-          appendStreamDelta(streamChatId, {
-            id: data.messageId,
+        // Append token to streaming message using temp assistant ID
+        if (data.content && tempMessageRef?.tempAssistantMessageId) {
+          const currentChatId = currentChatIdRef.current || streamChatId
+          console.log('Appending token:', { messageId: tempMessageRef.tempAssistantMessageId, content: data.content.substring(0, 20) })
+          appendStreamDelta(currentChatId, {
+            id: tempMessageRef.tempAssistantMessageId,
             content: data.content,
           })
         }
         break
         
       case 'complete':
-        // Streaming complete
+        // Streaming complete - use temp assistant ID for finishStreaming
         if (data.messageId && data.content !== undefined) {
-          console.log('Finishing streaming:', { messageId: data.messageId, contentLength: data.content.length })
-          finishStreaming(streamChatId, data.messageId, data.content)
+          const currentChatId = currentChatIdRef.current || streamChatId
+          console.log('Finishing streaming:', { 
+            realMessageId: data.messageId, 
+            tempMessageId: tempMessageRef?.tempAssistantMessageId, 
+            contentLength: data.content.length,
+            currentChatId,
+            tempMessageRef: tempMessageRef
+          })
+          
+          // Use the temp assistant message ID for finishStreaming since that's what we used during streaming
+          const messageIdForFinish = tempMessageRef?.tempAssistantMessageId || data.messageId
+          console.log('Using messageId for finishStreaming:', messageIdForFinish)
+          
+          // Combine finishing streaming and ID update into a single operation to prevent flicker
+          if (tempMessageRef?.tempAssistantMessageId && data.messageId !== tempMessageRef.tempAssistantMessageId) {
+            // Custom finish that updates ID and content atomically
+            finishStreamingWithIdUpdate(currentChatId, messageIdForFinish, data.content, data.messageId)
+          } else {
+            // Normal finish streaming
+            finishStreaming(currentChatId, messageIdForFinish, data.content)
+          }
+          
           onComplete?.(data.messageId, data.content)
         }
         break
@@ -191,7 +271,7 @@ export function useStreaming({ chatId, onComplete, onError }: UseStreamingOption
         onError?.(errorMsg)
         break
     }
-  }, [startStreaming, appendStreamDelta, finishStreaming, addError, addMessage, onComplete, onError])
+  }, [startStreaming, appendStreamDelta, finishStreaming, finishStreamingWithIdUpdate, addError, addMessage, updateMessage, migrateConversation, createTempChat, onComplete, onError, onConversationCreated])
   
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {

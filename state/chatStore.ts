@@ -56,8 +56,6 @@ interface ChatStore {
   // Actions - UI State
   setSelectedConversation: (id: ConversationId | null) => void
   setSelectedWorkspace: (id: WorkspaceId | null) => void
-  setSidebarOpen: (open: boolean) => void
-  setRightSidebarOpen: (open: boolean) => void
   setComposerDraft: (draft: string) => void
   setComposerSubmitting: (submitting: boolean) => void
   
@@ -72,8 +70,6 @@ export const useChatStore = create<ChatStore>()(
         // Initial state
         chats: {},
         ui: {
-          sidebarOpen: true,
-          rightSidebarOpen: false,
           selectedWorkspace: null,
           selectedConversation: null,
           composer: {
@@ -250,7 +246,7 @@ export const useChatStore = create<ChatStore>()(
                 messages: [],
                 byId: {},
                 streaming: false,
-              }
+                  }
               state.chats[conversationId] = chat
               state.ui.selectedConversation = conversationId
             }
@@ -329,7 +325,7 @@ export const useChatStore = create<ChatStore>()(
               messages: [],
               byId: {},
               streaming: false,
-            }
+              }
             
             // Copy messages with new IDs
             messagesToCopy.forEach((originalMsg, index) => {
@@ -370,20 +366,20 @@ export const useChatStore = create<ChatStore>()(
         
         appendStreamDelta: (chatId, { id, content, finished }) => set((state) => {
           const chat = state.chats[chatId]
-          if (chat?.byId[id]) {
+          if (chat && chat.streaming && chat.streamingMessageId === id) {
             const message = chat.byId[id]
-            message.content += content
-            message.updated_at = new Date().toISOString()
-            
-            if (finished) {
-              chat.streaming = false
-              chat.streamingMessageId = undefined
-              if ('isPending' in message) {
-                message.isPending = false
+            if (message) {
+              message.content += content
+              message.updated_at = new Date().toISOString()
+              
+              if (finished) {
+                if ('isPending' in message) {
+                  message.isPending = false
+                }
+                chat.streaming = false
+                chat.streamingMessageId = undefined
               }
             }
-          } else {
-            console.error('appendStreamDelta: Message not found', { chatId, messageId: id, availableIds: Object.keys(chat?.byId || {}) })
           }
         }),
         
@@ -402,6 +398,116 @@ export const useChatStore = create<ChatStore>()(
             }
           } else {
             console.error('finishStreaming: Message not found', { chatId, messageId, availableIds: Object.keys(chat?.byId || {}) })
+          }
+        }),
+        
+        // Atomic finish streaming with ID update to prevent flicker
+        finishStreamingWithIdUpdate: (chatId, tempMessageId, finalContent, realMessageId) => set((state) => {
+          const chat = state.chats[chatId]
+          if (chat?.byId[tempMessageId]) {
+            const message = chat.byId[tempMessageId]
+            
+            // Update content and metadata
+            message.content = finalContent
+            message.updated_at = new Date().toISOString()
+            message.isOptimistic = false
+            
+            // Update message ID atomically
+            if (realMessageId !== tempMessageId) {
+              // Move message to new ID
+              chat.byId[realMessageId] = { ...message, id: realMessageId }
+              delete chat.byId[tempMessageId]
+              
+              // Update messages array
+              const messageIndex = chat.messages.indexOf(tempMessageId)
+              if (messageIndex !== -1) {
+                chat.messages[messageIndex] = realMessageId
+              }
+            }
+            
+            // Stop streaming
+            chat.streaming = false
+            chat.streamingMessageId = undefined
+            
+            if ('isPending' in message) {
+              message.isPending = false
+            }
+          } else {
+            console.error('finishStreamingWithIdUpdate: Message not found', { 
+              chatId, 
+              tempMessageId, 
+              availableIds: Object.keys(chat?.byId || {}) 
+            })
+          }
+        }),
+        
+        // Create temporary chat for new conversations
+        createTempChat: (tempChatId, workspaceId) => set((state) => {
+          if (!state.chats[tempChatId]) {
+            state.chats[tempChatId] = {
+              meta: {
+                id: tempChatId,
+                workspace_id: workspaceId,
+                created_at: new Date().toISOString(),
+                isOptimistic: true,
+              },
+              messages: [],
+              byId: {},
+              streaming: false,
+            }
+            
+            // Set as selected conversation
+            state.ui.selectedConversation = tempChatId
+          }
+        }),
+        
+        // Conversation Migration Action - for moving temp conversations to real IDs
+        migrateConversation: (tempChatId, realChatId, realConversationData) => set((state) => {
+          const tempChat = state.chats[tempChatId]
+          console.log('🔄 Migration debug:', {
+            tempChatId,
+            realChatId,
+            tempChatExists: !!tempChat,
+            tempChatMessages: tempChat ? Object.keys(tempChat.byId) : [],
+            tempChatMessageCount: tempChat ? tempChat.messages.length : 0,
+            isStreaming: tempChat?.streaming,
+            streamingMessageId: tempChat?.streamingMessageId
+          })
+          
+          if (tempChat) {
+            // Copy the temp chat to the real conversation ID
+            state.chats[realChatId] = {
+              ...tempChat,
+              meta: {
+                ...tempChat.meta,
+                id: realChatId,
+                ...realConversationData,
+                isOptimistic: false
+              }
+            }
+            
+            // Update all messages to have the new conversation ID
+            Object.values(tempChat.byId).forEach(message => {
+              if (message) {
+                message.conversation_id = realChatId
+              }
+            })
+            
+            console.log('🔄 After migration:', {
+              realChatExists: !!state.chats[realChatId],
+              realChatMessages: state.chats[realChatId] ? Object.keys(state.chats[realChatId].byId) : [],
+              realChatMessageCount: state.chats[realChatId] ? state.chats[realChatId].messages.length : 0,
+              isStreaming: state.chats[realChatId]?.streaming,
+              streamingMessageId: state.chats[realChatId]?.streamingMessageId
+            })
+            
+            // Remove the temp chat
+            delete state.chats[tempChatId]
+            
+            // Update UI state if this was the selected conversation
+            if (state.ui.selectedConversation === tempChatId) {
+              state.ui.selectedConversation = realChatId
+            }
           }
         }),
         
@@ -444,14 +550,6 @@ export const useChatStore = create<ChatStore>()(
           state.ui.selectedWorkspace = id
         }),
         
-        setSidebarOpen: (open) => set((state) => {
-          state.ui.sidebarOpen = open
-        }),
-
-        setRightSidebarOpen: (open) => set((state) => {
-          state.ui.rightSidebarOpen = open
-        }),
-        
         setComposerDraft: (draft) => set((state) => {
           state.ui.composer.draft = draft
         }),
@@ -475,9 +573,6 @@ export const useChatStore = create<ChatStore>()(
         partialize: (state) => ({
           ui: {
             selectedWorkspace: state.ui.selectedWorkspace,
-            // Don't persist sidebar states for faster responsiveness
-            // sidebarOpen: state.ui.sidebarOpen,
-            // rightSidebarOpen: state.ui.rightSidebarOpen,
             composer: {
               draft: state.ui.composer.draft,
               isSubmitting: false, // Don't persist submitting state
@@ -499,7 +594,6 @@ export const useMessages = (chatId: ConversationId) => {
   const chat = useChatStore((state) => state.chats[chatId])
   return useMemo(() => {
     if (!chat) return []
-    
     const messages = chat.messages.map(id => chat.byId[id]).filter(Boolean)
     return sortByOrderKey(messages)
   }, [chat])
@@ -514,12 +608,6 @@ export const useCurrentChat = () =>
 export const useUIState = () => 
   useChatStore((state) => state.ui)
 
-export const useStreamingMessage = (chatId: ConversationId) =>
-  useChatStore((state) => {
-    const chat = state.chats[chatId]
-    if (!chat?.streaming || !chat.streamingMessageId) return undefined
-    return chat.byId[chat.streamingMessageId]
-  })
 
 export const useChatError = (messageId: MessageId) =>
   useChatStore((state) => state.errors[messageId])
@@ -527,8 +615,6 @@ export const useChatError = (messageId: MessageId) =>
 // Individual action hooks - the proper Zustand way
 export const useSetSelectedConversation = () => useChatStore((state) => state.setSelectedConversation)
 export const useSetSelectedWorkspace = () => useChatStore((state) => state.setSelectedWorkspace)
-export const useSetSidebarOpen = () => useChatStore((state) => state.setSidebarOpen)
-export const useSetRightSidebarOpen = () => useChatStore((state) => state.setRightSidebarOpen)
 export const useSetComposerDraft = () => useChatStore((state) => state.setComposerDraft)
 export const useSetComposerSubmitting = () => useChatStore((state) => state.setComposerSubmitting)
 export const useSendOptimisticMessage = () => useChatStore((state) => state.sendOptimisticMessage)
@@ -544,8 +630,11 @@ export const useChatGetter = () => {
   const chats = useChatStore((state) => state.chats)
   return useCallback((chatId: ConversationId) => chats[chatId], [chats])
 }
+export const useCreateTempChat = () => useChatStore((state) => state.createTempChat)
 export const useStartStreaming = () => useChatStore((state) => state.startStreaming)
 export const useAppendStreamDelta = () => useChatStore((state) => state.appendStreamDelta)
 export const useFinishStreaming = () => useChatStore((state) => state.finishStreaming)
+export const useFinishStreamingWithIdUpdate = () => useChatStore((state) => state.finishStreamingWithIdUpdate)
+export const useMigrateConversation = () => useChatStore((state) => state.migrateConversation)
 export const useAddError = () => useChatStore((state) => state.addError)
 export const useSetChat = () => useChatStore((state) => state.setChat)

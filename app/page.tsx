@@ -1,28 +1,38 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { AuthModal } from '@/components/auth/auth-modal'
 import { Sidebar } from '@/components/Sidebar'
-import { useUIState, useSetSelectedConversation, useSetSidebarOpen } from '@/state/chatStore'
+import { useSetSelectedConversation } from '@/state/chatStore'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Plus } from 'lucide-react'
+import { MessageSquare, Plus, PanelLeft } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
 
 export default function HomePage() {
   const { user, loading } = useAuth()
   const router = useRouter()
-  const uiState = useUIState()
   const setSelectedConversation = useSetSelectedConversation()
-  const setSidebarOpen = useSetSidebarOpen()
+  
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  // Load sidebar state from localStorage on mount
+  useEffect(() => {
+    const savedSidebarOpen = localStorage.getItem('sidebarOpen')
+    if (savedSidebarOpen !== null) {
+      setSidebarOpen(savedSidebarOpen === 'true')
+    }
+  }, [])
+
+  const handleSidebarToggle = (open: boolean) => {
+    setSidebarOpen(open)
+    localStorage.setItem('sidebarOpen', String(open))
+  }
 
   const handleNewConversation = () => {
     setSelectedConversation(null)
     router.push('/new')
-  }
-
-  const toggleSidebar = () => {
-    setSidebarOpen(!uiState.sidebarOpen)
   }
 
   if (loading) {
@@ -39,30 +49,40 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen w-full bg-background overflow-hidden">
-      {/* Sidebar */}
+      {/* Left Sidebar */}
       <div className={`
-        transition-all duration-300 ease-in-out 
-        ${uiState.sidebarOpen ? 'opacity-100' : 'opacity-0 w-0'}
+        transition-[width] ease-out h-full
+        ${sidebarOpen ? 'w-60' : 'w-0'}
         overflow-hidden
       `}>
-        <Sidebar className="h-full" />
+        <div className={`
+          transition-opacity ease-out h-full
+          ${sidebarOpen ? 'opacity-100' : 'opacity-0'}
+          w-60
+        `}>
+          <Sidebar className="h-full" onClose={() => handleSidebarToggle(false)} />
+        </div>
       </div>
+
+      {/* Left Sidebar Toggle Button - Always Visible */}
+      {!sidebarOpen && (
+        <div className="absolute top-4 left-4 z-50">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => handleSidebarToggle(true)}
+            className="h-8 w-8 bg-background/80 backdrop-blur-sm border hover:bg-accent"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Main Welcome Area */}
       <div className="flex-1 flex flex-col border-l min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8" 
-              onClick={toggleSidebar}
-            >
-              <MessageSquare className="h-5 w-5" />
-            </Button>
-            <span className="font-medium">Welcome to bud.chat</span>
-          </div>
+        <div className="flex items-center justify-center p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 relative">
+          <span className="font-medium">Welcome to bud.chat</span>
         </div>
 
         {/* Welcome Content */}

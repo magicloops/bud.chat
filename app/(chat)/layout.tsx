@@ -76,13 +76,13 @@ export default function ChatLayout({ children }: ChatLayoutProps) {
       {/* Right Sidebar */}
       <div className={`
         transition-[width] duration-150 ease-out h-full
-        ${rightSidebarOpen ? 'w-60' : 'w-0'}
+        ${rightSidebarOpen ? 'w-80' : 'w-0'}
         overflow-hidden border-l
       `}>
         <div className={`
           transition-opacity duration-100 ease-out h-full
           ${rightSidebarOpen ? 'opacity-100' : 'opacity-0'}
-          w-60
+          w-80
         `}>
           <SettingsPanel onClose={() => handleRightSidebarToggle(false)} />
         </div>

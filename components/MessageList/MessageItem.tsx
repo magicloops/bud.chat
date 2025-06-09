@@ -2,6 +2,7 @@
 
 import { memo, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import MarkdownRenderer from '@/components/markdown-renderer'
 import { UnifiedMessage } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -11,12 +12,8 @@ import {
   Trash2,
   GitBranch,
   MoreHorizontal,
-  User,
   Bot,
-  Settings,
-  CheckCircle,
-  AlertCircle,
-  Loader2
+  AlertCircle
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -26,10 +23,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useChatError } from '@/state/chatStore'
+import { useAuth } from '@/lib/auth/auth-provider'
 
 interface MessageItemProps {
   message: UnifiedMessage
+  index?: number
   isLast?: boolean
+  isStreaming?: boolean
   onEdit?: (messageId: string, newContent: string) => void
   onDelete?: (messageId: string) => void
   onBranch?: (messageId: string) => void
@@ -37,19 +37,24 @@ interface MessageItemProps {
 
 export const MessageItem = memo(function MessageItem({
   message,
+  index = 0,
   isLast,
+  isStreaming = false,
   onEdit,
   onDelete,
   onBranch,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false)
   const error = useChatError(message.id)
+  const { user } = useAuth()
+
 
   const isOptimistic = 'isOptimistic' in message && message.isOptimistic
   const isPending = 'isPending' in message && message.isPending
   const isSystem = message.role === 'system'
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
+  const assistantName = 'Assistant' // Could be made configurable in the future
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content)
@@ -73,156 +78,158 @@ export const MessageItem = memo(function MessageItem({
     }
   }, [onBranch, message.id])
 
-  const getStatusIcon = () => {
-    if (error) {
-      return <AlertCircle className="h-3 w-3 text-destructive" />
+  const formatMessageDuration = useCallback((message: any, index: number) => {
+    // For user messages, always show time since sent
+    if (message.role === 'user') {
+      const date = new Date(message.created_at)
+      const now = new Date()
+      const diffMs = now.getTime() - date.getTime()
+      const diffSecs = Math.floor(diffMs / 1000)
+      const diffMins = Math.floor(diffSecs / 60)
+      const diffHours = Math.floor(diffMins / 60)
+      
+      if (diffSecs < 60) return `${diffSecs}s ago`
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffHours < 24) return `${diffHours}h ago`
+      return date.toLocaleDateString()
     }
-    if (isPending) {
-      return <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-    }
-    if (isOptimistic) {
-      return <div className="h-3 w-3 rounded-full bg-yellow-500 animate-pulse" />
-    }
-    return <CheckCircle className="h-3 w-3 text-green-500" />
-  }
-
-  const getRoleIcon = () => {
-    switch (message.role) {
-      case 'user':
-        return <User className="h-4 w-4" />
-      case 'assistant':
-        return <Bot className="h-4 w-4" />
-      case 'system':
-        return <Settings className="h-4 w-4" />
-      default:
-        return null
-    }
-  }
-
-  const getRoleLabel = () => {
-    switch (message.role) {
-      case 'user':
-        return 'You'
-      case 'assistant':
-        return 'Assistant'
-      case 'system':
-        return 'System'
-      default:
-        return message.role
-    }
-  }
+    
+    // For assistant messages, show duration from previous message or time since created
+    const date = new Date(message.updated_at || message.created_at)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffSecs = Math.floor(diffMs / 1000)
+    const diffMins = Math.floor(diffSecs / 60)
+    const diffHours = Math.floor(diffMins / 60)
+    
+    if (diffSecs < 1) return '0s'
+    if (diffSecs < 60) return `${diffSecs}s ago`
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    return date.toLocaleDateString()
+  }, [])
 
   const canEdit = isUser && !isPending
   const canDelete = !isPending
   const canBranch = !isPending && !isSystem
 
-  console.log("message rendered: " + message.id)
+  // Don't render system messages in the old style
+  if (isSystem) {
+    return (
+      <div className="mb-6 group">
+        <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
+          <div className="text-sm text-muted-foreground font-mono">
+            {message.content}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
 
   return (
-    <div className={cn(
-      "group relative flex gap-3 p-4 rounded-lg transition-colors",
-      isUser && "bg-primary/5 ml-8",
-      isAssistant && "bg-muted/50 mr-8",
-      isSystem && "bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800",
-      error && "bg-destructive/5 border border-destructive/20"
-    )}>
-      {/* Avatar */}
-      <div className={cn(
-        "flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full",
-        isUser && "bg-primary text-primary-foreground",
-        isAssistant && "bg-muted text-muted-foreground",
-        isSystem && "bg-yellow-500 text-white"
-      )}>
-        {getRoleIcon()}
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">
-              {getRoleLabel()}
-            </span>
-            {getStatusIcon()}
-          </div>
-
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleCopy}
-              className="h-6 w-6 p-0"
-            >
-              <Copy className="h-3 w-3" />
-            </Button>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 w-6 p-0"
-                >
-                  <MoreHorizontal className="h-3 w-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {canEdit && (
-                  <DropdownMenuItem onClick={handleEdit}>
-                    <Edit className="h-3 w-3 mr-2" />
-                    Edit
-                  </DropdownMenuItem>
-                )}
-                {canBranch && (
-                  <DropdownMenuItem onClick={handleBranch}>
-                    <GitBranch className="h-3 w-3 mr-2" />
-                    Branch from here
-                  </DropdownMenuItem>
-                )}
-                {(canEdit || canBranch) && canDelete && <DropdownMenuSeparator />}
-                {canDelete && (
-                  <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-                    <Trash2 className="h-3 w-3 mr-2" />
-                    Delete
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-
-        {/* Message Content */}
-        <div className="prose prose-sm max-w-none dark:prose-invert">
-          {isSystem ? (
-            <div className="text-sm text-muted-foreground font-mono">
-              {message.content}
-            </div>
+    <div className={`mb-6 group ${index === 0 ? "pt-4" : ""}`}>
+      <div className="flex items-start gap-3">
+        <Avatar className="h-8 w-8">
+          {isUser ? (
+            <>
+              {user?.user_metadata?.avatar_url ? (
+                <AvatarImage 
+                  src={user.user_metadata.avatar_url} 
+                  alt="User"
+                />
+              ) : (
+                null
+              )}
+              <AvatarFallback>
+                {user?.email?.charAt(0).toUpperCase() || 'U'}
+              </AvatarFallback>
+            </>
           ) : (
+            <AvatarFallback>
+              <Bot className="h-5 w-5 text-green-500" />
+            </AvatarFallback>
+          )}
+        </Avatar>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium">
+              {isUser ? 'You' : assistantName}
+            </span>
+            {isAssistant && message.json_meta?.model && message.json_meta.model !== 'greeting' && (
+              <span className="text-xs text-muted-foreground/60">{message.json_meta.model}</span>
+            )}
+            <span className="text-xs text-muted-foreground">
+              · {isStreaming ? 'typing...' : formatMessageDuration(message, index)}
+            </span>
+          </div>
+          <div className="relative">
+            {isStreaming && !message.content && (
+              <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
+            )}
             <MarkdownRenderer content={message.content} />
+          </div>
+          
+          {/* Error Display */}
+          {error && (
+            <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4" />
+                <span>Error: {error.error}</span>
+              </div>
+            </div>
           )}
         </div>
-
-        {/* Error Display */}
-        {error && (
-          <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded text-sm text-destructive">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              <span>Error: {error.error}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Metadata */}
-        {/*
-        {(isOptimistic || isPending) && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            {isPending && "Generating response..."}
-            {isOptimistic && !isPending && "Sending..."}
-          </div>
-        )}
-        */}
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={handleCopy}>
+              <Copy className="mr-2 h-4 w-4" />
+              <span>Copy</span>
+            </DropdownMenuItem>
+            {canBranch && (
+              <DropdownMenuItem onClick={handleBranch}>
+                <GitBranch className="mr-2 h-4 w-4" />
+                <span>Branch</span>
+              </DropdownMenuItem>
+            )}
+            {canEdit && (
+              <DropdownMenuItem onClick={handleEdit}>
+                <Edit className="mr-2 h-4 w-4" />
+                <span>Edit</span>
+              </DropdownMenuItem>
+            )}
+            {canDelete && canEdit && <DropdownMenuSeparator />}
+            {canDelete && (
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
+  )
+}, (prevProps, nextProps) => {
+  // Only re-render if the message content, streaming state, or error state changes
+  // Ignore isOptimistic changes to prevent flicker
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.updated_at === nextProps.message.updated_at &&
+    prevProps.isStreaming === nextProps.isStreaming &&
+    prevProps.index === nextProps.index &&
+    prevProps.isLast === nextProps.isLast
   )
 })

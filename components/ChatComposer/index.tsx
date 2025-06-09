@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Send, Square } from 'lucide-react'
@@ -35,6 +36,7 @@ export function ChatComposer({
   const [input, setInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const router = useRouter()
   
   const createOptimisticChat = useCreateOptimisticChat()
   const updateMessage = useUpdateMessage()
@@ -52,6 +54,10 @@ export function ChatComposer({
     },
     onError: (error) => {
       console.error('Streaming error:', error)
+    },
+    onConversationCreated: (newConversationId) => {
+      console.log('Updating URL to new conversation:', newConversationId)
+      router.replace(`/${newConversationId}`)
     }
   })
 
@@ -110,7 +116,7 @@ export function ChatComposer({
       
       // For both new and existing conversations, use the new streaming API
       // This will create messages and start streaming in one call
-      connect(actualConversationId, messageContent, selectedModel)
+      connect(actualConversationId, messageContent, selectedModel, workspaceId)
       
       onMessageSent?.(actualConversationId)
     } catch (error) {

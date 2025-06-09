@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { MessageList } from '@/components/MessageList'
 import { ChatComposer } from '@/components/ChatComposer'
-import { useChat, useUIState, useSetSelectedConversation } from '@/state/chatStore'
+import { useChat, useUIState, useSetSelectedConversation, useChatStore } from '@/state/chatStore'
 import { ConversationId, WorkspaceId } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -14,9 +14,12 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ conversationId, workspaceId, className }: ChatAreaProps) {
-  const chat = useChat(conversationId || '')
   const setSelectedConversation = useSetSelectedConversation()
   const uiState = useUIState()
+  
+  // Use granular selectors to prevent unnecessary re-renders during streaming
+  const chatMeta = useChatStore((state) => state.chats[conversationId || '']?.meta)
+  const isStreaming = useChatStore((state) => state.chats[conversationId || '']?.streaming || false)
 
   // Set the selected conversation when the component mounts
   useEffect(() => {
@@ -41,24 +44,20 @@ export function ChatArea({ conversationId, workspaceId, className }: ChatAreaPro
         <div className="flex items-center justify-center p-4 relative">
           {/* Centered title */}
           <div>
-            {isNewConversation ? (
-              <h1 className="text-lg font-semibold">New Conversation</h1>
-            ) : (
-              <h1 className="text-lg font-semibold">
-                {chat?.meta.isOptimistic ? 'New Conversation' : 'Chat'}
-              </h1>
-            )}
+            <h1 className="text-lg font-semibold">
+              {isNewConversation || chatMeta?.isOptimistic ? 'New Conversation' : 'Chat'}
+            </h1>
           </div>
           
           {/* Status indicators - positioned absolutely to the right */}
           <div className="absolute right-4 flex items-center gap-2 text-sm text-muted-foreground">
-            {chat?.streaming && (
+            {isStreaming && (
               <div className="flex items-center gap-1">
                 <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
                 <span>Generating...</span>
               </div>
             )}
-            {chat?.meta.isOptimistic && (
+            {chatMeta?.isOptimistic && (
               <div className="flex items-center gap-1">
                 <div className="h-2 w-2 bg-yellow-500 rounded-full animate-pulse" />
                 <span>Saving...</span>

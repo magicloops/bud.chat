@@ -109,8 +109,9 @@ export function MessageList({
       <div className="space-y-4 p-4 pb-6">
         {messages.map((message, index) => (
           <MessageItem
-            key={message.id}
+            key={`${message.conversation_id}-${index}`}
             message={message}
+            index={index}
             isLast={index === messages.length - 1}
             onEdit={handleMessageEdit}
             onDelete={handleMessageDelete}

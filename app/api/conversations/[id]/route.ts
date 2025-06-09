@@ -9,9 +9,9 @@ export async function GET(
     const { id: conversationId } = await params
     const { searchParams } = new URL(request.url)
     const includeMessages = searchParams.get('include_messages') === 'true'
-    
+
     const supabase = await createClient()
-    
+
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return new Response('Unauthorized', { status: 401 })
@@ -92,7 +92,7 @@ export async function DELETE(
   try {
     const { id: conversationId } = await params
     const supabase = await createClient()
-    
+
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return new Response('Unauthorized', { status: 401 })

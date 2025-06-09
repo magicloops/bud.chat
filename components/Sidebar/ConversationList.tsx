@@ -51,8 +51,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       try {
         setConversationsLoading(workspaceId, true)
         
-        // Include first message in the query to get conversation titles
-        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}&include_first_message=true`)
+        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}`)
         if (response.ok) {
           const conversationsData = await response.json()
           setConversations(workspaceId, conversationsData)
@@ -141,14 +140,9 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         const createdAt = new Date(conversation.created_at)
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true })
         
-        // Get title from first message content or fallback
+        // Get title from conversation title field or use default
         const getConversationTitle = () => {
-          if (conversation.first_message?.content) {
-            // Truncate to first 50 characters for title
-            const content = conversation.first_message.content.slice(0, 50)
-            return content.length === 50 ? content + '...' : content
-          }
-          return `Chat ${new Date(conversation.created_at).toLocaleDateString()}`
+          return conversation.title || 'New Chat'
         }
         
         return (

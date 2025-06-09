@@ -137,6 +137,8 @@ export type Database = {
           workspace_id: string
           root_msg_id: string | null
           bud_id: string | null
+          title: string | null
+          metadata: Json | null
           created_at: string
         }
         Insert: {
@@ -144,6 +146,8 @@ export type Database = {
           workspace_id: string
           root_msg_id?: string | null
           bud_id?: string | null
+          title?: string | null
+          metadata?: Json | null
           created_at?: string
         }
         Update: {
@@ -151,6 +155,8 @@ export type Database = {
           workspace_id?: string
           root_msg_id?: string | null
           bud_id?: string | null
+          title?: string | null
+          metadata?: Json | null
           created_at?: string
         }
         Relationships: [
