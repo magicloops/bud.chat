@@ -226,6 +226,31 @@ pnpm dev:server   # tRPC / route handlers in watch mode
 
 ---
 
+## Cost
+There were many sessions that looked like: 
+```
+Total cost:            $23.12
+Total duration (API):  1h 25m 5.6s
+Total duration (wall): 77h 56m 1.8s
+Total code changes:    5344 lines added, 1987 lines removed
+Token usage by model:
+    claude-3-5-haiku:  310.6k input, 8.5k output, 0 cache read, 0 cache write
+       claude-sonnet:  16.9k input, 186.4k output, 46.9m cache read, 1.6m cache write
+```
+
+```
+Total cost:            $118.65
+Total duration (API):  9h 39m 41.7s
+Total duration (wall): 313h 36m 4.6s
+Total code changes:    11978 lines added, 4753 lines removed
+Token usage by model:
+    claude-3-5-haiku:  2.8m input, 79.4k output, 0 cache read, 0 cache write
+       claude-sonnet:  28.9k input, 777.6k output, 220.8m cache read, 10.2m cache write
+```
+
+
+---
+
 ## 📝 License
 
 MIT © 2025 bud.chat contributors
