@@ -164,6 +164,23 @@ export async function POST(request: NextRequest) {
 
       conversation = newConversation
       actualConversationId = newConversation.id
+
+      // Add the greeting message to the new conversation
+      const greetingOrderKey = generateKeyBetween(null, null)
+      const { error: greetingError } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: actualConversationId,
+          order_key: greetingOrderKey,
+          role: 'assistant',
+          content: 'How can I help you today?',
+          json_meta: { isGreeting: true }
+        })
+
+      if (greetingError) {
+        console.error('Error creating greeting message:', greetingError)
+        // Don't fail the conversation creation for this, but log it
+      }
     } else {
       // Verify user has access to existing conversation through workspace membership
       const { data: existingConversation, error: convError } = await supabase
@@ -246,36 +263,47 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Save user message after stream starts (to reduce initial latency)
-          const { data: userMessageRecord, error: userMsgError } = await supabase
-            .from('messages')
-            .insert({
-              conversation_id: actualConversationId,
-              order_key: nextUserOrderKey,
-              role: 'user',
-              content: userMessage,
-              json_meta: {}
-            })
-            .select()
-            .single()
+          // Only save user message if this conversation doesn't already have user messages
+          // (to avoid duplicates from optimistic UI). Greeting messages don't count.
+          let userMessageRecord = null
+          const hasUserMessages = messages?.some(m => m.role === 'user') || false
+          if (!hasUserMessages) {
+            const { data: newUserMessage, error: userMsgError } = await supabase
+              .from('messages')
+              .insert({
+                conversation_id: actualConversationId,
+                order_key: nextUserOrderKey,
+                role: 'user',
+                content: userMessage,
+                json_meta: {}
+              })
+              .select()
+              .single()
+            
+            userMessageRecord = newUserMessage
 
-          if (userMsgError) {
-            console.error('Error saving user message:', userMsgError)
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-              type: 'error',
-              error: 'Failed to save user message'
-            })}\n\n`))
-            controller.close()
-            return
+            if (userMsgError) {
+              console.error('Error saving user message:', userMsgError)
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'error',
+                error: 'Failed to save user message'
+              })}\n\n`))
+              return
+            }
+          } else {
+            console.log('Skipping user message creation - conversation already has messages')
           }
 
+
           // Send the user message ID and conversation ID so frontend can update its optimistic state
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'userMessage',
-            messageId: userMessageRecord.id,
-            conversationId: actualConversationId,
-            content: userMessage
-          })}\n\n`))
+          if (userMessageRecord) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'userMessage',
+              messageId: userMessageRecord.id,
+              conversationId: actualConversationId,
+              content: userMessage
+            })}\n\n`))
+          }
           
           // Call OpenAI Responses API
           const response = await openai.chat.completions.create({

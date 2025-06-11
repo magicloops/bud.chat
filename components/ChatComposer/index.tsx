@@ -11,7 +11,8 @@ import {
   useCreateOptimisticChat,
   useUpdateMessage,
   useUpdateChatMeta,
-  useChatGetter
+  useChatGetter,
+  useChatStore
 } from '@/state/chatStore'
 import { createChat } from '@/lib/actions'
 import { useStreaming } from '@/hooks/useStreaming'
@@ -24,6 +25,7 @@ interface ChatComposerProps {
   className?: string
   placeholder?: string
   onMessageSent?: (messageId: string) => void
+  onConversationIdChange?: (newId: ConversationId) => void
 }
 
 export function ChatComposer({
@@ -32,6 +34,7 @@ export function ChatComposer({
   className,
   placeholder = "Type your message...",
   onMessageSent,
+  onConversationIdChange,
 }: ChatComposerProps) {
   const [input, setInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -51,13 +54,81 @@ export function ChatComposer({
     chatId: conversationId || '',
     onComplete: (messageId, content) => {
       console.log('Streaming completed:', { messageId, content: content.substring(0, 50) + '...' })
+      
+      // Update URL after streaming completes if this was a new conversation
+      if (conversationId === 'new') {
+        // Find the real conversation ID from all chats (since it was migrated)
+        const allChats = useChatStore.getState().chats
+        console.log('Looking for real conversation in chats:', Object.keys(allChats))
+        
+        // Debug each chat to see why our search isn't working
+        Object.values(allChats).forEach(chat => {
+          console.log('Chat debug:', {
+            id: chat.meta.id,
+            workspaceId: chat.meta.workspace_id,
+            isOptimistic: chat.meta.isOptimistic,
+            createdAt: chat.meta.created_at,
+            isRecent: new Date(chat.meta.created_at).getTime() > Date.now() - 60000
+          })
+        })
+        
+        // Simplify search - just find the most recent non-'new' conversation
+        // Since we just created it, it should be the newest one
+        const realConversation = Object.values(allChats)
+          .filter(chat => chat.meta.id !== 'new')
+          .sort((a, b) => new Date(b.meta.created_at).getTime() - new Date(a.meta.created_at).getTime())
+          [0] // Get the most recent one
+        
+        console.log('Found real conversation:', realConversation?.meta.id, realConversation?.meta)
+        
+        if (realConversation) {
+          console.log('Updating conversation ID after streaming completion:', realConversation.meta.id)
+          
+          // Debug: Check messages in both conversations before cleanup
+          const allChats = useChatStore.getState().chats
+          const debugInfo = {
+            newChat: {
+              exists: !!allChats['new'],
+              messageCount: allChats['new']?.messages.length,
+              messages: allChats['new']?.messages,
+              byId: allChats['new']?.byId ? Object.keys(allChats['new'].byId) : []
+            },
+            realChat: {
+              exists: !!allChats[realConversation.meta.id],
+              messageCount: allChats[realConversation.meta.id]?.messages.length,
+              messages: allChats[realConversation.meta.id]?.messages,
+              byId: allChats[realConversation.meta.id]?.byId ? Object.keys(allChats[realConversation.meta.id].byId) : []
+            }
+          }
+          console.log('Messages before cleanup:', debugInfo)
+          
+          // Sync the final messages from 'new' to the real conversation
+          const syncConversationMessages = useChatStore.getState().syncConversationMessages
+          syncConversationMessages('new', realConversation.meta.id)
+          
+          // Update the parent component's conversation ID
+          onConversationIdChange?.(realConversation.meta.id)
+          
+          // Update URL silently
+          window.history.replaceState(null, '', `/${realConversation.meta.id}`)
+          
+          // Wait a bit before cleaning up to ensure component has switched
+          setTimeout(() => {
+            const removeChat = useChatStore.getState().removeChat
+            removeChat('new')
+            console.log('Cleaned up temp chat')
+          }, 100)
+        } else {
+          console.log('No real conversation found for URL update')
+        }
+      }
     },
     onError: (error) => {
       console.error('Streaming error:', error)
     },
     onConversationCreated: (newConversationId) => {
-      console.log('Updating URL to new conversation:', newConversationId)
-      router.replace(`/${newConversationId}`)
+      console.log('Conversation created, will update URL after streaming completes:', newConversationId)
+      // Don't update URL immediately - wait for streaming to complete
     }
   })
 
@@ -105,6 +176,9 @@ export function ChatComposer({
         
         // Use the real conversation ID for streaming
         actualConversationId = result.data!.conversationId
+        
+        // Update URL to the real conversation ID
+        router.replace(`/${actualConversationId}`)
       }
       
       // For both new and existing conversations, use the new streaming API

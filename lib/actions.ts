@@ -132,15 +132,7 @@ export async function createChat(args: CreateChatArgs): Promise<ActionResponse<C
         json_meta: {},
       })
 
-      // Add assistant placeholder
-      currentOrderKey = generateKeyBetween(currentOrderKey, null)
-      messagesToInsert.push({
-        conversation_id: conversation.id,
-        order_key: currentOrderKey,
-        role: 'assistant',
-        content: '',
-        json_meta: { isPending: true },
-      })
+      // Assistant message will be created by the streaming API, not here
     }
 
     if (messagesToInsert.length > 0) {

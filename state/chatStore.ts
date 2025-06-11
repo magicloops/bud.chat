@@ -404,6 +404,14 @@ export const useChatStore = create<ChatStore>()(
         // Atomic finish streaming with ID update to prevent flicker
         finishStreamingWithIdUpdate: (chatId, tempMessageId, finalContent, realMessageId) => set((state) => {
           const chat = state.chats[chatId]
+          console.log('🔄 finishStreamingWithIdUpdate debug:', {
+            chatId,
+            tempMessageId,
+            realMessageId,
+            chatExists: !!chat,
+            tempMessageExists: !!(chat?.byId[tempMessageId]),
+            allMessageIds: Object.keys(chat?.byId || {})
+          })
           if (chat?.byId[tempMessageId]) {
             const message = chat.byId[tempMessageId]
             
@@ -475,7 +483,7 @@ export const useChatStore = create<ChatStore>()(
           })
           
           if (tempChat) {
-            // Copy the temp chat to the real conversation ID
+            // Copy the temp chat to the real conversation ID, preserving streaming state
             state.chats[realChatId] = {
               ...tempChat,
               meta: {
@@ -484,7 +492,15 @@ export const useChatStore = create<ChatStore>()(
                 ...realConversationData,
                 isOptimistic: false
               }
+              // Note: streaming state is already copied by ...tempChat spread
             }
+            
+            console.log('🔄 Streaming state after copy:', {
+              tempStreaming: tempChat.streaming,
+              tempStreamingMessageId: tempChat.streamingMessageId,
+              realStreaming: state.chats[realChatId].streaming,
+              realStreamingMessageId: state.chats[realChatId].streamingMessageId
+            })
             
             // Update all messages to have the new conversation ID
             Object.values(tempChat.byId).forEach(message => {
@@ -501,13 +517,35 @@ export const useChatStore = create<ChatStore>()(
               streamingMessageId: state.chats[realChatId]?.streamingMessageId
             })
             
-            // Remove the temp chat
-            delete state.chats[tempChatId]
+            // Don't delete the temp chat yet - keep it until URL updates
+            // This prevents the UI from losing access to the chat state
+            // delete state.chats[tempChatId]
             
             // Update UI state if this was the selected conversation
             if (state.ui.selectedConversation === tempChatId) {
               state.ui.selectedConversation = realChatId
             }
+          }
+        }),
+        
+        // Sync messages from one conversation to another (for temp/real conversation sync)
+        syncConversationMessages: (fromChatId, toChatId) => set((state) => {
+          const fromChat = state.chats[fromChatId]
+          const toChat = state.chats[toChatId]
+          
+          if (fromChat && toChat) {
+            // Copy messages and byId from source to target
+            toChat.messages = [...fromChat.messages]
+            toChat.byId = { ...fromChat.byId }
+            
+            // Update conversation_id in all messages
+            Object.values(toChat.byId).forEach(message => {
+              if (message) {
+                message.conversation_id = toChatId
+              }
+            })
+            
+            console.log('🔄 Synced messages from', fromChatId, 'to', toChatId, ':', toChat.messages.length, 'messages')
           }
         }),
         
@@ -638,3 +676,4 @@ export const useFinishStreamingWithIdUpdate = () => useChatStore((state) => stat
 export const useMigrateConversation = () => useChatStore((state) => state.migrateConversation)
 export const useAddError = () => useChatStore((state) => state.addError)
 export const useSetChat = () => useChatStore((state) => state.setChat)
+export const useSyncConversationMessages = () => useChatStore((state) => state.syncConversationMessages)

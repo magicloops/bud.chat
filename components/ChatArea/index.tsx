@@ -11,12 +11,23 @@ interface ChatAreaProps {
   conversationId?: ConversationId
   workspaceId: WorkspaceId
   className?: string
+  onConversationIdChange?: (newId: ConversationId) => void
 }
 
-export function ChatArea({ conversationId, workspaceId, className }: ChatAreaProps) {
+export function ChatArea({ conversationId, workspaceId, className, onConversationIdChange }: ChatAreaProps) {
   // Use granular selectors to prevent unnecessary re-renders during streaming
   const chatMeta = useChatStore((state) => state.chats[conversationId || '']?.meta)
   const isStreaming = useChatStore((state) => state.chats[conversationId || '']?.streaming || false)
+  const chat = useChatStore((state) => state.chats[conversationId || ''])
+  
+  // Debug what the component sees
+  console.log('ChatArea debug:', {
+    conversationId,
+    hasChat: !!chat,
+    messageCount: chat?.messages?.length || 0,
+    messageIds: chat?.messages || [],
+    byIdKeys: chat?.byId ? Object.keys(chat.byId) : []
+  })
 
   // Handle new conversation case (/new route)
   const isNewConversation = !conversationId
@@ -90,6 +101,7 @@ export function ChatArea({ conversationId, workspaceId, className }: ChatAreaPro
           workspaceId={workspaceId}
           placeholder={isNewConversation ? "Start a new conversation..." : "Type your message..."}
           onMessageSent={handleMessageSent}
+          onConversationIdChange={onConversationIdChange}
         />
       </div>
     </div>
