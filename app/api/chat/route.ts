@@ -357,6 +357,7 @@ export async function POST(request: NextRequest) {
           })}\n\n`))
           
           // Generate conversation title asynchronously (fire-and-forget)
+          // The realtime listener in the frontend will pick up the title update
           generateConversationTitle(actualConversationId, supabase).catch(error => {
             console.error('Background title generation failed:', error)
           })

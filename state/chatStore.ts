@@ -22,7 +22,9 @@ import { generateTempId, isTempId, sortByOrderKey } from '@/lib/fractionalKey'
 
 interface ChatStore {
   // State
-  chats: Record<ConversationId, ChatState>
+  chats: Record<ConversationId, ChatState>  // Actual storage (will be renamed to conversations)
+  registry: Record<ConversationId, ConversationId>  // displayId -> actualId mapping
+  workspaceConversations: Record<WorkspaceId, ConversationId[]>  // workspaceId -> displayId[]
   ui: UIState
   errors: Record<MessageId, OptimisticError>
   
@@ -61,6 +63,15 @@ interface ChatStore {
   
   // Actions - Persistence
   hydrate: (data: Partial<Pick<ChatStore, 'chats' | 'ui'>>) => void
+  
+  // Actions - Registry Pattern (Phase 1)
+  getConversation: (displayId: ConversationId) => ChatState | undefined
+  promoteConversation: (displayId: ConversationId, realId: ConversationId) => void
+  clearRegistryEntry: (displayId: ConversationId) => void
+  addConversationToWorkspace: (workspaceId: WorkspaceId, displayId: ConversationId) => void
+  addMultipleConversationsToWorkspace: (workspaceId: WorkspaceId, displayIds: ConversationId[]) => void
+  removeConversationFromWorkspace: (workspaceId: WorkspaceId, displayId: ConversationId) => void
+  getWorkspaceConversations: (workspaceId: WorkspaceId) => ConversationId[]
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -69,6 +80,8 @@ export const useChatStore = create<ChatStore>()(
       immer((set, get) => ({
         // Initial state
         chats: {},
+        registry: {},  // displayId -> actualId mapping
+        workspaceConversations: {},  // workspaceId -> displayId[]
         ui: {
           selectedWorkspace: null,
           selectedConversation: null,
@@ -80,31 +93,46 @@ export const useChatStore = create<ChatStore>()(
         errors: {},
         
         // Chat Management Actions
-        setChat: (chatId, chat) => set((state) => {
-          state.chats[chatId] = chat
-        }),
-        
-        updateChatMeta: (chatId, meta) => set((state) => {
-          if (state.chats[chatId]) {
-            Object.assign(state.chats[chatId].meta, meta)
+        setChat: (displayId, chat) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          state.chats[actualId] = chat
+          
+          // If this is the first time setting this chat with displayId, ensure registry is set
+          if (displayId !== actualId) {
+            state.registry[displayId] = actualId
           }
         }),
         
-        removeChat: (chatId) => set((state) => {
-          delete state.chats[chatId]
-          if (state.ui.selectedConversation === chatId) {
+        updateChatMeta: (displayId, meta) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          if (state.chats[actualId]) {
+            Object.assign(state.chats[actualId].meta, meta)
+          }
+        }),
+        
+        removeChat: (displayId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          delete state.chats[actualId]
+          
+          // Clean up registry entry
+          if (state.registry[displayId] === actualId) {
+            delete state.registry[displayId]
+          }
+          
+          if (state.ui.selectedConversation === displayId) {
             state.ui.selectedConversation = null
           }
         }),
         
-        // Message Management Actions
-        addMessage: (chatId, message) => set((state) => {
-          if (!state.chats[chatId]) {
-            console.warn(`Attempted to add message to non-existent chat: ${chatId}`)
+        // Message Management Actions (Registry-aware)
+        addMessage: (displayId, message) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          if (!state.chats[actualId]) {
+            console.warn(`Attempted to add message to non-existent chat: ${displayId} (actual: ${actualId})`)
             return
           }
           
-          const chat = state.chats[chatId]
+          const chat = state.chats[actualId]
           chat.byId[message.id] = message
           
           if (!chat.messages.includes(message.id)) {
@@ -118,8 +146,9 @@ export const useChatStore = create<ChatStore>()(
           }
         }),
         
-        updateMessage: (chatId, messageId, updates) => set((state) => {
-          const chat = state.chats[chatId]
+        updateMessage: (displayId, messageId, updates) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat?.byId[messageId]) {
             // Handle ID changes by remapping the message
             if (updates.id && updates.id !== messageId) {
@@ -141,18 +170,20 @@ export const useChatStore = create<ChatStore>()(
           }
         }),
         
-        removeMessage: (chatId, messageId) => set((state) => {
-          const chat = state.chats[chatId]
+        removeMessage: (displayId, messageId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat) {
             delete chat.byId[messageId]
             chat.messages = chat.messages.filter(id => id !== messageId)
           }
         }),
         
-        setMessages: (chatId, messages) => set((state) => {
-          if (!state.chats[chatId]) return
+        setMessages: (displayId, messages) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          if (!state.chats[actualId]) return
           
-          const chat = state.chats[chatId]
+          const chat = state.chats[actualId]
           const sortedMessages = sortByOrderKey(messages)
           
           chat.messages = sortedMessages.map(m => m.id)
@@ -232,13 +263,14 @@ export const useChatStore = create<ChatStore>()(
           const now = new Date().toISOString()
           
           set((state) => {
-            let chat = state.chats[conversationId]
+            const actualId = state.registry[conversationId] || conversationId
+            let chat = state.chats[actualId]
             
             // Create chat if it doesn't exist (for /new route)
             if (!chat) {
               chat = {
                 meta: {
-                  id: conversationId,
+                  id: conversationId,  // Use display ID for meta
                   workspace_id: workspaceId,
                   created_at: now,
                   isOptimistic: true,
@@ -247,7 +279,7 @@ export const useChatStore = create<ChatStore>()(
                 byId: {},
                 streaming: false,
                   }
-              state.chats[conversationId] = chat
+              state.chats[actualId] = chat
               state.ui.selectedConversation = conversationId
             }
             
@@ -258,7 +290,7 @@ export const useChatStore = create<ChatStore>()(
             // Add user message
             const userMessage: OptimisticMessage = {
               id: userMessageId,
-              conversation_id: conversationId,
+              conversation_id: actualId,  // Use actual storage ID
               order_key: `temp-user-${nextUserIndex}`,
               role: 'user',
               content,
@@ -272,7 +304,7 @@ export const useChatStore = create<ChatStore>()(
             // Add assistant placeholder
             const assistantMessage: OptimisticMessage = {
               id: assistantMessageId,
-              conversation_id: conversationId,
+              conversation_id: actualId,  // Use actual storage ID
               order_key: `temp-assistant-${nextAssistantIndex}`,
               role: 'assistant',
               content: '',
@@ -349,9 +381,10 @@ export const useChatStore = create<ChatStore>()(
           return { newChatId }
         },
         
-        // Streaming Actions
-        startStreaming: (chatId, messageId) => set((state) => {
-          const chat = state.chats[chatId]
+        // Streaming Actions (Registry-aware)
+        startStreaming: (displayId, messageId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat) {
             chat.streaming = true
             chat.streamingMessageId = messageId
@@ -364,8 +397,9 @@ export const useChatStore = create<ChatStore>()(
           }
         }),
         
-        appendStreamDelta: (chatId, { id, content, finished }) => set((state) => {
-          const chat = state.chats[chatId]
+        appendStreamDelta: (displayId, { id, content, finished }) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat && chat.streaming && chat.streamingMessageId === id) {
             const message = chat.byId[id]
             if (message) {
@@ -383,8 +417,9 @@ export const useChatStore = create<ChatStore>()(
           }
         }),
         
-        finishStreaming: (chatId, messageId, finalContent) => set((state) => {
-          const chat = state.chats[chatId]
+        finishStreaming: (displayId, messageId, finalContent) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat?.byId[messageId]) {
             const message = chat.byId[messageId]
             message.content = finalContent
@@ -397,21 +432,15 @@ export const useChatStore = create<ChatStore>()(
               message.isPending = false
             }
           } else {
-            console.error('finishStreaming: Message not found', { chatId, messageId, availableIds: Object.keys(chat?.byId || {}) })
+            console.error('finishStreaming: Message not found', { displayId, actualId, messageId, availableIds: Object.keys(chat?.byId || {}) })
           }
         }),
         
-        // Atomic finish streaming with ID update to prevent flicker
-        finishStreamingWithIdUpdate: (chatId, tempMessageId, finalContent, realMessageId) => set((state) => {
-          const chat = state.chats[chatId]
-          console.log('🔄 finishStreamingWithIdUpdate debug:', {
-            chatId,
-            tempMessageId,
-            realMessageId,
-            chatExists: !!chat,
-            tempMessageExists: !!(chat?.byId[tempMessageId]),
-            allMessageIds: Object.keys(chat?.byId || {})
-          })
+        // Atomic finish streaming with ID update to prevent flicker (Registry-aware)
+        finishStreamingWithIdUpdate: (displayId, tempMessageId, finalContent, realMessageId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
+          
           if (chat?.byId[tempMessageId]) {
             const message = chat.byId[tempMessageId]
             
@@ -440,12 +469,6 @@ export const useChatStore = create<ChatStore>()(
             if ('isPending' in message) {
               message.isPending = false
             }
-          } else {
-            console.error('finishStreamingWithIdUpdate: Message not found', { 
-              chatId, 
-              tempMessageId, 
-              availableIds: Object.keys(chat?.byId || {}) 
-            })
           }
         }),
         
@@ -562,8 +585,9 @@ export const useChatStore = create<ChatStore>()(
           delete state.errors[messageId]
         }),
         
-        rollbackOptimisticMessage: (chatId, messageId) => set((state) => {
-          const chat = state.chats[chatId]
+        rollbackOptimisticMessage: (displayId, messageId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          const chat = state.chats[actualId]
           if (chat) {
             delete chat.byId[messageId]
             chat.messages = chat.messages.filter(id => id !== messageId)
@@ -596,6 +620,89 @@ export const useChatStore = create<ChatStore>()(
           state.ui.composer.isSubmitting = submitting
         }),
         
+        // Registry Pattern Actions (Phase 1)
+        getConversation: (displayId) => {
+          const state = get()
+          const actualId = state.registry[displayId] || displayId
+          return state.chats[actualId]
+        },
+        
+        promoteConversation: (displayId, realId) => set((state) => {
+          const actualId = state.registry[displayId] || displayId
+          
+          // Copy conversation data to new real ID
+          if (state.chats[actualId]) {
+            state.chats[realId] = { 
+              ...state.chats[actualId],
+              meta: {
+                ...state.chats[actualId].meta,
+                id: realId,
+                isOptimistic: false
+              }
+            }
+            
+            // Clean up old conversation data if it's different from the new one
+            if (actualId !== realId) {
+              delete state.chats[actualId]
+            }
+          }
+          
+          // Update registry to point displayId to realId
+          state.registry[displayId] = realId
+          console.log('📝 Registry updated:', { displayId, realId, isTemp: displayId.startsWith('temp-') })
+          
+          // If this was a /new conversation, add the real ID to workspace conversations
+          if (displayId === 'new' && state.chats[realId]?.meta?.workspace_id) {
+            const workspaceId = state.chats[realId].meta.workspace_id
+            if (!state.workspaceConversations[workspaceId]) {
+              state.workspaceConversations[workspaceId] = []
+            }
+            if (!state.workspaceConversations[workspaceId].includes(realId)) {
+              state.workspaceConversations[workspaceId].unshift(realId)
+            }
+          }
+        }),
+
+        clearRegistryEntry: (displayId) => set((state) => {
+          // Clear registry mapping for this display ID
+          delete state.registry[displayId]
+          // Also clear the chat data for this display ID to ensure fresh start
+          delete state.chats[displayId]
+        }),
+        
+        addConversationToWorkspace: (workspaceId, displayId) => set((state) => {
+          if (!state.workspaceConversations[workspaceId]) {
+            state.workspaceConversations[workspaceId] = []
+          }
+          if (!state.workspaceConversations[workspaceId].includes(displayId)) {
+            state.workspaceConversations[workspaceId].unshift(displayId) // Add to beginning
+          }
+        }),
+        
+        // Batch version to reduce re-renders
+        addMultipleConversationsToWorkspace: (workspaceId, displayIds) => set((state) => {
+          if (!state.workspaceConversations[workspaceId]) {
+            state.workspaceConversations[workspaceId] = []
+          }
+          const existing = new Set(state.workspaceConversations[workspaceId])
+          const newIds = displayIds.filter(id => !existing.has(id))
+          if (newIds.length > 0) {
+            state.workspaceConversations[workspaceId] = [...newIds, ...state.workspaceConversations[workspaceId]]
+          }
+        }),
+        
+        removeConversationFromWorkspace: (workspaceId, displayId) => set((state) => {
+          if (state.workspaceConversations[workspaceId]) {
+            state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId]
+              .filter(id => id !== displayId)
+          }
+        }),
+        
+        getWorkspaceConversations: (workspaceId) => {
+          const state = get()
+          return state.workspaceConversations[workspaceId] || []
+        },
+        
         // Persistence Actions
         hydrate: (data) => set((state) => {
           if (data.chats) {
@@ -624,12 +731,31 @@ export const useChatStore = create<ChatStore>()(
   )
 )
 
-// Selectors for performance - components can subscribe to specific slices
-export const useChat = (chatId: ConversationId) => 
-  useChatStore((state) => state.chats[chatId])
+// Selectors for performance - components can subscribe to specific slices (Registry-aware)
+export const useChat = (displayId: ConversationId) => 
+  useChatStore((state) => {
+    const actualId = state.registry[displayId] || displayId
+    const chat = state.chats[actualId]
+    
+    // Debug: Log what's happening in useChat
+    if (displayId.startsWith('temp-')) {
+      console.log('🔍 useChat lookup for temp ID:', {
+        displayId,
+        actualId,
+        registryHasEntry: !!state.registry[displayId],
+        chatFound: !!chat,
+        chatMessageCount: chat?.messages?.length || 0
+      })
+    }
+    
+    return chat
+  })
 
-export const useMessages = (chatId: ConversationId) => {
-  const chat = useChatStore((state) => state.chats[chatId])
+export const useMessages = (displayId: ConversationId) => {
+  const chat = useChatStore((state) => {
+    const actualId = state.registry[displayId] || displayId
+    return state.chats[actualId]
+  })
   return useMemo(() => {
     if (!chat) return []
     const messages = chat.messages.map(id => chat.byId[id]).filter(Boolean)
@@ -640,7 +766,9 @@ export const useMessages = (chatId: ConversationId) => {
 export const useCurrentChat = () => 
   useChatStore((state) => {
     const { selectedConversation } = state.ui
-    return selectedConversation ? state.chats[selectedConversation] : undefined
+    if (!selectedConversation) return undefined
+    const actualId = state.registry[selectedConversation] || selectedConversation
+    return state.chats[actualId]
   })
 
 export const useUIState = () => 
@@ -663,10 +791,13 @@ export const useUpdateChatMeta = () => useChatStore((state) => state.updateChatM
 export const useRollbackOptimisticMessage = () => useChatStore((state) => state.rollbackOptimisticMessage)
 export const useGetChat = (chatId: ConversationId) => useChatStore((state) => state.chats[chatId])
 
-// For cases where you need to get a chat by dynamic ID within a component
+// For cases where you need to get a chat by dynamic ID within a component (Registry-aware)
 export const useChatGetter = () => {
-  const chats = useChatStore((state) => state.chats)
-  return useCallback((chatId: ConversationId) => chats[chatId], [chats])
+  const store = useChatStore()
+  return useCallback((displayId: ConversationId) => {
+    const actualId = store.registry[displayId] || displayId
+    return store.chats[actualId]
+  }, [store])
 }
 export const useCreateTempChat = () => useChatStore((state) => state.createTempChat)
 export const useStartStreaming = () => useChatStore((state) => state.startStreaming)
@@ -677,3 +808,11 @@ export const useMigrateConversation = () => useChatStore((state) => state.migrat
 export const useAddError = () => useChatStore((state) => state.addError)
 export const useSetChat = () => useChatStore((state) => state.setChat)
 export const useSyncConversationMessages = () => useChatStore((state) => state.syncConversationMessages)
+
+// Registry Pattern Hooks (Phase 1)
+export const useGetConversation = () => useChatStore((state) => state.getConversation)
+export const usePromoteConversation = () => useChatStore((state) => state.promoteConversation)
+export const useClearRegistryEntry = () => useChatStore((state) => state.clearRegistryEntry)
+export const useAddConversationToWorkspace = () => useChatStore((state) => state.addConversationToWorkspace)
+export const useRemoveConversationFromWorkspace = () => useChatStore((state) => state.removeConversationFromWorkspace)
+export const useGetWorkspaceConversations = () => useChatStore((state) => state.getWorkspaceConversations)

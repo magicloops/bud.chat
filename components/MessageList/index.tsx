@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { useMessages, useChatStore } from '@/state/chatStore'
-import { useAddConversation, useWorkspaceStore } from '@/state/workspaceStore'
+import { useMessages, useChatStore, useAddConversationToWorkspace } from '@/state/chatStore'
+import { useWorkspaceStore } from '@/state/workspaceStore'
 import { MessageItem } from './MessageItem'
 import { ConversationId } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -20,8 +20,21 @@ export function MessageList({
   autoScroll = true 
 }: MessageListProps) {
   const messages = useMessages(conversationId)
+  
+  // Debug: Log what messages are being displayed
+  console.log('📋 MessageList rendering:', {
+    conversationId,
+    messageCount: messages.length,
+    messages: messages.map(m => ({ 
+      id: m.id, 
+      content: m.content?.slice(0, 100), 
+      role: m.role,
+      conversation_id: m.conversation_id,
+      isOptimistic: 'isOptimistic' in m ? m.isOptimistic : 'N/A'
+    }))
+  })
   const router = useRouter()
-  const addConversation = useAddConversation()
+  const addConversationToWorkspace = useAddConversationToWorkspace()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isUserScrollingRef = useRef(false)
   const lastMessageCountRef = useRef(0)
@@ -162,14 +175,8 @@ export function MessageList({
           // Replace temp chat with real one
           setChat(data.forkedConversation.id, chatState)
           
-          // Add the new conversation to the workspace store so it appears in the sidebar
-          addConversation({
-            id: data.forkedConversation.id,
-            workspace_id: data.forkedConversation.workspace_id,
-            created_at: data.forkedConversation.created_at,
-            title: data.forkedConversation.title,
-            metadata: data.forkedConversation.metadata || {}
-          })
+          // Add the new conversation to the workspace conversations list so it appears in the sidebar
+          addConversationToWorkspace(data.forkedConversation.workspace_id, data.forkedConversation.id)
           
           // Remove temp chat
           const removeChat = useChatStore.getState().removeChat

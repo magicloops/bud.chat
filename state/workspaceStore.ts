@@ -6,10 +6,8 @@ import { useMemo } from 'react'
 import { 
   Workspace, 
   WorkspaceMember, 
-  Conversation, 
   Bud, 
   WorkspaceId, 
-  ConversationId, 
   BudId,
   BudConfig
 } from '@/lib/types'
@@ -18,13 +16,11 @@ interface WorkspaceStore {
   // State
   workspaces: Record<WorkspaceId, Workspace>
   members: Record<WorkspaceId, WorkspaceMember[]>
-  conversations: Record<WorkspaceId, Conversation[]>
   buds: Record<WorkspaceId, Bud[]>
   
   // Loading states
   loading: {
     workspaces: boolean
-    conversations: Record<WorkspaceId, boolean>
     buds: Record<WorkspaceId, boolean>
   }
   
@@ -41,11 +37,6 @@ interface WorkspaceStore {
   removeWorkspaceMember: (workspaceId: WorkspaceId, userId: string) => void
   updateMemberRole: (workspaceId: WorkspaceId, userId: string, role: string) => void
   
-  // Actions - Conversations Management
-  setConversations: (workspaceId: WorkspaceId, conversations: Conversation[]) => void
-  addConversation: (conversation: Conversation) => void
-  updateConversation: (id: ConversationId, updates: Partial<Conversation>) => void
-  removeConversation: (id: ConversationId) => void
   
   // Actions - Buds Management
   setBuds: (workspaceId: WorkspaceId, buds: Bud[]) => void
@@ -55,14 +46,10 @@ interface WorkspaceStore {
   
   // Actions - Loading States
   setWorkspacesLoading: (loading: boolean) => void
-  setConversationsLoading: (workspaceId: WorkspaceId, loading: boolean) => void
   setBudsLoading: (workspaceId: WorkspaceId, loading: boolean) => void
   
-  // Actions - Optimistic Operations
-  createOptimisticConversation: (workspaceId: WorkspaceId, budId?: BudId) => Conversation
-  
   // Actions - Persistence
-  hydrate: (data: Partial<Pick<WorkspaceStore, 'workspaces' | 'conversations' | 'buds'>>) => void
+  hydrate: (data: Partial<Pick<WorkspaceStore, 'workspaces' | 'buds'>>) => void
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>()(
@@ -72,11 +59,9 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         // Initial state
         workspaces: {},
         members: {},
-        conversations: {},
         buds: {},
         loading: {
           workspaces: false,
-          conversations: {},
           buds: {},
         },
         
@@ -98,9 +83,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         removeWorkspace: (id) => set((state) => {
           delete state.workspaces[id]
           delete state.members[id]
-          delete state.conversations[id]
           delete state.buds[id]
-          delete state.loading.conversations[id]
           delete state.loading.buds[id]
         }),
         
@@ -137,41 +120,6 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           }
         }),
         
-        // Conversations Management Actions
-        setConversations: (workspaceId, conversations) => set((state) => {
-          state.conversations[workspaceId] = conversations.sort((a, b) => 
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          )
-        }),
-        
-        addConversation: (conversation) => set((state) => {
-          const workspaceId = conversation.workspace_id
-          if (!state.conversations[workspaceId]) {
-            state.conversations[workspaceId] = []
-          }
-          
-          // Add to beginning (most recent first)
-          state.conversations[workspaceId].unshift(conversation)
-        }),
-        
-        updateConversation: (id, updates) => set((state) => {
-          // Find conversation across all workspaces
-          for (const workspaceId in state.conversations) {
-            const conversations = state.conversations[workspaceId]
-            const index = conversations.findIndex(c => c.id === id)
-            if (index >= 0) {
-              Object.assign(conversations[index], updates)
-              break
-            }
-          }
-        }),
-        
-        removeConversation: (id) => set((state) => {
-          // Remove conversation from all workspaces
-          for (const workspaceId in state.conversations) {
-            state.conversations[workspaceId] = state.conversations[workspaceId].filter(c => c.id !== id)
-          }
-        }),
         
         // Buds Management Actions
         setBuds: (workspaceId, buds) => set((state) => {
@@ -218,42 +166,16 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           state.loading.workspaces = loading
         }),
         
-        setConversationsLoading: (workspaceId, loading) => set((state) => {
-          state.loading.conversations[workspaceId] = loading
-        }),
         
         setBudsLoading: (workspaceId, loading) => set((state) => {
           state.loading.buds[workspaceId] = loading
         }),
         
-        // Optimistic Operations
-        createOptimisticConversation: (workspaceId, budId) => {
-          const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-          const conversation: Conversation = {
-            id: tempId,
-            workspace_id: workspaceId,
-            root_msg_id: null,
-            bud_id: budId || null,
-            created_at: new Date().toISOString(),
-          }
-          
-          set((state) => {
-            if (!state.conversations[workspaceId]) {
-              state.conversations[workspaceId] = []
-            }
-            state.conversations[workspaceId].unshift(conversation)
-          })
-          
-          return conversation
-        },
         
         // Persistence Actions
         hydrate: (data) => set((state) => {
           if (data.workspaces) {
             Object.assign(state.workspaces, data.workspaces)
-          }
-          if (data.conversations) {
-            Object.assign(state.conversations, data.conversations)
           }
           if (data.buds) {
             Object.assign(state.buds, data.buds)
@@ -264,8 +186,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         name: 'workspace-store',
         partialize: (state) => ({
           workspaces: state.workspaces,
-          // Persist conversations and buds for offline access
-          conversations: state.conversations,
+          // Persist buds for offline access
           buds: state.buds,
           // Don't persist loading states or members (they change frequently)
         }),
@@ -283,10 +204,6 @@ export const useWorkspaces = () => {
   return useMemo(() => Object.values(workspaces), [workspaces])
 }
 
-export const useWorkspaceConversations = (workspaceId: WorkspaceId) => {
-  const conversations = useWorkspaceStore((state) => state.conversations[workspaceId])
-  return useMemo(() => conversations || [], [conversations])
-}
 
 export const useWorkspaceBuds = (workspaceId: WorkspaceId) => {
   const buds = useWorkspaceStore((state) => state.buds[workspaceId])
@@ -296,15 +213,10 @@ export const useWorkspaceBuds = (workspaceId: WorkspaceId) => {
 export const useWorkspaceLoading = (workspaceId: WorkspaceId) =>
   useWorkspaceStore((state) => 
     state.loading.workspaces || 
-    state.loading.conversations[workspaceId] || 
     state.loading.buds[workspaceId] || 
     false
   )
 
 // Individual action hooks - the proper Zustand way
 export const useSetWorkspaces = () => useWorkspaceStore((state) => state.setWorkspaces)
-export const useSetConversations = () => useWorkspaceStore((state) => state.setConversations)
-export const useAddConversation = () => useWorkspaceStore((state) => state.addConversation)
-export const useRemoveConversation = () => useWorkspaceStore((state) => state.removeConversation)
 export const useSetWorkspacesLoading = () => useWorkspaceStore((state) => state.setWorkspacesLoading)
-export const useSetConversationsLoading = () => useWorkspaceStore((state) => state.setConversationsLoading)

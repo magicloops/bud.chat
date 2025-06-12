@@ -22,6 +22,8 @@ export function WorkspaceSelector() {
 
   const handleWorkspaceChange = (workspaceId: string) => {
     setSelectedWorkspace(workspaceId)
+    // Save to localStorage for persistence
+    localStorage.setItem('lastSelectedWorkspaceId', workspaceId)
     // Clear selected conversation when switching workspaces
     setSelectedConversation(null)
   }

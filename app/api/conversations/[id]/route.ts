@@ -23,6 +23,9 @@ export async function GET(
       .select(`
         id,
         created_at,
+        title,
+        workspace_id,
+        bud_id,
         workspace:workspace_id (
           id,
           workspace_members!workspace_members_workspace_id_fkey (

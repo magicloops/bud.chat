@@ -59,13 +59,25 @@ export function Sidebar({ className, onClose }: SidebarProps) {
               const newWorkspace = await createResponse.json()
               setWorkspaces([newWorkspace])
               setSelectedWorkspace(newWorkspace.id)
+              localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id)
             }
           } else {
             setWorkspaces(workspacesData)
             
-            // Set default workspace if none selected
-            if (!uiState.selectedWorkspace && workspacesData.length > 0) {
-              setSelectedWorkspace(workspacesData[0].id)
+            // Try to restore last selected workspace from localStorage
+            const lastSelectedWorkspaceId = localStorage.getItem('lastSelectedWorkspaceId')
+            const validWorkspaceId = lastSelectedWorkspaceId && workspacesData.find(w => w.id === lastSelectedWorkspaceId)
+            
+            if (validWorkspaceId) {
+              // Restore the last selected workspace
+              console.log('Setting restored workspace:', lastSelectedWorkspaceId)
+              setSelectedWorkspace(lastSelectedWorkspaceId)
+            } else if (workspacesData.length > 0) {
+              // Fall back to first workspace and save it
+              const firstWorkspaceId = workspacesData[0].id
+              console.log('Setting fallback workspace:', firstWorkspaceId)
+              setSelectedWorkspace(firstWorkspaceId)
+              localStorage.setItem('lastSelectedWorkspaceId', firstWorkspaceId)
             }
           }
         }
@@ -124,9 +136,9 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
       {/* Conversations - Constrained scroll area */}
       <div className="flex-1 min-h-0">
-        {selectedWorkspace ? (
+        {uiState.selectedWorkspace ? (
           <ScrollArea className="h-full w-full max-w-full">
-            <ConversationList workspaceId={selectedWorkspace.id} />
+            <ConversationList workspaceId={uiState.selectedWorkspace} />
           </ScrollArea>
         ) : (
           <div className="flex items-center justify-center h-full">

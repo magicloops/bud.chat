@@ -94,7 +94,7 @@ export function useStreaming({ chatId, onComplete, onError, onConversationCreate
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
-        conversationId: streamChatId, // Use streamChatId directly (could be "new")
+        conversationId: streamChatId.startsWith('temp-') ? 'new' : streamChatId, // Map temp IDs to 'new' for server
         message: content, 
         workspaceId: workspaceId || '1', // Fallback to '1' if not provided
         model 
@@ -152,29 +152,21 @@ export function useStreaming({ chatId, onComplete, onError, onConversationCreate
         // User message created - update with real ID and conversation ID
         console.log('User message created:', data)
         
-        // If this was a new conversation, migrate the conversation from 'new' to real ID
-        if (data.conversationId && streamChatId === 'new' && data.conversationId !== 'new') {
-          console.log('Migrating conversation from /new to real ID:', {
-            tempChatId: streamChatId,
-            realChatId: data.conversationId
+        // If this was a new conversation, notify that real ID is available (registry pattern)
+        if (data.conversationId && streamChatId.startsWith('temp-') && data.conversationId !== 'new') {
+          console.log('Registry pattern: Real conversation ID available:', {
+            displayId: streamChatId,
+            realId: data.conversationId
           })
           
-          // Migrate the entire conversation
-          migrateConversation(streamChatId, data.conversationId, {
-            workspace_id: data.workspace_id,
-            isOptimistic: false
-          })
-          
-          // Update currentChatIdRef so server message updates go to the real conversation
-          currentChatIdRef.current = data.conversationId
-          
+          // Don't migrate here - let the ChatComposer handle promotion via registry
+          // Continue streaming to the display ID (registry will handle storage mapping)
           onConversationCreated?.(data.conversationId)
         }
         
-        // Use the current chat ID (which might have been updated by migration)
-        const currentChatId = currentChatIdRef.current || streamChatId
+        // Registry pattern: always use original streamChatId, registry handles storage mapping
         if (data.messageId && tempMessageRef?.tempUserMessageId) {
-          updateMessage(currentChatId, tempMessageRef.tempUserMessageId, {
+          updateMessage(streamChatId, tempMessageRef.tempUserMessageId, {
             id: data.messageId,
             isOptimistic: false,
           })
