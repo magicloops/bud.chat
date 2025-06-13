@@ -37,8 +37,11 @@ export function UserMenu() {
   }
 
   const handleSettings = () => {
-    // TODO: Implement settings
-    console.log('Open settings')
+    // Trigger settings panel toggle
+    const settingsPanelOpen = localStorage.getItem('settingsPanelOpen') === 'true'
+    localStorage.setItem('settingsPanelOpen', String(!settingsPanelOpen))
+    // Trigger a custom event to notify the layout
+    window.dispatchEvent(new CustomEvent('toggleSettingsPanel', { detail: { open: !settingsPanelOpen } }))
   }
 
   const handleProfile = () => {

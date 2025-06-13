@@ -1,29 +1,43 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useAuth } from '@/lib/auth/auth-provider'
+import { AuthModal } from '@/components/auth/auth-modal'
 import { Sidebar } from '@/components/Sidebar'
 import SettingsPanel from '@/components/settings-panel'
 import { Button } from '@/components/ui/button'
 import { PanelLeft, PanelRight } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
-interface ChatLayoutProps {
+export default function ChatLayout({
+  children,
+}: {
   children: React.ReactNode
-}
-
-export default function ChatLayout({ children }: ChatLayoutProps) {
+}) {
+  const { user, loading } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(false)
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
 
-  // Load sidebar states from localStorage on mount
+  // Load sidebar state from localStorage on mount
   useEffect(() => {
     const savedSidebarOpen = localStorage.getItem('sidebarOpen')
-    const savedRightSidebarOpen = localStorage.getItem('rightSidebarOpen')
-    
     if (savedSidebarOpen !== null) {
       setSidebarOpen(savedSidebarOpen === 'true')
     }
-    if (savedRightSidebarOpen !== null) {
-      setRightSidebarOpen(savedRightSidebarOpen === 'true')
+    const savedSettingsPanelOpen = localStorage.getItem('settingsPanelOpen')
+    if (savedSettingsPanelOpen !== null) {
+      setSettingsPanelOpen(savedSettingsPanelOpen === 'true')
+    }
+
+    // Listen for settings panel toggle events
+    const handleToggleSettingsPanel = (event: CustomEvent) => {
+      setSettingsPanelOpen(event.detail.open)
+    }
+    
+    window.addEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener)
+    
+    return () => {
+      window.removeEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener)
     }
   }, [])
 
@@ -32,9 +46,21 @@ export default function ChatLayout({ children }: ChatLayoutProps) {
     localStorage.setItem('sidebarOpen', String(open))
   }
 
-  const handleRightSidebarToggle = (open: boolean) => {
-    setRightSidebarOpen(open)
-    localStorage.setItem('rightSidebarOpen', String(open))
+  const handleSettingsPanelToggle = (open: boolean) => {
+    setSettingsPanelOpen(open)
+    localStorage.setItem('settingsPanelOpen', String(open))
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <AuthModal />
   }
 
   return (
@@ -54,7 +80,7 @@ export default function ChatLayout({ children }: ChatLayoutProps) {
         </div>
       </div>
 
-      {/* Left Sidebar Toggle Button - Always Visible */}
+      {/* Toggle Buttons - Always Visible */}
       {!sidebarOpen && (
         <div className="absolute top-4 left-4 z-50">
           <Button
@@ -68,39 +94,38 @@ export default function ChatLayout({ children }: ChatLayoutProps) {
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 border-l">
-        {children}
-      </div>
-
-      {/* Right Sidebar */}
-      <div className={`
-        transition-[width] duration-150 ease-out h-full
-        ${rightSidebarOpen ? 'w-80' : 'w-0'}
-        overflow-hidden border-l
-      `}>
-        <div className={`
-          transition-opacity duration-100 ease-out h-full
-          ${rightSidebarOpen ? 'opacity-100' : 'opacity-0'}
-          w-80
-        `}>
-          <SettingsPanel onClose={() => handleRightSidebarToggle(false)} />
-        </div>
-      </div>
-
-      {/* Right Sidebar Toggle Button - Always Visible */}
-      {!rightSidebarOpen && (
+      {!settingsPanelOpen && (
         <div className="absolute top-4 right-4 z-50">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => handleRightSidebarToggle(true)}
+            onClick={() => handleSettingsPanelToggle(true)}
             className="h-8 w-8 bg-background/80 backdrop-blur-sm border hover:bg-accent"
           >
             <PanelRight className="h-4 w-4" />
           </Button>
         </div>
       )}
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col border-l min-w-0">
+        {children}
+      </div>
+
+      {/* Right Settings Panel */}
+      <div className={`
+        transition-[width] ease-out h-full
+        ${settingsPanelOpen ? 'w-80' : 'w-0'}
+        overflow-hidden
+      `}>
+        <div className={`
+          transition-opacity ease-out h-full
+          ${settingsPanelOpen ? 'opacity-100' : 'opacity-0'}
+          w-80
+        `}>
+          <SettingsPanel onClose={() => handleSettingsPanelToggle(false)} />
+        </div>
+      </div>
     </div>
   )
 }

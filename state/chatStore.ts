@@ -18,7 +18,11 @@ import {
   StreamDelta,
   UIState
 } from '@/lib/types'
-import { generateTempId, isTempId, sortByOrderKey } from '@/lib/fractionalKey'
+// Inline utility functions (replacing deleted fractionalKey.ts)
+const generateTempId = (): string => `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+const isTempId = (id: string): boolean => id.startsWith('temp-')
+const sortByOrderKey = <T extends { order_key: string }>(messages: T[]): T[] => 
+  [...messages].sort((a, b) => a.order_key.localeCompare(b.order_key))
 
 interface ChatStore {
   // State

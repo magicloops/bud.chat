@@ -70,12 +70,10 @@ export function Sidebar({ className, onClose }: SidebarProps) {
             
             if (validWorkspaceId) {
               // Restore the last selected workspace
-              console.log('Setting restored workspace:', lastSelectedWorkspaceId)
               setSelectedWorkspace(lastSelectedWorkspaceId)
             } else if (workspacesData.length > 0) {
               // Fall back to first workspace and save it
               const firstWorkspaceId = workspacesData[0].id
-              console.log('Setting fallback workspace:', firstWorkspaceId)
               setSelectedWorkspace(firstWorkspaceId)
               localStorage.setItem('lastSelectedWorkspaceId', firstWorkspaceId)
             }

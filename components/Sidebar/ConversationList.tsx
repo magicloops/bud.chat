@@ -5,13 +5,17 @@ import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { 
-  useGetWorkspaceConversations,
-  useGetConversation,
-  useRemoveConversationFromWorkspace,
+  useConversations,
+  useSetConversation,
+  useWorkspaceConversations,
   useAddConversationToWorkspace,
-  useSetChat,
-  useChatStore
-} from '@/state/chatStore'
+  useRemoveConversationFromWorkspace,
+  useSetWorkspaceConversations,
+  useSelectedWorkspace,
+  useConversation,
+  Conversation,
+  ConversationMeta
+} from '@/state/simpleChatStore'
 import { usePathname } from 'next/navigation'
 import { WorkspaceId, ConversationId } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -40,149 +44,79 @@ interface ConversationListProps {
 export function ConversationList({ workspaceId }: ConversationListProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const getWorkspaceConversations = useGetWorkspaceConversations()
-  const getConversation = useGetConversation()
-  const removeConversationFromWorkspace = useRemoveConversationFromWorkspace()
+  const conversationsRecord = useConversations()
+  const workspaceConversationIds = useWorkspaceConversations(workspaceId)
+  const setConversation = useSetConversation()
   const addConversationToWorkspace = useAddConversationToWorkspace()
-  const setChat = useSetChat()
+  const removeConversationFromWorkspace = useRemoveConversationFromWorkspace()
+  const setWorkspaceConversations = useSetWorkspaceConversations()
+  const selectedWorkspace = useSelectedWorkspace()
   const [isLoading, setIsLoading] = useState(false)
   const realtimeSetupRef = useRef(false)
+  const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
-  // Create stable selectors that return references to stable objects
-  const workspaceConversationsMap = useChatStore((state) => state.workspaceConversations)
-  const chats = useChatStore((state) => state.chats)
-  const registry = useChatStore((state) => state.registry)
-  
-  // Get the specific workspace conversations with a stable reference
+  // Get conversations for this workspace (much simpler with new store)
   const workspaceConversations = useMemo(() => {
-    return workspaceConversationsMap[workspaceId] || []
-  }, [workspaceConversationsMap, workspaceId])
-  
-  // Use subscribed data in memoized computation
-  const conversations = useMemo(() => {
-    console.log('Computing conversations - workspace IDs:', workspaceConversations.length, 'chats:', Object.keys(chats).length, 'registry:', Object.keys(registry).length)
+    const conversationIds = workspaceConversationIds || []
     
-    const result = workspaceConversations
-      .map(displayId => {
-        const actualId = registry[displayId] || displayId
-        const conversation = chats[actualId]
-        
-        if (conversation?.meta && !conversation.meta.isOptimistic) {
-          return { ...conversation.meta, displayId }
-        }
-        return null
-      })
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    const result = conversationIds
+      .map(conversationId => conversationsRecord[conversationId])
+      .filter(Boolean) // Remove any undefined conversations
+      .map(conversation => conversation.meta) // Extract metadata for list display
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Sort by newest first
     
-    console.log('Computed conversations result:', result.length, 'conversations')
     return result
-  }, [workspaceConversations, chats, registry])
+  }, [workspaceConversationIds, conversationsRecord, workspaceId])
   
   // Extract current conversation ID from URL
   const currentConversationId = pathname.split('/').pop()
 
   // Load conversations for the workspace and add them to ChatStore
   useEffect(() => {
-    console.log('ConversationList useEffect triggered - workspaceId:', workspaceId)
-    
     const loadConversations = async () => {
       if (!workspaceId) {
-        console.log('No workspaceId provided to ConversationList')
         return
       }
       
       // Check if we already have conversations loaded for this workspace
-      const existingConversations = getWorkspaceConversations(workspaceId)
-      console.log('Existing conversations for workspace', workspaceId, ':', existingConversations.length)
-      if (existingConversations.length > 0) {
-        console.log('Conversations already exist, skipping load')
+      const existingIds = workspaceConversationIds || []
+      if (existingIds.length > 0) {
         return
       }
-      
-      console.log('Fetching conversations from API for workspace:', workspaceId)
       
       try {
         setIsLoading(true)
         
         const response = await fetch(`/api/conversations?workspace_id=${workspaceId}`)
-        console.log('API response status:', response.status, response.statusText)
         if (response.ok) {
           const conversationsData = await response.json()
-          console.log('Received conversations data:', conversationsData.length, 'conversations')
           
-          // Store conversations in a more efficient way
-          const conversationsToAdd: any[] = []
-          const workspaceConvIds: string[] = []
+          // Store conversations using new simple store
+          const conversationIds: string[] = []
           
           conversationsData.forEach((conv: any) => {
-            // Check if conversation already exists
-            const existingConversation = getConversation(conv.id)
-            
-            if (!existingConversation) {
-              // Store new conversations
-              conversationsToAdd.push({
-                id: conv.id,
-                chatState: {
-                  meta: {
-                    id: conv.id,
-                    workspace_id: conv.workspace_id,
-                    created_at: conv.created_at,
-                    title: conv.title,
-                    bud_id: conv.bud_id,
-                  },
-                  messages: [], // Messages will be loaded when conversation is opened
-                  byId: {},
-                  streaming: false,
-                }
-              })
-            } else {
-              // Update existing conversation metadata with server data, but preserve important state
-              const existingTitle = existingConversation.meta?.title
-              const serverTitle = conv.title
-              const finalTitle = serverTitle || existingTitle || 'New Chat'
-              
-              console.log('Updating conversation', conv.id, 'existing title:', existingTitle, 'server title:', serverTitle, 'final title:', finalTitle)
-              
-              const updatedChatState = {
-                ...existingConversation,
-                meta: {
-                  ...existingConversation.meta,
-                  // Update with server data
-                  workspace_id: conv.workspace_id,
-                  created_at: conv.created_at,
-                  bud_id: conv.bud_id,
-                  // Use server title if it exists, otherwise keep existing
-                  title: finalTitle,
-                }
-              }
-              
-              // Add to update list
-              conversationsToAdd.push({
-                id: conv.id,
-                chatState: updatedChatState
-              })
+            const conversationMeta: ConversationMeta = {
+              id: conv.id,
+              title: conv.title || 'New Chat',
+              workspace_id: conv.workspace_id,
+              bud_id: conv.bud_id,
+              created_at: conv.created_at
             }
             
-            // Collect workspace conversation IDs
-            workspaceConvIds.push(conv.id)
+            const conversation: Conversation = {
+              id: conv.id,
+              messages: [], // Messages will be loaded when conversation is opened
+              isStreaming: false,
+              meta: conversationMeta
+            }
+            
+            // Store conversation in the new store
+            setConversation(conv.id, conversation)
+            conversationIds.push(conv.id)
           })
           
-          // Batch the store updates to reduce re-renders
-          conversationsToAdd.forEach(({ id, chatState }) => {
-            setChat(id, chatState)
-          })
-          
-          // Use a single batch update instead of individual calls to prevent excessive re-renders
-          // For now, we'll do individual calls but add a check to prevent duplicates
-          const existingIds = getWorkspaceConversations(workspaceId)
-          const newIds = workspaceConvIds.filter(id => !existingIds.includes(id))
-          
-          newIds.forEach(convId => {
-            addConversationToWorkspace(workspaceId, convId)
-          })
-          
-          console.log('Successfully processed', conversationsToAdd.length, 'new conversations, added', newIds.length, 'to workspace')
+          // Set all conversation IDs for this workspace at once
+          setWorkspaceConversations(workspaceId, conversationIds)
         } else {
           console.error('Failed to load conversations:', response.status, response.statusText)
         }
@@ -198,13 +132,9 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
 
   // Set up realtime listener for conversation updates
   useEffect(() => {
-    console.log('Realtime effect triggered with workspaceId:', workspaceId)
     if (!workspaceId) {
-      console.log('No workspaceId for realtime listener')
       return
     }
-
-    console.log('Setting up realtime listener for workspace:', workspaceId)
     const supabase = createClient()
     
     // Listen for conversation updates in this workspace
@@ -219,84 +149,65 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
           filter: `workspace_id=eq.${workspaceId}`,
         },
         (payload) => {
-          console.log('🔄 Realtime event received:', {
-            eventType: payload.eventType,
-            table: payload.table,
-            schema: payload.schema,
-            workspaceId,
-            payloadOld: payload.old,
-            payloadNew: payload.new
-          })
-          
           if (payload.eventType === 'INSERT') {
-            console.log('🆕 New conversation created via realtime:', payload.new)
+            
+            // Add new conversation to the store
+            const newConv = payload.new as any
+            const conversationMeta: ConversationMeta = {
+              id: newConv.id,
+              title: newConv.title || 'New Chat',
+              workspace_id: newConv.workspace_id,
+              bud_id: newConv.bud_id,
+              created_at: newConv.created_at
+            }
+            
+            const conversation: Conversation = {
+              id: newConv.id,
+              messages: [],
+              isStreaming: false,
+              meta: conversationMeta
+            }
+            
+            setConversation(newConv.id, conversation)
+            addConversationToWorkspace(workspaceId, newConv.id)
+            
           } else if (payload.eventType === 'UPDATE') {
-            console.log('🔄 Conversation updated via realtime:', {
-              conversationId: payload.new?.id,
-              oldTitle: payload.old?.title,
-              newTitle: payload.new?.title,
-              oldData: payload.old,
-              newData: payload.new
-            })
-            
-            // Update the conversation in the store with new metadata
+            // Update the conversation in the new store
             const updatedConversation = payload.new as any
-            const existingConversation = getConversation(updatedConversation.id)
-            
-            console.log('Store lookup for conversation:', {
-              conversationId: updatedConversation.id,
-              found: !!existingConversation,
-              existingTitle: existingConversation?.meta?.title,
-              newTitle: updatedConversation.title
-            })
+            const existingConversation = conversationsRecord[updatedConversation.id]
             
             if (existingConversation) {
-              console.log('📝 Updating conversation title:', {
-                from: existingConversation.meta?.title,
-                to: updatedConversation.title,
-                conversationId: updatedConversation.id
-              })
               
-              const updatedChatState = {
+              const updatedConversationData: Conversation = {
                 ...existingConversation,
                 meta: {
                   ...existingConversation.meta,
                   title: updatedConversation.title,
-                  // Update other fields that might have changed
                   workspace_id: updatedConversation.workspace_id,
                   created_at: updatedConversation.created_at,
                   bud_id: updatedConversation.bud_id,
                 }
               }
               
-              // Update the conversation in the store
-              setChat(updatedConversation.id, updatedChatState)
-              console.log('✅ Conversation updated in store via realtime:', {
-                conversationId: updatedConversation.id,
-                newTitle: updatedConversation.title
-              })
-            } else {
-              console.log('❌ Conversation not found in store, cannot update:', {
-                conversationId: updatedConversation.id,
-                availableConversations: Object.keys(chats),
-                registryKeys: Object.keys(registry)
-              })
+              // Update the conversation in the new store
+              setConversation(updatedConversation.id, updatedConversationData)
             }
           } else if (payload.eventType === 'DELETE') {
-            console.log('🗑️ Conversation deleted via realtime:', payload.old)
+            const deletedConversation = payload.old as any
+            removeConversationFromWorkspace(workspaceId, deletedConversation.id)
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status)
-      })
-
-    console.log('Realtime listener subscribed for workspace:', workspaceId)
+      .subscribe()
 
     // Cleanup subscription on unmount or workspace change
     return () => {
-      console.log('Cleaning up realtime listener for workspace:', workspaceId)
       supabase.removeChannel(conversationChannel)
+      
+      // Also cleanup any pending preload timeout
+      if (preloadTimeoutRef.current) {
+        clearTimeout(preloadTimeoutRef.current)
+      }
     }
   }, [workspaceId])
 
@@ -330,8 +241,40 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const handleConversationBranch = useCallback((conversationId: ConversationId, e: React.MouseEvent) => {
     e.stopPropagation()
     // TODO: Implement conversation branching
-    console.log('Branch conversation:', conversationId)
   }, [])
+  
+  // Preload conversation messages on hover (debounced)
+  const handleConversationHover = useCallback((conversationId: ConversationId) => {
+    // Clear any existing timeout
+    if (preloadTimeoutRef.current) {
+      clearTimeout(preloadTimeoutRef.current)
+    }
+    
+    // Set up a new timeout for preloading
+    preloadTimeoutRef.current = setTimeout(async () => {
+      const existingConversation = conversationsRecord[conversationId]
+      
+      // Only preload if conversation exists but has no messages
+      if (existingConversation && existingConversation.messages.length === 0) {
+        try {
+          const response = await fetch(`/api/conversations/${conversationId}?include_messages=true`)
+          if (response.ok) {
+            const conversationData = await response.json()
+            
+            // Update the existing conversation with messages
+            const updatedConversation: Conversation = {
+              ...existingConversation,
+              messages: conversationData.messages || []
+            }
+            
+            setConversation(conversationId, updatedConversation)
+          }
+        } catch (error) {
+          // Silently fail - this is just opportunistic preloading
+        }
+      }
+    }, 150) // 150ms debounce
+  }, [conversationsRecord, setConversation])
 
   if (isLoading) {
     return (
@@ -349,7 +292,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     )
   }
 
-  if (conversations.length === 0) {
+  if (workspaceConversations.length === 0) {
     return (
       <div className="p-4 text-center text-muted-foreground">
         <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -361,21 +304,22 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
 
   return (
     <div className="p-2 space-y-1 min-h-0 w-full max-w-full">
-      {conversations.map((conversation) => {
-        const isSelected = currentConversationId === conversation.displayId
-        const createdAt = new Date(conversation.created_at)
+      {workspaceConversations.map((conversationMeta) => {
+        const isSelected = currentConversationId === conversationMeta.id
+        const createdAt = new Date(conversationMeta.created_at)
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true })
         
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
-          return conversation.title || 'New Chat'
+          return conversationMeta.title || 'New Chat'
         }
         
         return (
           <Link
-            key={conversation.displayId}
-            href={`/${conversation.displayId}`}
+            key={conversationMeta.id}
+            href={`/chat/${conversationMeta.id}`}
             prefetch={false}
+            onMouseEnter={() => handleConversationHover(conversationMeta.id)}
             className={cn(
               "group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden block",
               isSelected && "bg-muted"
@@ -399,13 +343,13 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => handleConversationBranch(conversation.displayId, e)}>
+                      <DropdownMenuItem onClick={(e) => handleConversationBranch(conversationMeta.id, e)}>
                         <GitBranch className="h-3 w-3 mr-2" />
                         Branch
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem 
-                        onClick={(e) => handleConversationDelete(conversation.displayId, e)}
+                        onClick={(e) => handleConversationDelete(conversationMeta.id, e)}
                         className="text-destructive"
                       >
                         <Trash2 className="h-3 w-3 mr-2" />
