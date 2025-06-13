@@ -37,7 +37,6 @@ export default function NewChatPage() {
       return
     }
 
-    console.log('🚀 Starting new conversation with streaming-first approach')
     
     // 1. Optimistic UI updates (instant)
     const userMessage = createUserMessage(content)

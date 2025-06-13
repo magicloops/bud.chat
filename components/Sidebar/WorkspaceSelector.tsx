@@ -9,23 +9,44 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useWorkspaces } from '@/state/workspaceStore'
-import { useUIState, useSetSelectedWorkspace, useSetSelectedConversation } from '@/state/chatStore'
+import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useSimpleChatStore } from '@/state/simpleChatStore'
 import { Building2, Plus } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 export function WorkspaceSelector() {
+  const router = useRouter()
   const workspaces = useWorkspaces()
-  const uiState = useUIState()
+  const selectedWorkspaceId = useSelectedWorkspace()
   const setSelectedWorkspace = useSetSelectedWorkspace()
-  const setSelectedConversation = useSetSelectedConversation()
+  const conversationsRecord = useConversations()
 
-  const selectedWorkspace = workspaces.find(w => w.id === uiState.selectedWorkspace)
+  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
 
   const handleWorkspaceChange = (workspaceId: string) => {
     setSelectedWorkspace(workspaceId)
     // Save to localStorage for persistence
     localStorage.setItem('lastSelectedWorkspaceId', workspaceId)
-    // Clear selected conversation when switching workspaces
-    setSelectedConversation(null)
+    
+    // Get workspace conversations directly from store
+    const storeState = useSimpleChatStore.getState()
+    const workspaceConversationIds = storeState.workspaceConversations[workspaceId]
+    
+    if (workspaceConversationIds && workspaceConversationIds.length > 0) {
+      // Find the most recent conversation by created_at
+      const workspaceConversations = workspaceConversationIds
+        .map(id => storeState.conversations[id])
+        .filter(Boolean)
+        .sort((a, b) => new Date(b.meta.created_at).getTime() - new Date(a.meta.created_at).getTime())
+      
+      if (workspaceConversations.length > 0) {
+        const mostRecentConversation = workspaceConversations[0]
+        router.push(`/chat/${mostRecentConversation.id}`)
+        return
+      }
+    }
+    
+    // Fall back to new conversation if no conversations exist
+    router.push('/new')
   }
 
   const handleNewWorkspace = async () => {
@@ -68,7 +89,7 @@ export function WorkspaceSelector() {
   return (
     <div className="space-y-2">
       <Select
-        value={uiState.selectedWorkspace || undefined}
+        value={selectedWorkspaceId || undefined}
         onValueChange={handleWorkspaceChange}
       >
         <SelectTrigger>

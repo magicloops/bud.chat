@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConversationList } from './ConversationList'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import { UserMenu } from './UserMenu'
-import { useUIState, useSetSelectedWorkspace, useSetSelectedConversation } from '@/state/chatStore'
+import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/simpleChatStore'
 import { 
   useWorkspaces, 
   useSetWorkspaces, 
@@ -14,7 +15,6 @@ import {
 } from '@/state/workspaceStore'
 import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRouter } from 'next/navigation'
 
 interface SidebarProps {
   className?: string
@@ -23,9 +23,8 @@ interface SidebarProps {
 
 export function Sidebar({ className, onClose }: SidebarProps) {
   const router = useRouter()
-  const uiState = useUIState()
+  const selectedWorkspaceId = useSelectedWorkspace()
   const setSelectedWorkspace = useSetSelectedWorkspace()
-  const setSelectedConversation = useSetSelectedConversation()
   const setWorkspaces = useSetWorkspaces()
   const setWorkspacesLoading = useSetWorkspacesLoading()
   const workspaces = useWorkspaces()
@@ -93,14 +92,13 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   const handleNewConversation = () => {
     // Navigate to new conversation route
     router.push('/new')
-    setSelectedConversation(null)
   }
 
   const toggleSidebar = () => {
     onClose()
   }
 
-  const selectedWorkspace = workspaces.find(w => w.id === uiState.selectedWorkspace)
+  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
 
   return (
     <div className={cn("w-60 border-r bg-muted/30 flex flex-col h-full", className)}>
@@ -134,9 +132,9 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
       {/* Conversations - Constrained scroll area */}
       <div className="flex-1 min-h-0">
-        {uiState.selectedWorkspace ? (
+        {selectedWorkspaceId ? (
           <ScrollArea className="h-full w-full max-w-full">
-            <ConversationList workspaceId={uiState.selectedWorkspace} />
+            <ConversationList workspaceId={selectedWorkspaceId} />
           </ScrollArea>
         ) : (
           <div className="flex items-center justify-center h-full">
