@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/lib/auth/auth-provider'
 import { AuthModal } from '@/components/auth/auth-modal'
 import { Sidebar } from '@/components/Sidebar'
-import { useSetSelectedConversation } from '@/state/chatStore'
 import { Button } from '@/components/ui/button'
 import { MessageSquare, Plus, PanelLeft } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
@@ -13,7 +12,6 @@ import { Loader2 } from 'lucide-react'
 export default function HomePage() {
   const { user, loading } = useAuth()
   const router = useRouter()
-  const setSelectedConversation = useSetSelectedConversation()
   
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -31,7 +29,6 @@ export default function HomePage() {
   }
 
   const handleNewConversation = () => {
-    setSelectedConversation(null)
     router.push('/new')
   }
 

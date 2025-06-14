@@ -22,7 +22,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useChatError } from '@/state/chatStore'
 import { useAuth } from '@/lib/auth/auth-provider'
 
 interface MessageItemProps {
@@ -45,7 +44,7 @@ export const MessageItem = memo(function MessageItem({
   onBranch,
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const error = useChatError(message.id)
+  const error = null // TODO: Implement error handling in new architecture
   const { user } = useAuth()
 
 
