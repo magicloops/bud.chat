@@ -67,9 +67,11 @@ async function createConversationInBackground(
   const supabase = await createClient()
   
   try {
-    console.log('💾 Creating conversation in background...', { messageCount: messages.length, workspaceId })
+    const dbStartTime = Date.now()
+    console.log('💾 PERF: Creating conversation in background...', { messageCount: messages.length, workspaceId })
     
     // Create conversation
+    const convStartTime = Date.now()
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .insert({
@@ -79,13 +81,14 @@ async function createConversationInBackground(
       })
       .select()
       .single()
+    const convCreationTime = Date.now() - convStartTime
 
     if (convError || !conversation) {
       console.error('❌ Error creating conversation:', convError)
       throw new Error('Failed to create conversation')
     }
 
-    console.log('✅ Conversation created:', conversation.id)
+    console.log('✅ PERF: Conversation created in:', convCreationTime, 'ms -', conversation.id)
 
     // Create messages with proper ordering
     let previousOrderKey: string | null = null
@@ -104,20 +107,25 @@ async function createConversationInBackground(
       }
     })
 
+    const messagesStartTime = Date.now()
     const { error: messagesError } = await supabase
       .from('messages')
       .insert(messageInserts)
+    const messagesCreationTime = Date.now() - messagesStartTime
 
     if (messagesError) {
       console.error('❌ Error creating messages:', messagesError)
       throw new Error('Failed to create messages')
     }
 
-    console.log('✅ Messages created for conversation:', conversation.id)
+    console.log('✅ PERF: Messages created in:', messagesCreationTime, 'ms for conversation:', conversation.id)
 
     // Generate title in background (fire and forget)
     generateConversationTitleInBackground(conversation.id, messages, supabase)
       .catch(error => console.error('Background title generation failed:', error))
+
+    const totalDbTime = Date.now() - dbStartTime
+    console.log('💾 PERF: Total background DB operations completed in:', totalDbTime, 'ms')
 
     return conversation.id
   } catch (error) {
@@ -189,14 +197,19 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          const streamStartTime = Date.now()
+          console.log('🚀 PERF: Starting LLM request...')
+          
           // 1. Start LLM streaming IMMEDIATELY - no database operations blocking!
+          const llmStartTime = Date.now()
           const openaiStream = await openai.chat.completions.create({
             model,
             messages: openaiMessages,
             stream: true,
           })
+          const llmSetupTime = Date.now() - llmStartTime
 
-          console.log('⚡ LLM streaming started - time to first token should be minimal!')
+          console.log('⚡ PERF: LLM setup completed in:', llmSetupTime, 'ms')
 
           // 2. Create conversation in background (don't await - parallel processing)
           let conversationCreationPromise = createConversationInBackground(messages, workspaceId, budId)
@@ -206,19 +219,49 @@ export async function POST(request: NextRequest) {
           // 3. Stream LLM response while database operations happen in parallel
           let fullContent = ''
           let tokenCount = 0
+          let firstTokenTime: number | null = null
+          let lastTokenTime = Date.now()
 
           for await (const chunk of openaiStream) {
+            const chunkStartTime = Date.now()
             const content = chunk.choices[0]?.delta?.content || ''
             
             if (content) {
-              fullContent += content
               tokenCount++
+              fullContent += content
               
-              // Send token to client immediately
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                type: 'token',
-                content
-              })}\n\n`))
+              // Track first token timing
+              if (firstTokenTime === null) {
+                firstTokenTime = Date.now()
+                const timeToFirstToken = firstTokenTime - streamStartTime
+                console.log('⚡ PERF: Time to first token from LLM:', timeToFirstToken, 'ms')
+              }
+              
+              // Track inter-token timing
+              const timeSinceLastToken = chunkStartTime - lastTokenTime
+              if (tokenCount % 20 === 0) {
+                console.log(`⚡ PERF: Token ${tokenCount} - LLM inter-token delay:`, timeSinceLastToken, 'ms')
+              }
+              lastTokenTime = chunkStartTime
+              
+              // Send token to client immediately with aggressive anti-buffering
+              const encodeStart = Date.now()
+              
+              // Use minimal JSON and add padding to force immediate transmission
+              const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
+              const chunk = encoder.encode(data)
+              controller.enqueue(chunk)
+              
+              // Send a keep-alive chunk to force flush (browsers batch small chunks)
+              if (tokenCount % 5 === 0) {
+                controller.enqueue(encoder.encode(': keep-alive\n\n'))
+              }
+              
+              const encodeTime = Date.now() - encodeStart
+              
+              if (encodeTime > 5) {
+                console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
+              }
             }
 
             // Check if conversation creation is complete (non-blocking)
@@ -267,7 +310,11 @@ export async function POST(request: NextRequest) {
           // 5. Save assistant message to database (if conversation was created)
           if (conversationId && fullContent) {
             try {
+              const assistantSaveStartTime = Date.now()
+              console.log('💾 PERF: Saving assistant message to DB...')
+              
               // Get the last message order key to generate next one
+              const orderKeyStartTime = Date.now()
               const { data: lastMessage } = await supabase
                 .from('messages')
                 .select('order_key')
@@ -275,9 +322,11 @@ export async function POST(request: NextRequest) {
                 .order('order_key', { ascending: false })
                 .limit(1)
                 .single()
+              const orderKeyTime = Date.now() - orderKeyStartTime
 
               const assistantOrderKey = generateKeyBetween(lastMessage?.order_key || null, null)
 
+              const insertStartTime = Date.now()
               const { error: assistantMsgError } = await supabase
                 .from('messages')
                 .insert({
@@ -289,11 +338,14 @@ export async function POST(request: NextRequest) {
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString()
                 })
+              const insertTime = Date.now() - insertStartTime
+
+              const totalAssistantSaveTime = Date.now() - assistantSaveStartTime
 
               if (assistantMsgError) {
                 console.error('❌ Error saving assistant message:', assistantMsgError)
               } else {
-                console.log('✅ Assistant message saved')
+                console.log('✅ PERF: Assistant message saved in:', totalAssistantSaveTime, 'ms (order key:', orderKeyTime, 'ms, insert:', insertTime, 'ms)')
               }
             } catch (error) {
               console.error('❌ Error saving assistant message:', error)
@@ -324,8 +376,11 @@ export async function POST(request: NextRequest) {
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control',
       },
     })
   } catch (error) {

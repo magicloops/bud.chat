@@ -15,19 +15,19 @@ import {
 } from '@/state/simpleChatStore'
 import { createUserMessage, createAssistantPlaceholder } from '@/lib/messageHelpers'
 
-interface NewChatComposerProps {
+interface ChatComposerProps {
   conversationId: string
   className?: string
   placeholder?: string
   onMessageSent?: (messageId: string) => void
 }
 
-export function NewChatComposer({ 
+export function ChatComposer({ 
   conversationId, 
   className, 
   placeholder = "Type your message...",
   onMessageSent
-}: NewChatComposerProps) {
+}: ChatComposerProps) {
   const [input, setInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -79,29 +79,62 @@ export function NewChatComposer({
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      // 4. Handle streaming response
+      // 4. Handle streaming response with performance tracking
       const reader = response.body?.getReader()
       if (!reader) {
         throw new Error('No response body')
       }
 
       const decoder = new TextDecoder()
+      let tokenCount = 0
+      let streamStartTime = performance.now()
+      let lastTokenTime = performance.now()
 
       while (true) {
+        const chunkStartTime = performance.now()
         const { done, value } = await reader.read()
         if (done) break
 
+        const parseStartTime = performance.now()
         const chunk = decoder.decode(value, { stream: true })
         const lines = chunk.split('\n')
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
+              const jsonParseStart = performance.now()
               const data = JSON.parse(line.slice(6))
+              const jsonParseTime = performance.now() - jsonParseStart
+              
+              if (jsonParseTime > 2) {
+                console.log('🐌 PERF: Slow JSON parse:', jsonParseTime.toFixed(2), 'ms')
+              }
               
               switch (data.type) {
                 case 'token':
+                  // Performance: Track token timing
+                  tokenCount++
+                  const currentTime = performance.now()
+                  const timeSinceStart = currentTime - streamStartTime
+                  const timeSinceLastToken = currentTime - lastTokenTime
+                  lastTokenTime = currentTime
+                  
+                  if (tokenCount === 1) {
+                    console.log('⚡ PERF: Time to first token:', timeSinceStart.toFixed(2), 'ms')
+                  }
+                  
+                  if (tokenCount % 10 === 0) {
+                    console.log(`⚡ PERF: Token ${tokenCount} - Inter-token delay:`, timeSinceLastToken.toFixed(2), 'ms')
+                  }
+                  
+                  // Performance: Time React state update
+                  const reactUpdateStart = performance.now()
                   appendToStreamingMessage(conversationId, data.content)
+                  const reactUpdateTime = performance.now() - reactUpdateStart
+                  
+                  if (reactUpdateTime > 5) {
+                    console.log('🐌 PERF: Slow React update:', reactUpdateTime.toFixed(2), 'ms')
+                  }
                   break
                   
                 case 'complete':

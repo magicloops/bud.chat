@@ -72,21 +72,37 @@ export async function POST(
 
     console.log('✅ User has access to conversation:', conversationId)
 
-    // Get existing messages for context
+    // Preload messages immediately after auth check (before streaming starts)
+    const preloadStartTime = Date.now()
+    console.log('📚 PERF: Preloading conversation messages...')
+    
     const { data: existingMessages, error: messagesError } = await supabase
       .from('messages')
-      .select('role, content')
+      .select('role, content, order_key')
       .eq('conversation_id', conversationId)
       .order('order_key', { ascending: true })
-
+    
+    const preloadTime = Date.now() - preloadStartTime
+    
     if (messagesError) {
       console.error('❌ Error fetching messages:', messagesError)
       return new Response('Failed to fetch conversation context', { status: 500 })
     }
-
-    console.log('📚 Loaded conversation context:', { messageCount: existingMessages?.length })
-
-    // Build OpenAI messages array
+    
+    console.log('📚 PERF: Messages preloaded in:', preloadTime, 'ms - Message count:', existingMessages?.length)
+    
+    // Generate order keys immediately from preloaded messages
+    const keyGenStart = Date.now()
+    const lastMessage = existingMessages?.[existingMessages.length - 1]
+    const lastOrderKey = lastMessage?.order_key || null
+    
+    const userOrderKey = generateKeyBetween(lastOrderKey, null)
+    const assistantOrderKey = generateKeyBetween(userOrderKey, null)
+    
+    console.log('🔑 PERF: Order keys generated in:', Date.now() - keyGenStart, 'ms')
+    
+    // Build OpenAI messages array immediately
+    const buildStart = Date.now()
     const openaiMessages = [
       ...(existingMessages || []).map(msg => ({
         role: msg.role as 'system' | 'user' | 'assistant',
@@ -97,99 +113,173 @@ export async function POST(
         content: message
       }
     ]
+    const buildTime = Date.now() - buildStart
+    console.log('📚 PERF: OpenAI messages built in:', buildTime, 'ms')
 
     console.log('🤖 Starting LLM streaming for existing conversation...')
 
-    // Create the streaming response
+    // Create the streaming response with aggressive anti-buffering
     const encoder = new TextEncoder()
     
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // 1. Start LLM streaming immediately
+          const streamStartTime = Date.now()
+          console.log('🚀 PERF: Starting LLM request for existing conversation...')
+          
+          // 1. Start LLM streaming immediately (messages already preloaded)
+          const llmStartTime = Date.now()
           const openaiStream = await openai.chat.completions.create({
             model,
             messages: openaiMessages,
             stream: true,
           })
+          const llmSetupTime = Date.now() - llmStartTime
+          console.log('⚡ PERF: LLM setup completed in:', llmSetupTime, 'ms')
 
-          console.log('⚡ LLM streaming started for existing conversation')
+          // 2. Save user message in background (using pre-generated order key)
+          const saveUserMessageInBackground = async () => {
+            try {
+              const userSaveStartTime = Date.now()
+              console.log('💾 PERF: Saving user message in background...')
+              
+              const insertStartTime = Date.now()
+              const { error: userMsgError } = await supabase
+                .from('messages')
+                .insert({
+                  conversation_id: conversationId,
+                  order_key: userOrderKey,
+                  role: 'user',
+                  content: message,
+                  json_meta: {},
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+              const insertTime = Date.now() - insertStartTime
 
-          // 2. Save user message FIRST (blocking - we need this for proper ordering)
-          console.log('💾 Saving user message...')
-          
-          // Get the last message order key for proper ordering
-          const { data: lastMessage } = await supabase
-            .from('messages')
-            .select('order_key')
-            .eq('conversation_id', conversationId)
-            .order('order_key', { ascending: false })
-            .limit(1)
-            .single()
+              const totalUserSaveTime = Date.now() - userSaveStartTime
 
-          const userOrderKey = generateKeyBetween(lastMessage?.order_key || null, null)
+              if (userMsgError) {
+                console.error('❌ Error saving user message:', userMsgError)
+                throw new Error('Failed to save user message')
+              }
 
-          const { error: userMsgError } = await supabase
-            .from('messages')
-            .insert({
-              conversation_id: conversationId,
-              order_key: userOrderKey,
-              role: 'user',
-              content: message,
-              json_meta: {},
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-
-          if (userMsgError) {
-            console.error('❌ Error saving user message:', userMsgError)
-            throw new Error('Failed to save user message')
+              console.log('✅ PERF: User message saved in:', totalUserSaveTime, 'ms (insert:', insertTime, 'ms)')
+              return userOrderKey
+            } catch (error) {
+              console.error('❌ Error saving user message:', error)
+              throw error
+            }
           }
 
-          console.log('✅ User message saved, starting streaming')
+          // Start user message save in parallel
+          const userMessagePromise = saveUserMessageInBackground()
+          let userMessageSaved = false
 
-          // 3. Stream LLM response while user message saves in parallel
+          // 3. Stream LLM response while database operations happen in parallel
           let fullContent = ''
           let tokenCount = 0
+          let firstTokenTime: number | null = null
+          let lastTokenTime = Date.now()
 
           for await (const chunk of openaiStream) {
+            const chunkStartTime = Date.now()
             const content = chunk.choices[0]?.delta?.content || ''
             
             if (content) {
-              fullContent += content
               tokenCount++
+              fullContent += content
               
-              // Send token to client immediately
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                type: 'token',
-                content
-              })}\n\n`))
+              // Track first token timing
+              if (firstTokenTime === null) {
+                firstTokenTime = Date.now()
+                const timeToFirstToken = firstTokenTime - streamStartTime
+                console.log('⚡ PERF: Time to first token from LLM:', timeToFirstToken, 'ms')
+              }
+              
+              // Track inter-token timing
+              const timeSinceLastToken = chunkStartTime - lastTokenTime
+              if (tokenCount % 20 === 0) {
+                console.log(`⚡ PERF: Token ${tokenCount} - LLM inter-token delay:`, timeSinceLastToken, 'ms')
+              }
+              lastTokenTime = chunkStartTime
+              
+              // Send token to client immediately with aggressive anti-buffering
+              const encodeStart = Date.now()
+              
+              // Use minimal JSON and add padding to force immediate transmission
+              const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
+              const chunk = encoder.encode(data)
+              controller.enqueue(chunk)
+              
+              // Send a keep-alive chunk to force flush (browsers batch small chunks)
+              if (tokenCount % 5 === 0) {
+                controller.enqueue(encoder.encode(': keep-alive\n\n'))
+              }
+              
+              const encodeTime = Date.now() - encodeStart
+              
+              if (encodeTime > 5) {
+                console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
+              }
+            }
+
+            // Check if user message save is complete (non-blocking)
+            if (!userMessageSaved) {
+              try {
+                await Promise.race([
+                  userMessagePromise,
+                  new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 0))
+                ])
+                userMessageSaved = true
+                console.log('💾 User message save completed during streaming')
+              } catch (error) {
+                // User message save still in progress, continue streaming
+              }
             }
           }
 
-          // 4. Save assistant message after streaming completes
-          try {
-            const assistantOrderKey = generateKeyBetween(userOrderKey, null)
-
-            const { error: assistantMsgError } = await supabase
-              .from('messages')
-              .insert({
-                conversation_id: conversationId,
-                order_key: assistantOrderKey,
-                role: 'assistant',
-                content: fullContent,
-                json_meta: { model, token_count: tokenCount },
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              })
-
-            if (assistantMsgError) {
-              console.error('❌ Error saving assistant message:', assistantMsgError)
-            } else {
-              console.log('✅ Assistant message saved')
+          // 4. Wait for user message save if still pending
+          if (!userMessageSaved) {
+            try {
+              await userMessagePromise
+              userMessageSaved = true
+              console.log('💾 User message save completed after streaming')
+            } catch (error) {
+              console.error('❌ User message save failed:', error)
             }
-          } catch (error) {
-            console.error('❌ Error saving assistant message:', error)
+          }
+
+          // 5. Save assistant message to database (if user message was saved)
+          if (userMessageSaved && fullContent) {
+            try {
+              const assistantSaveStartTime = Date.now()
+              console.log('💾 PERF: Saving assistant message to DB...')
+              
+              const insertStartTime = Date.now()
+              const { error: assistantMsgError } = await supabase
+                .from('messages')
+                .insert({
+                  conversation_id: conversationId,
+                  order_key: assistantOrderKey,
+                  role: 'assistant',
+                  content: fullContent,
+                  json_meta: { model, token_count: tokenCount },
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+              const insertTime = Date.now() - insertStartTime
+
+              const totalAssistantSaveTime = Date.now() - assistantSaveStartTime
+
+              if (assistantMsgError) {
+                console.error('❌ Error saving assistant message:', assistantMsgError)
+              } else {
+                console.log('✅ PERF: Assistant message saved in:', totalAssistantSaveTime, 'ms (insert:', insertTime, 'ms)')
+              }
+            } catch (error) {
+              console.error('❌ Error saving assistant message:', error)
+            }
           }
 
           // 5. Send completion signal
@@ -215,8 +305,11 @@ export async function POST(
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // Disable nginx buffering
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Cache-Control',
       },
     })
   } catch (error) {

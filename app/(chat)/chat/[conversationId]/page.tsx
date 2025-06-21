@@ -2,7 +2,7 @@
 
 import { use, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChatArea } from '@/components/NewChatArea'
+import { ChatArea } from '@/components/ChatArea'
 import { Loader2 } from 'lucide-react'
 import { 
   useConversation, 

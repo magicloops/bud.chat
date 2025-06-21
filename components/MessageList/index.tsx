@@ -28,6 +28,19 @@ export function MessageList({
   const displayMessages = messages || conversation?.messages || []
   const isStreaming = useIsStreaming(conversationId || '')
   
+  // Performance: Track re-renders during streaming
+  const renderCountRef = useRef(0)
+  const lastRenderTimeRef = useRef(performance.now())
+  
+  renderCountRef.current++
+  const currentRenderTime = performance.now()
+  const timeSinceLastRender = currentRenderTime - lastRenderTimeRef.current
+  lastRenderTimeRef.current = currentRenderTime
+  
+  if (isStreaming && renderCountRef.current % 5 === 0) {
+    console.log(`📋 PERF: MessageList render #${renderCountRef.current} - Time since last:`, timeSinceLastRender.toFixed(2), 'ms')
+  }
+  
   const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
   const isUserScrollingRef = useRef(false)
@@ -68,19 +81,12 @@ export function MessageList({
     lastMessageCountRef.current = messageCount
   }, [displayMessages.length, scrollToBottom])
 
-  // Auto-scroll during streaming updates (throttled)
+  // Auto-scroll on content changes during streaming (immediate, not throttled)
   useEffect(() => {
-    if (!isStreaming) {
-      return
-    }
-    
-    // Set up a throttled scroll for streaming
-    const intervalId = setInterval(() => {
+    if (isStreaming) {
       scrollToBottom()
-    }, 100) // Scroll every 100ms during streaming
-    
-    return () => clearInterval(intervalId)
-  }, [isStreaming, scrollToBottom])
+    }
+  }, [displayMessages, isStreaming, scrollToBottom])
 
   // Force scroll to bottom on initial load
   useEffect(() => {

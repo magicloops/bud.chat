@@ -1,7 +1,7 @@
 'use client'
 
-import { MessageList } from '@/components/NewMessageList'
-import { NewChatComposer } from '@/components/NewChatComposer'
+import { MessageList } from '@/components/MessageList'
+import { ChatComposer } from '@/components/ChatComposer'
 import { Message } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
 
@@ -102,7 +102,7 @@ export function ChatArea({
           />
         ) : conversationId ? (
           // Server state composer
-          <NewChatComposer
+          <ChatComposer
             conversationId={conversationId}
             placeholder={placeholder}
             onMessageSent={handleMessageSent}

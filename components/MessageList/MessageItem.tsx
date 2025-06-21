@@ -4,7 +4,7 @@ import { memo, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import MarkdownRenderer from '@/components/markdown-renderer'
-import { UnifiedMessage } from '@/lib/types'
+import { Message } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
 import {
   Copy,
@@ -22,10 +22,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useAuth } from '@/lib/auth/auth-provider'
 
 interface MessageItemProps {
-  message: UnifiedMessage
+  message: Message
   index?: number
   isLast?: boolean
   isStreaming?: boolean
@@ -45,11 +44,9 @@ export const MessageItem = memo(function MessageItem({
 }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false)
   const error = null // TODO: Implement error handling in new architecture
-  const { user } = useAuth()
 
-
-  const isOptimistic = 'isOptimistic' in message && message.isOptimistic
-  const isPending = 'isPending' in message && message.isPending
+  const isOptimistic = message.json_meta?.isOptimistic || false
+  const isPending = message.json_meta?.isPending || false
   const isSystem = message.role === 'system'
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
@@ -77,7 +74,7 @@ export const MessageItem = memo(function MessageItem({
     }
   }, [onBranch, message.id])
 
-  const formatMessageDuration = useCallback((message: any, index: number) => {
+  const formatMessageDuration = useCallback((message: Message, index: number) => {
     // For user messages, always show time since sent
     if (message.role === 'user') {
       const date = new Date(message.created_at)
@@ -125,25 +122,14 @@ export const MessageItem = memo(function MessageItem({
     )
   }
 
-
   return (
     <div className={`mb-6 group ${index === 0 ? "pt-4" : ""}`}>
       <div className="flex items-start gap-3">
         <Avatar className="h-8 w-8">
           {isUser ? (
-            <>
-              {user?.user_metadata?.avatar_url ? (
-                <AvatarImage 
-                  src={user.user_metadata.avatar_url} 
-                  alt="User"
-                />
-              ) : (
-                null
-              )}
-              <AvatarFallback>
-                {user?.email?.charAt(0).toUpperCase() || 'U'}
-              </AvatarFallback>
-            </>
+            <AvatarFallback>
+              U
+            </AvatarFallback>
           ) : (
             <AvatarFallback>
               <Bot className="h-5 w-5 text-green-500" />
