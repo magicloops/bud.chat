@@ -74,29 +74,18 @@ export default function NewChatPage() {
 
       const decoder = new TextDecoder()
       let conversationId: string | null = null
-      let tokenCount = 0
-      let streamStartTime = performance.now()
-      let lastTokenTime = performance.now()
 
       while (true) {
-        const chunkStartTime = performance.now()
         const { done, value } = await reader.read()
         if (done) break
 
-        const parseStartTime = performance.now()
         const chunk = decoder.decode(value, { stream: true })
         const lines = chunk.split('\n')
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
-              const jsonParseStart = performance.now()
               const data = JSON.parse(line.slice(6))
-              const jsonParseTime = performance.now() - jsonParseStart
-              
-              if (jsonParseTime > 2) {
-                console.log('🐌 PERF: Slow JSON parse:', jsonParseTime.toFixed(2), 'ms')
-              }
               
               switch (data.type) {
                 case 'conversationCreated':
@@ -105,23 +94,6 @@ export default function NewChatPage() {
                   break
                   
                 case 'token':
-                  // Performance: Track token timing
-                  tokenCount++
-                  const currentTime = performance.now()
-                  const timeSinceStart = currentTime - streamStartTime
-                  const timeSinceLastToken = currentTime - lastTokenTime
-                  lastTokenTime = currentTime
-                  
-                  if (tokenCount === 1) {
-                    console.log('⚡ PERF: Time to first token:', timeSinceStart.toFixed(2), 'ms')
-                  }
-                  
-                  if (tokenCount % 10 === 0) {
-                    console.log(`⚡ PERF: Token ${tokenCount} - Inter-token delay:`, timeSinceLastToken.toFixed(2), 'ms')
-                  }
-                  
-                  // Performance: Time React state update
-                  const reactUpdateStart = performance.now()
                   setMessages(prevMessages => 
                     prevMessages.map(msg => 
                       msg.id === assistantPlaceholder.id 
@@ -129,11 +101,6 @@ export default function NewChatPage() {
                         : msg
                     )
                   )
-                  const reactUpdateTime = performance.now() - reactUpdateStart
-                  
-                  if (reactUpdateTime > 5) {
-                    console.log('🐌 PERF: Slow React update:', reactUpdateTime.toFixed(2), 'ms')
-                  }
                   break
                   
                 case 'complete':

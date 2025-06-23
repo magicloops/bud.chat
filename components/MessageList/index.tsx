@@ -28,18 +28,6 @@ export function MessageList({
   const displayMessages = messages || conversation?.messages || []
   const isStreaming = useIsStreaming(conversationId || '')
   
-  // Performance: Track re-renders during streaming
-  const renderCountRef = useRef(0)
-  const lastRenderTimeRef = useRef(performance.now())
-  
-  renderCountRef.current++
-  const currentRenderTime = performance.now()
-  const timeSinceLastRender = currentRenderTime - lastRenderTimeRef.current
-  lastRenderTimeRef.current = currentRenderTime
-  
-  if (isStreaming && renderCountRef.current % 5 === 0) {
-    console.log(`📋 PERF: MessageList render #${renderCountRef.current} - Time since last:`, timeSinceLastRender.toFixed(2), 'ms')
-  }
   
   const router = useRouter()
   const scrollRef = useRef<HTMLDivElement>(null)
