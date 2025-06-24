@@ -10,13 +10,26 @@ export async function GET(request: NextRequest) {
       return new Response('Unauthorized', { status: 401 })
     }
 
-    // Get workspaces where user is a member
-    const { data: membershipData, error: membershipError } = await supabase
+    // Get workspaces where user is owner OR member
+    
+    // First: Get workspaces you own
+    const { data: ownedWorkspaces, error: ownedError } = await supabase
+      .from('workspaces')
+      .select('id, name, owner_user_id, created_at')
+      .eq('owner_user_id', user.id)
+
+    if (ownedError) {
+      console.error('Error fetching owned workspaces:', ownedError)
+      return new Response(`Error fetching owned workspaces: ${ownedError.message}`, { status: 500 })
+    }
+
+    // Second: Get workspaces where you're a member
+    const { data: memberWorkspaces, error: memberError } = await supabase
       .from('workspace_members')
       .select(`
         workspace_id,
         role,
-        workspace:workspace_id (
+        workspaces!inner (
           id,
           name,
           owner_user_id,
@@ -25,15 +38,29 @@ export async function GET(request: NextRequest) {
       `)
       .eq('user_id', user.id)
 
-    if (membershipError) {
-      console.error('Error fetching workspace memberships:', membershipError)
-      return new Response(`Error fetching workspaces: ${membershipError.message}`, { status: 500 })
+    if (memberError) {
+      console.error('Error fetching member workspaces:', memberError)
+      return new Response(`Error fetching member workspaces: ${memberError.message}`, { status: 500 })
     }
 
-    // Extract workspaces from membership data
-    const workspaces = membershipData?.map(m => m.workspace).filter(Boolean) || []
+    // Combine and deduplicate
+    const allWorkspaces = new Map()
+    
+    // Add owned workspaces
+    ownedWorkspaces?.forEach(workspace => {
+      allWorkspaces.set(workspace.id, workspace)
+    })
+    
+    // Add member workspaces (skip if already owned)
+    memberWorkspaces?.forEach(member => {
+      if (!allWorkspaces.has(member.workspaces.id)) {
+        allWorkspaces.set(member.workspaces.id, member.workspaces)
+      }
+    })
 
-    return Response.json(workspaces)
+    const formattedWorkspaces = Array.from(allWorkspaces.values())
+
+    return Response.json(formattedWorkspaces)
   } catch (error) {
     console.error('Error in workspaces GET:', error)
     return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 })
