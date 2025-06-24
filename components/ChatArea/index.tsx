@@ -11,6 +11,7 @@ interface ChatAreaProps {
   isStreaming?: boolean
   onSendMessage?: (content: string) => void | Promise<void>
   placeholder?: string
+  budData?: any // Bud data for optimistic assistant identity
   
   // For server state (existing conversations) 
   conversationId?: string
@@ -23,11 +24,28 @@ export function ChatArea({
   isStreaming = false, 
   onSendMessage,
   placeholder = "Type your message...",
+  budData,
   conversationId,
   className 
 }: ChatAreaProps) {
   const isNewConversation = !conversationId && messages !== undefined
   const conversation = useConversation(conversationId || '')
+  
+  // Create optimistic conversation for bud identity in new conversations
+  const optimisticConversation = isNewConversation && budData ? {
+    id: 'temp',
+    messages: messages || [],
+    isStreaming: false,
+    meta: {
+      id: 'temp',
+      title: 'New Chat',
+      workspace_id: 'temp',
+      source_bud_id: budData.id,
+      assistant_name: budData.default_json?.name || 'Assistant',
+      assistant_avatar: budData.default_json?.avatar || '🤖',
+      created_at: new Date().toISOString()
+    }
+  } : null
   
   const handleMessageSent = (messageId: string) => {
     // For server-state conversations, the store handles updates
@@ -76,6 +94,7 @@ export function ChatArea({
           // Local state - render messages directly
           <MessageList 
             messages={messages}
+            conversation={optimisticConversation}
             autoScroll={true}
             className="h-full"
           />

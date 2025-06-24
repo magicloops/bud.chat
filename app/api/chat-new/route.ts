@@ -63,12 +63,29 @@ async function createConversationInBackground(
   messages: any[],
   workspaceId: string,
   budId?: string
-): Promise<string> {
+): Promise<{ conversationId: string, bud?: any }> {
   const supabase = await createClient()
   
   try {
     const dbStartTime = Date.now()
     console.log('💾 PERF: Creating conversation in background...', { messageCount: messages.length, workspaceId })
+    
+    // Fetch bud if budId is provided (parallel with conversation creation)
+    let budPromise: Promise<any> | null = null
+    if (budId) {
+      budPromise = supabase
+        .from('buds')
+        .select('*')
+        .eq('id', budId)
+        .single()
+        .then(({ data, error }) => {
+          if (error) {
+            console.warn('Failed to fetch bud:', error)
+            return null
+          }
+          return data
+        })
+    }
     
     // Create conversation
     const convStartTime = Date.now()
@@ -76,7 +93,7 @@ async function createConversationInBackground(
       .from('conversations')
       .insert({
         workspace_id: workspaceId,
-        bud_id: budId,
+        source_bud_id: budId, // Changed from bud_id to source_bud_id
         created_at: new Date().toISOString()
       })
       .select()
@@ -87,6 +104,9 @@ async function createConversationInBackground(
       console.error('❌ Error creating conversation:', convError)
       throw new Error('Failed to create conversation')
     }
+
+    // Wait for bud fetch if it was initiated
+    const bud = budPromise ? await budPromise : null
 
     console.log('✅ PERF: Conversation created in:', convCreationTime, 'ms -', conversation.id)
 
@@ -127,7 +147,7 @@ async function createConversationInBackground(
     const totalDbTime = Date.now() - dbStartTime
     console.log('💾 PERF: Total background DB operations completed in:', totalDbTime, 'ms')
 
-    return conversation.id
+    return { conversationId: conversation.id, bud }
   } catch (error) {
     console.error('❌ Background conversation creation failed:', error)
     throw error
@@ -200,12 +220,18 @@ export async function POST(request: NextRequest) {
           const streamStartTime = Date.now()
           console.log('🚀 PERF: Starting LLM request...')
           
-          // 1. Start LLM streaming IMMEDIATELY - no database operations blocking!
+          // 1. Get effective model configuration (will get bud from conversation creation)
+          let effectiveConfig = { model, temperature: 0.7 }
+          let budData: any = null
+
+          // 2. Start LLM streaming with effective configuration
           const llmStartTime = Date.now()
           const openaiStream = await openai.chat.completions.create({
-            model,
+            model: effectiveConfig.model,
             messages: openaiMessages,
             stream: true,
+            temperature: effectiveConfig.temperature,
+            max_tokens: effectiveConfig.max_tokens,
           })
           const llmSetupTime = Date.now() - llmStartTime
 
@@ -267,11 +293,29 @@ export async function POST(request: NextRequest) {
             // Check if conversation creation is complete (non-blocking)
             if (!conversationCreated) {
               try {
-                conversationId = await Promise.race([
+                const result = await Promise.race([
                   conversationCreationPromise,
                   new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 0))
                 ])
+                conversationId = result.conversationId
+                budData = result.bud
                 conversationCreated = true
+                
+                // Update effective config if we got bud data
+                if (budData && budId) {
+                  try {
+                    const { getEffectiveConversationConfig } = await import('@/lib/budHelpers')
+                    const config = getEffectiveConversationConfig({ source_bud_id: budId }, budData)
+                    effectiveConfig = {
+                      model: config.model,
+                      temperature: config.temperature,
+                      max_tokens: config.max_tokens
+                    }
+                    console.log('📝 Updated effective config from bud:', effectiveConfig)
+                  } catch (error) {
+                    console.warn('Failed to get effective config:', error)
+                  }
+                }
                 
                 // Send conversation ID when available
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -289,8 +333,26 @@ export async function POST(request: NextRequest) {
           // 4. Wait for conversation creation if still pending
           if (!conversationCreated) {
             try {
-              conversationId = await conversationCreationPromise
+              const result = await conversationCreationPromise
+              conversationId = result.conversationId
+              budData = result.bud
               conversationCreated = true
+              
+              // Update effective config if we got bud data
+              if (budData && budId) {
+                try {
+                  const { getEffectiveConversationConfig } = await import('@/lib/budHelpers')
+                  const config = getEffectiveConversationConfig({ source_bud_id: budId }, budData)
+                  effectiveConfig = {
+                    model: config.model,
+                    temperature: config.temperature,
+                    max_tokens: config.max_tokens
+                  }
+                  console.log('📝 Updated effective config from bud (post-stream):', effectiveConfig)
+                } catch (error) {
+                  console.warn('Failed to get effective config:', error)
+                }
+              }
               
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'conversationCreated',
@@ -334,7 +396,7 @@ export async function POST(request: NextRequest) {
                   order_key: assistantOrderKey,
                   role: 'assistant',
                   content: fullContent,
-                  json_meta: { model, token_count: tokenCount },
+                  json_meta: { model: effectiveConfig.model, token_count: tokenCount },
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString()
                 })

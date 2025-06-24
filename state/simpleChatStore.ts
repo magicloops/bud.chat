@@ -19,7 +19,10 @@ export interface ConversationMeta {
   id: string
   title?: string
   workspace_id: string
-  bud_id?: string
+  source_bud_id?: string // Renamed from bud_id  
+  assistant_name?: string // Custom assistant name (NULL = use bud default)
+  assistant_avatar?: string // Custom assistant avatar (NULL = use bud default)
+  model_config_overrides?: Record<string, any> // Model configuration overrides as JSON
   created_at: string
 }
 

@@ -37,7 +37,15 @@ export async function GET(request: NextRequest) {
         title,
         metadata,
         created_at,
-        workspace_id
+        workspace_id,
+        source_bud_id,
+        assistant_name,
+        assistant_avatar,
+        model_config_overrides,
+        buds:source_bud_id (
+          id,
+          default_json
+        )
       `)
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false })
@@ -47,7 +55,32 @@ export async function GET(request: NextRequest) {
       return new Response(`Error fetching conversations: ${error.message}`, { status: 500 })
     }
 
-    return Response.json(conversations)
+    // Compute effective assistant identity for each conversation
+    const conversationsWithEffectiveIdentity = conversations?.map(conversation => {
+      let effectiveAssistantName = conversation.assistant_name
+      let effectiveAssistantAvatar = conversation.assistant_avatar
+
+      // If no custom name/avatar and there's a source bud, use bud defaults
+      if ((!effectiveAssistantName || !effectiveAssistantAvatar) && conversation.buds) {
+        const budConfig = conversation.buds.default_json
+        if (!effectiveAssistantName && budConfig.name) {
+          effectiveAssistantName = budConfig.name
+        }
+        if (!effectiveAssistantAvatar && budConfig.avatar) {
+          effectiveAssistantAvatar = budConfig.avatar
+        }
+      }
+
+      // Return conversation with effective identity, remove nested bud data
+      const { buds, ...conversationData } = conversation
+      return {
+        ...conversationData,
+        effective_assistant_name: effectiveAssistantName || 'Assistant',
+        effective_assistant_avatar: effectiveAssistantAvatar || '🤖'
+      }
+    }) || []
+
+    return Response.json(conversationsWithEffectiveIdentity)
   } catch (error) {
     console.error('Error in conversations GET:', error)
     return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 })

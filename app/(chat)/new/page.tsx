@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useCallback, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { ChatArea } from '@/components/ChatArea'
 import { 
   Message, 
@@ -17,19 +17,62 @@ import {
   createSystemMessages,
   updateMessagesConversationId
 } from '@/lib/messageHelpers'
+import { 
+  createBudInitialMessages,
+  budManager
+} from '@/lib/budHelpers'
+import { Bud } from '@/lib/types'
 
 export default function NewChatPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const selectedWorkspace = useSelectedWorkspace()
   const setConversation = useSetConversation()
   
-  // Local state only - no Zustand needed for /new route
-  const [messages, setMessages] = useState<Message[]>(() => [
-    createGreetingMessage(),
-    ...createSystemMessages() // TODO: Based on bud config
-  ])
+  const budId = searchParams.get('bud')
+  
+  // State for bud and messages
+  const [bud, setBud] = useState<Bud | null>(null)
+  const [budLoading, setBudLoading] = useState(!!budId)
+  const [messages, setMessages] = useState<Message[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+
+  // Load bud if budId is provided
+  useEffect(() => {
+    const loadBud = async () => {
+      if (!budId) {
+        // No bud specified, use default messages
+        setMessages([
+          createGreetingMessage(),
+          ...createSystemMessages()
+        ])
+        setBudLoading(false)
+        return
+      }
+
+      try {
+        setBudLoading(true)
+        const loadedBud = await budManager.getBud(budId)
+        setBud(loadedBud)
+        
+        // Initialize messages with bud configuration
+        const budMessages = createBudInitialMessages(loadedBud)
+        setMessages(budMessages)
+      } catch (error) {
+        console.error('Failed to load bud:', error)
+        // Fallback to default messages
+        setMessages([
+          createGreetingMessage(),
+          ...createSystemMessages()
+        ])
+      } finally {
+        setBudLoading(false)
+      }
+    }
+
+    loadBud()
+  }, [budId])
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (!selectedWorkspace) {
@@ -58,7 +101,8 @@ export default function NewChatPage() {
         body: JSON.stringify({
           messages: newMessages.filter(m => m.role !== 'assistant' || !m.json_meta?.isStreaming), // Don't send placeholder
           workspaceId: selectedWorkspace,
-          model: 'gpt-4o' // TODO: Make configurable
+          budId: bud?.id,
+          model: bud ? (bud.default_json as any).model || 'gpt-4o' : 'gpt-4o'
         })
       })
 
@@ -125,10 +169,16 @@ export default function NewChatPage() {
                     console.log('🔄 Transitioning to real conversation:', conversationId)
                     
                     // 4. Pre-populate Zustand store with local state
+                    const budConfig = bud?.default_json as any
                     const conversationMeta: ConversationMeta = {
                       id: conversationId,
                       title: 'New Chat',
                       workspace_id: selectedWorkspace,
+                      source_bud_id: bud?.id,
+                      // Include resolved assistant identity from bud for optimistic display
+                      assistant_name: budConfig?.name || 'Assistant',
+                      assistant_avatar: budConfig?.avatar || '🤖',
+                      model_config_overrides: undefined,
                       created_at: new Date().toISOString()
                     }
                     
@@ -177,13 +227,29 @@ export default function NewChatPage() {
     )
   }
 
+  // Show loading while bud is loading
+  if (budLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center text-muted-foreground">
+          <p>Loading bud...</p>
+        </div>
+      </div>
+    )
+  }
+
   // Render chat interface with local state
+  const placeholder = bud 
+    ? `Chat with ${(bud.default_json as any).name || 'your bud'}...`
+    : "Start a new conversation..."
+
   return (
     <ChatArea
       messages={messages}
       isStreaming={isStreaming}
       onSendMessage={handleSendMessage}
-      placeholder="Start a new conversation..."
+      placeholder={placeholder}
+      budData={bud}
     />
   )
 }

@@ -13,7 +13,7 @@ import {
   useSetWorkspaces, 
   useSetWorkspacesLoading 
 } from '@/state/workspaceStore'
-import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { Plus, PanelLeftClose, PanelLeft, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface SidebarProps {
@@ -94,6 +94,12 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     router.push('/new')
   }
 
+  const handleManageBuds = () => {
+    if (selectedWorkspaceId) {
+      router.push(`/workspace/${selectedWorkspaceId}/buds`)
+    }
+  }
+
   const toggleSidebar = () => {
     onClose()
   }
@@ -128,6 +134,21 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
         {/* Workspace Selector */}
         <WorkspaceSelector />
+
+        {/* Workspace Actions */}
+        {selectedWorkspaceId && (
+          <div className="mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleManageBuds}
+              className="w-full justify-start"
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Manage Buds
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Conversations - Constrained scroll area */}

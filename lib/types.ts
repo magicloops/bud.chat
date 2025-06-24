@@ -70,8 +70,10 @@ export interface BudConfig {
   avatar?: string
   systemPrompt: string
   model: string
-  tools?: string[]
+  temperature?: number
+  maxTokens?: number
   greeting?: string
+  tools?: string[]
 }
 
 // UI State
