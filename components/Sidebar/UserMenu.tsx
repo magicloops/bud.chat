@@ -9,12 +9,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ThemeToggle } from '@/components/theme-toggle'
+import { useThemeToggle } from '@/hooks/use-theme-toggle'
 import { 
   User, 
   Settings, 
   LogOut, 
-  ChevronUp 
+  ChevronUp,
+  Moon,
+  Sun
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -22,6 +24,7 @@ import { useRouter } from 'next/navigation'
 export function UserMenu() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const { toggleTheme, isDarkMode, mounted } = useThemeToggle()
 
   const handleSignOut = async () => {
     try {
@@ -50,8 +53,7 @@ export function UserMenu() {
   }
 
   return (
-    <div className="flex items-center justify-between">
-      <DropdownMenu>
+    <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="w-full justify-between p-2">
             <div className="flex items-center gap-2">
@@ -73,14 +75,20 @@ export function UserMenu() {
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={toggleTheme}>
+            {mounted ? (
+              isDarkMode ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />
+            ) : (
+              <Moon className="h-4 w-4 mr-2" />
+            )}
+            {mounted ? (isDarkMode ? "Light mode" : "Dark mode") : "Theme"}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleSignOut} disabled={isLoading}>
             <LogOut className="h-4 w-4 mr-2" />
             {isLoading ? 'Signing out...' : 'Sign out'}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      
-      <ThemeToggle />
-    </div>
   )
 }

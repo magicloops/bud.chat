@@ -82,7 +82,7 @@ export default function ChatLayout({
 
       {/* Toggle Buttons - Always Visible */}
       {!sidebarOpen && (
-        <div className="absolute top-4 left-4 z-50">
+        <div className="absolute left-4 z-50" style={{ top: '0.35rem' }}>
           <Button
             variant="ghost"
             size="icon"
@@ -95,7 +95,7 @@ export default function ChatLayout({
       )}
 
       {!settingsPanelOpen && (
-        <div className="absolute top-4 right-4 z-50">
+        <div className="absolute right-4 z-50" style={{ top: '0.35rem' }}>
           <Button
             variant="ghost"
             size="icon"

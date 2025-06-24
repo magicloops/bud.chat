@@ -2,7 +2,7 @@
 
 import { MessageList } from '@/components/MessageList'
 import { ChatComposer } from '@/components/ChatComposer'
-import { Message } from '@/state/simpleChatStore'
+import { Message, useConversation } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
 
 interface ChatAreaProps {
@@ -27,29 +27,43 @@ export function ChatArea({
   className 
 }: ChatAreaProps) {
   const isNewConversation = !conversationId && messages !== undefined
+  const conversation = useConversation(conversationId || '')
   
   const handleMessageSent = (messageId: string) => {
     // For server-state conversations, the store handles updates
     // For local-state conversations, the parent component handles updates
   }
 
-  const title = isNewConversation ? 'New Conversation' : 'Chat'
+  const title = isNewConversation 
+    ? 'New Conversation' 
+    : conversation?.meta?.title || 'Chat'
+  
+  // Get model from latest message (assuming assistant messages contain model info)
+  const latestAssistantMessage = conversation?.messages
+    ?.filter(m => m.role === 'assistant')
+    ?.slice(-1)[0]
+  const model = latestAssistantMessage?.json_meta?.model || 'claude-3.5-sonnet'
 
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
       <div className="flex-shrink-0 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center justify-center p-4 relative">
-          <div>
-            <h1 className="text-lg font-semibold">{title}</h1>
+        <div className="flex items-center justify-between px-4 py-3 relative">
+          {/* Left spacer for sidebar toggle button */}
+          <div className="w-12"></div>
+          
+          {/* Centered title and model */}
+          <div className="flex items-center gap-2 flex-1 justify-center min-w-0">
+            <h1 className="text-sm font-medium truncate max-w-xs">{title}</h1>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">• {model}</span>
           </div>
           
-          {/* Status indicators */}
-          <div className="absolute right-4 flex items-center gap-2 text-sm text-muted-foreground">
+          {/* Status indicators and space for settings toggle */}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground w-12 justify-end">
             {isStreaming && (
               <div className="flex items-center gap-1">
-                <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                <span>Generating...</span>
+                <div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
+                <span className="text-xs">•••</span>
               </div>
             )}
           </div>
