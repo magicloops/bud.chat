@@ -55,8 +55,8 @@ export function WorkspaceSelector() {
       }
     }
     
-    // Fall back to new conversation if no conversations exist
-    router.push('/new')
+    // Fall back to home route to select a bud if no conversations exist
+    router.push('/')
   }
 
   const handleCreateWorkspace = async (name: string) => {
@@ -82,8 +82,8 @@ export function WorkspaceSelector() {
         setSelectedWorkspace(newWorkspace.id)
         localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id)
         
-        // Navigate to new conversation in the new workspace
-        router.push('/new')
+        // Navigate to home route to select a bud in the new workspace
+        router.push('/')
       } else {
         console.error('Failed to create workspace')
         throw new Error('Failed to create workspace')

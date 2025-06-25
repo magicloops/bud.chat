@@ -19,6 +19,9 @@ export interface BudStore {
     delete: Record<string, boolean>              // budId -> loading
   }
   
+  // Track which workspaces have been loaded
+  loadedWorkspaces: string[]
+  
   // Error states
   errors: {
     workspace: Record<string, string | null>     // workspaceId -> error
@@ -29,6 +32,7 @@ export interface BudStore {
   
   // Actions
   loadWorkspaceBuds: (workspaceId: string) => Promise<void>
+  forceLoadWorkspaceBuds: (workspaceId: string) => Promise<void>
   createBud: (args: CreateBudArgs) => Promise<Bud>
   updateBud: (budId: string, updates: UpdateBudArgs) => Promise<Bud>
   deleteBud: (budId: string) => Promise<void>
@@ -48,6 +52,7 @@ export const useBudStore = create<BudStore>()(
         // Initial state
         buds: {},
         workspaceBuds: {},
+        loadedWorkspaces: [],
         loading: {
           workspace: {},
           create: false,
@@ -63,6 +68,11 @@ export const useBudStore = create<BudStore>()(
         
         // Load workspace buds
         loadWorkspaceBuds: async (workspaceId: string) => {
+          // Check if already loaded
+          if (get().loadedWorkspaces.includes(workspaceId)) {
+            return
+          }
+          
           set((state) => {
             state.loading.workspace[workspaceId] = true
             state.errors.workspace[workspaceId] = null
@@ -79,6 +89,45 @@ export const useBudStore = create<BudStore>()(
               
               // Store workspace -> bud ids mapping
               state.workspaceBuds[workspaceId] = buds.map(b => b.id)
+              if (!state.loadedWorkspaces.includes(workspaceId)) {
+                state.loadedWorkspaces.push(workspaceId)
+              }
+              state.loading.workspace[workspaceId] = false
+            })
+          } catch (error) {
+            set((state) => {
+              state.loading.workspace[workspaceId] = false
+              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds'
+            })
+          }
+        },
+        
+        // Force load workspace buds (ignores cache)
+        forceLoadWorkspaceBuds: async (workspaceId: string) => {
+          set((state) => {
+            // Remove from loaded workspaces to force reload
+            const index = state.loadedWorkspaces.indexOf(workspaceId)
+            if (index > -1) {
+              state.loadedWorkspaces.splice(index, 1)
+            }
+            state.loading.workspace[workspaceId] = true
+            state.errors.workspace[workspaceId] = null
+          })
+          
+          try {
+            const buds = await budManager.getWorkspaceBuds(workspaceId)
+            
+            set((state) => {
+              // Store buds by id
+              buds.forEach(bud => {
+                state.buds[bud.id] = bud
+              })
+              
+              // Store workspace -> bud ids mapping
+              state.workspaceBuds[workspaceId] = buds.map(b => b.id)
+              if (!state.loadedWorkspaces.includes(workspaceId)) {
+                state.loadedWorkspaces.push(workspaceId)
+              }
               state.loading.workspace[workspaceId] = false
             })
           } catch (error) {
@@ -222,7 +271,8 @@ export const useBudStore = create<BudStore>()(
         partialize: (state) => ({
           // Don't persist loading states or errors
           buds: state.buds,
-          workspaceBuds: state.workspaceBuds
+          workspaceBuds: state.workspaceBuds,
+          loadedWorkspaces: state.loadedWorkspaces
         }),
       }
     )
@@ -269,6 +319,7 @@ export const useBudDeleteError = (budId: string) =>
 
 // Action hooks
 export const useLoadWorkspaceBuds = () => useBudStore((state) => state.loadWorkspaceBuds)
+export const useForceLoadWorkspaceBuds = () => useBudStore((state) => state.forceLoadWorkspaceBuds)
 export const useCreateBud = () => useBudStore((state) => state.createBud)
 export const useUpdateBud = () => useBudStore((state) => state.updateBud)
 export const useDeleteBud = () => useBudStore((state) => state.deleteBud)

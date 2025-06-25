@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Search, Sparkles, Filter, RefreshCw } from 'lucide-react'
+import { Search, Sparkles, Filter } from 'lucide-react'
 import { BudCard } from './BudCard'
 import { CreateBudCard } from './CreateBudCard'
 import { BudForm } from './BudForm'
@@ -70,8 +70,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
       config,
       workspaceId
     })
-    // Reload buds to show the new one
-    await loadWorkspaceBuds(workspaceId)
+    // No need to reload - the store automatically updates buds list
   }
 
   const handleDeleteBud = async (budId: string) => {
@@ -80,19 +79,13 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
     }
   }
 
-  const handleRefresh = () => {
-    loadWorkspaceBuds(workspaceId)
-  }
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8">
         <div className="text-center max-w-md">
           <p className="text-destructive mb-4">Failed to load buds: {error}</p>
-          <Button onClick={handleRefresh} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Try Again
-          </Button>
+          <p className="text-sm text-muted-foreground">Try reloading the page</p>
         </div>
       </div>
     )
@@ -102,21 +95,14 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="p-6 border-b bg-background/95 backdrop-blur">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-semibold flex items-center gap-2">
-              <Sparkles className="h-6 w-6 text-primary" />
-              Choose Your Bud
-            </h1>
-            <p className="text-muted-foreground">
-              Select an AI assistant to start a conversation, or create a new one.
-            </p>
-          </div>
-          
-          <Button onClick={handleRefresh} variant="outline" size="sm" disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+        <div className="mb-4">
+          <h1 className="text-2xl font-semibold flex items-center gap-2">
+            <Sparkles className="h-6 w-6 text-primary" />
+            Choose Your Bud
+          </h1>
+          <p className="text-muted-foreground">
+            Select an AI assistant to start a conversation, or create a new one.
+          </p>
         </div>
 
         {/* Search and Filters */}

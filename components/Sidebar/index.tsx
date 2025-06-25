@@ -94,8 +94,8 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   }, []) // Only run once on mount
 
   const handleNewConversation = () => {
-    // Navigate to new conversation route
-    router.push('/new')
+    // Navigate to home route to select a bud
+    router.push('/')
   }
 
   const handleManageBuds = () => {
