@@ -17,7 +17,7 @@ export async function GET(
       return new Response('Unauthorized', { status: 401 })
     }
 
-    // Get conversation with workspace membership check
+    // Get conversation with workspace membership check and bud data
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .select(`
@@ -25,7 +25,14 @@ export async function GET(
         created_at,
         title,
         workspace_id,
-        bud_id,
+        source_bud_id,
+        assistant_name,
+        assistant_avatar,
+        model_config_overrides,
+        buds:source_bud_id (
+          id,
+          default_json
+        ),
         workspace:workspace_id (
           id,
           workspace_members!workspace_members_workspace_id_fkey (
@@ -49,6 +56,31 @@ export async function GET(
       return new Response('Access denied', { status: 403 })
     }
 
+    // Compute effective assistant identity
+    let effectiveAssistantName = conversation.assistant_name
+    let effectiveAssistantAvatar = conversation.assistant_avatar
+
+    // If no custom name/avatar and there's a source bud, use bud defaults
+    if ((!effectiveAssistantName || !effectiveAssistantAvatar) && conversation.buds) {
+      const budConfig = conversation.buds.default_json
+      if (!effectiveAssistantName && budConfig.name) {
+        effectiveAssistantName = budConfig.name
+      }
+      if (!effectiveAssistantAvatar && budConfig.avatar) {
+        effectiveAssistantAvatar = budConfig.avatar
+      }
+    }
+
+    // Add effective identity to response
+    const responseData = {
+      ...conversation,
+      effective_assistant_name: effectiveAssistantName || 'Assistant',
+      effective_assistant_avatar: effectiveAssistantAvatar || '🤖'
+    }
+
+    // Remove the nested bud data from response (we've extracted what we need)
+    delete responseData.buds
+
     // If messages are requested, fetch them too
     if (includeMessages) {
       const { data: messages, error: messagesError } = await supabase
@@ -64,12 +96,12 @@ export async function GET(
 
       // Messages are already sorted by order_key
       return Response.json({
-        ...conversation,
+        ...responseData,
         messages: messages || []
       })
     }
 
-    return Response.json(conversation)
+    return Response.json(responseData)
   } catch (error) {
     console.error('Get conversation error:', error)
     return new Response('Internal server error', { status: 500 })

@@ -4,7 +4,7 @@ import { memo, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import MarkdownRenderer from '@/components/markdown-renderer'
-import { Message } from '@/state/simpleChatStore'
+import { Message, Conversation } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
 import {
   Copy,
@@ -25,6 +25,7 @@ import {
 
 interface MessageItemProps {
   message: Message
+  conversation?: Conversation | null
   index?: number
   isLast?: boolean
   isStreaming?: boolean
@@ -35,6 +36,7 @@ interface MessageItemProps {
 
 export const MessageItem = memo(function MessageItem({
   message,
+  conversation,
   index = 0,
   isLast,
   isStreaming = false,
@@ -50,7 +52,11 @@ export const MessageItem = memo(function MessageItem({
   const isSystem = message.role === 'system'
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
-  const assistantName = 'Assistant' // Could be made configurable in the future
+  
+  // Get assistant identity - all messages in a conversation should show the same identity
+  // The conversation meta should already have the resolved identity (overrides or bud defaults)
+  const assistantName = conversation?.meta?.assistant_name || 'Assistant'
+  const assistantAvatar = conversation?.meta?.assistant_avatar || '🤖'
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content)
@@ -132,7 +138,7 @@ export const MessageItem = memo(function MessageItem({
             </AvatarFallback>
           ) : (
             <AvatarFallback>
-              <Bot className="h-5 w-5 text-green-500" />
+              <span className="text-lg">{assistantAvatar}</span>
             </AvatarFallback>
           )}
         </Avatar>

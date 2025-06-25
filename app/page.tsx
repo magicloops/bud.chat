@@ -6,12 +6,15 @@ import { useAuth } from '@/lib/auth/auth-provider'
 import { AuthModal } from '@/components/auth/auth-modal'
 import { Sidebar } from '@/components/Sidebar'
 import { Button } from '@/components/ui/button'
-import { MessageSquare, Plus, PanelLeft } from 'lucide-react'
+import { MessageSquare, PanelLeft } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
+import { useSelectedWorkspace } from '@/state/simpleChatStore'
+import { BudSelectionGrid } from '@/components/BudSelectionGrid'
 
 export default function HomePage() {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const selectedWorkspace = useSelectedWorkspace()
   
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
@@ -28,9 +31,6 @@ export default function HomePage() {
     localStorage.setItem('sidebarOpen', String(open))
   }
 
-  const handleNewConversation = () => {
-    router.push('/new')
-  }
 
   if (loading) {
     return (
@@ -82,27 +82,31 @@ export default function HomePage() {
           <span className="font-medium">Welcome to bud.chat</span>
         </div>
 
-        {/* Welcome Content */}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md mx-auto p-8">
-            <MessageSquare className="h-16 w-16 mx-auto mb-6 text-muted-foreground" />
-            <h1 className="text-2xl font-semibold mb-4">Start a new conversation</h1>
-            <p className="text-muted-foreground mb-8">
-              Begin chatting with AI and explore ideas through branching conversations. 
-              Your conversations are automatically saved and organized by workspace.
-            </p>
-            
-            <div className="space-y-4">
-              <Button onClick={handleNewConversation} className="gap-2" size="lg">
-                <Plus className="h-4 w-4" />
-                New Conversation
-              </Button>
-              
-              <div className="text-sm text-muted-foreground/80">
-                <p>💡 Pro tip: You can branch any conversation to explore different directions</p>
+        {/* Main Content */}
+        <div className="flex-1">
+          {selectedWorkspace ? (
+            // Show Bud selection grid when workspace is selected
+            <BudSelectionGrid workspaceId={selectedWorkspace} />
+          ) : (
+            // Show welcome content when no workspace is selected
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center max-w-md mx-auto p-8">
+                <MessageSquare className="h-16 w-16 mx-auto mb-6 text-muted-foreground" />
+                <h1 className="text-2xl font-semibold mb-4">Welcome to bud.chat</h1>
+                <p className="text-muted-foreground mb-8">
+                  Create AI assistants (Buds) with custom personalities and start conversations. 
+                  Your conversations are automatically saved and organized by workspace.
+                </p>
+                
+                <div className="space-y-4">
+                  <div className="text-sm text-muted-foreground/80">
+                    <p>👈 Select a workspace from the sidebar to get started</p>
+                    <p className="mt-2">💡 Each workspace can have multiple custom Buds</p>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

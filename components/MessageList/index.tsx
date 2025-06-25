@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 interface MessageListProps {
   // For local state (new conversations)
   messages?: Message[]
+  conversation?: Conversation | null // For providing optimistic conversation context
   
   // For server state (existing conversations)
   conversationId?: string
@@ -26,12 +27,14 @@ interface MessageListProps {
 
 export function MessageList({ 
   messages,
+  conversation: providedConversation,
   conversationId,
   className,
   autoScroll = true 
 }: MessageListProps) {
   // Get messages from store if conversationId provided, otherwise use direct messages
-  const conversation = useConversation(conversationId || '')
+  const storeConversation = useConversation(conversationId || '')
+  const conversation = providedConversation || storeConversation
   const displayMessages = messages || conversation?.messages || []
   const isStreaming = useIsStreaming(conversationId || '')
   
@@ -145,7 +148,7 @@ export function MessageList({
         id: tempConversationId,
         title: `🌱 ${currentConversation.meta.title || 'Branched Chat'}`,
         workspace_id: currentConversation.meta.workspace_id,
-        bud_id: currentConversation.meta.bud_id,
+        source_bud_id: currentConversation.meta.source_bud_id,
         created_at: new Date().toISOString()
       }
     }
@@ -196,7 +199,7 @@ export function MessageList({
           id: realConvData.id,
           title: realConvData.title,
           workspace_id: realConvData.workspace_id,
-          bud_id: realConvData.bud_id,
+          source_bud_id: realConvData.source_bud_id,
           created_at: realConvData.created_at
         }
       }
@@ -246,6 +249,7 @@ export function MessageList({
           <MessageItem
             key={message.id} // Use stable message ID as key
             message={message}
+            conversation={conversation}
             index={index}
             isLast={index === displayMessages.length - 1}
             onEdit={handleMessageEdit}

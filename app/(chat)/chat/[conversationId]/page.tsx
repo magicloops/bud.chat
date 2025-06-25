@@ -52,7 +52,11 @@ export default function ChatPage({ params }: ChatPageProps) {
         id: conversationData.id,
         title: conversationData.title || 'Chat',
         workspace_id: conversationData.workspace_id,
-        bud_id: conversationData.bud_id,
+        source_bud_id: conversationData.source_bud_id,
+        // Use the effective identity computed by the server
+        assistant_name: conversationData.effective_assistant_name,
+        assistant_avatar: conversationData.effective_assistant_avatar,
+        model_config_overrides: conversationData.model_config_overrides,
         created_at: conversationData.created_at
       }
       
