@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -8,21 +9,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useWorkspaces } from '@/state/workspaceStore'
+import { useWorkspaces, useSetWorkspaces } from '@/state/workspaceStore'
 import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useSimpleChatStore } from '@/state/simpleChatStore'
 import { Building2, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { NewWorkspaceModal } from './NewWorkspaceModal'
 
 export function WorkspaceSelector() {
   const router = useRouter()
   const workspaces = useWorkspaces()
+  const setWorkspaces = useSetWorkspaces()
   const selectedWorkspaceId = useSelectedWorkspace()
   const setSelectedWorkspace = useSetSelectedWorkspace()
   const conversationsRecord = useConversations()
+  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false)
 
   const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
 
   const handleWorkspaceChange = (workspaceId: string) => {
+    // Handle "new-workspace" special case
+    if (workspaceId === 'new-workspace') {
+      setShowNewWorkspaceModal(true)
+      return
+    }
+    
     setSelectedWorkspace(workspaceId)
     // Save to localStorage for persistence
     localStorage.setItem('lastSelectedWorkspaceId', workspaceId)
@@ -49,7 +59,7 @@ export function WorkspaceSelector() {
     router.push('/new')
   }
 
-  const handleNewWorkspace = async () => {
+  const handleCreateWorkspace = async (name: string) => {
     try {
       const response = await fetch('/api/workspaces', {
         method: 'POST',
@@ -57,37 +67,55 @@ export function WorkspaceSelector() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: `Workspace ${workspaces.length + 1}`,
+          name,
         }),
       })
 
       if (response.ok) {
         const newWorkspace = await response.json()
-        // Refresh workspaces - this should trigger the effect in Sidebar
-        window.location.reload()
+        
+        // Update the workspaces in the store
+        const updatedWorkspaces = [...workspaces, newWorkspace]
+        setWorkspaces(updatedWorkspaces)
+        
+        // Switch to the new workspace
+        setSelectedWorkspace(newWorkspace.id)
+        localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id)
+        
+        // Navigate to new conversation in the new workspace
+        router.push('/new')
       } else {
         console.error('Failed to create workspace')
+        throw new Error('Failed to create workspace')
       }
     } catch (error) {
       console.error('Error creating workspace:', error)
+      throw error
     }
   }
 
   if (workspaces.length === 0) {
     return (
-      <div className="text-center p-4">
-        <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-        <p className="text-sm text-muted-foreground mb-2">No workspaces</p>
-        <Button onClick={handleNewWorkspace} size="sm">
-          <Plus className="h-3 w-3 mr-1" />
-          Create Workspace
-        </Button>
-      </div>
+      <>
+        <div className="text-center p-4">
+          <Building2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm text-muted-foreground mb-2">No workspaces</p>
+          <Button onClick={() => setShowNewWorkspaceModal(true)} size="sm">
+            <Plus className="h-3 w-3 mr-1" />
+            Create Workspace
+          </Button>
+        </div>
+        <NewWorkspaceModal
+          open={showNewWorkspaceModal}
+          onOpenChange={setShowNewWorkspaceModal}
+          onCreateWorkspace={handleCreateWorkspace}
+        />
+      </>
     )
   }
 
   return (
-    <div className="space-y-2">
+    <>
       <Select
         value={selectedWorkspaceId || undefined}
         onValueChange={handleWorkspaceChange}
@@ -111,18 +139,20 @@ export function WorkspaceSelector() {
               </div>
             </SelectItem>
           ))}
+          <SelectItem value="new-workspace">
+            <div className="flex items-center gap-2">
+              <Plus className="h-4 w-4" />
+              <span>New Workspace</span>
+            </div>
+          </SelectItem>
         </SelectContent>
       </Select>
 
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleNewWorkspace}
-        className="w-full"
-      >
-        <Plus className="h-3 w-3 mr-1" />
-        New Workspace
-      </Button>
-    </div>
+      <NewWorkspaceModal
+        open={showNewWorkspaceModal}
+        onOpenChange={setShowNewWorkspaceModal}
+        onCreateWorkspace={handleCreateWorkspace}
+      />
+    </>
   )
 }
