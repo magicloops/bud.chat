@@ -19,6 +19,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning className="h-full">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link 
+          href="https://fonts.googleapis.com/css2?family=Pacifico&family=Griffy&family=Leckerli+One&family=Cherry+Bomb+One&family=Chewy&family=Jua&family=Schoolbell&family=Arbutus&family=Arbutus+Slab&family=Fauna+One&family=Nabla&family=Fleur+De+Leah&family=Permanent+Marker&family=Seaweed+Script&display=swap" 
+          rel="stylesheet" 
+        />
+      </head>
       <body className="h-full">
         <ThemeProvider
           attribute="class"

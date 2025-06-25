@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -15,6 +15,7 @@ import {
 } from '@/state/workspaceStore'
 import { Plus, PanelLeftClose, PanelLeft, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getRandomHeaderFont } from '@/lib/fontRotation'
 
 interface SidebarProps {
   className?: string
@@ -30,6 +31,9 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   const workspaces = useWorkspaces()
   
   const hasLoadedWorkspaces = useRef(false)
+  
+  // Get a random font config that stays consistent for this render
+  const headerFontConfig = useMemo(() => getRandomHeaderFont(), [])
 
   // Load workspaces on mount
   useEffect(() => {
@@ -111,7 +115,12 @@ export function Sidebar({ className, onClose }: SidebarProps) {
       {/* Header */}
       <div className="p-4 border-b flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="font-semibold text-lg">bud.chat</h1>
+          <h1 
+            className={headerFontConfig.className} 
+            style={{ fontFamily: headerFontConfig.fontFamily }}
+          >
+            {headerFontConfig.text}
+          </h1>
           <div className="flex gap-1">
             <Button
               variant="ghost"
