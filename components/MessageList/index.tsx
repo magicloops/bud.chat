@@ -35,6 +35,7 @@ export function MessageList({
   // Get messages from store if conversationId provided, otherwise use direct messages
   const storeConversation = useConversation(conversationId || '')
   const conversation = providedConversation || storeConversation
+  
   const displayMessages = messages || conversation?.messages || []
   const isStreaming = useIsStreaming(conversationId || '')
   

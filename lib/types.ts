@@ -74,6 +74,10 @@ export interface BudConfig {
   maxTokens?: number
   greeting?: string
   tools?: string[]
+  customTheme?: {
+    name: string
+    cssVariables: Record<string, string>
+  }
 }
 
 // UI State

@@ -75,7 +75,9 @@ export async function GET(
     const responseData = {
       ...conversation,
       effective_assistant_name: effectiveAssistantName || 'Assistant',
-      effective_assistant_avatar: effectiveAssistantAvatar || '🤖'
+      effective_assistant_avatar: effectiveAssistantAvatar || '🤖',
+      // Include bud data for theme and other config access
+      bud_config: conversation.buds?.default_json || null
     }
 
     // Remove the nested bud data from response (we've extracted what we need)
@@ -113,7 +115,64 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    return new Response('Title updates not supported in new schema', { status: 501 })
+    const { id: conversationId } = await params
+    const supabase = await createClient()
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return new Response('Unauthorized', { status: 401 })
+    }
+
+    const body = await request.json()
+    const { title, assistant_name, assistant_avatar, model_config_overrides } = body
+
+    // Verify user has access through workspace membership
+    const { data: conversation, error: convError } = await supabase
+      .from('conversations')
+      .select(`
+        id,
+        workspace:workspace_id (
+          workspace_members!workspace_members_workspace_id_fkey (
+            user_id,
+            role
+          )
+        )
+      `)
+      .eq('id', conversationId)
+      .single()
+
+    if (convError || !conversation) {
+      return new Response('Conversation not found', { status: 404 })
+    }
+
+    const isMember = conversation.workspace?.workspace_members?.some(
+      (member: any) => member.user_id === user.id
+    )
+    if (!isMember) {
+      return new Response('Access denied', { status: 403 })
+    }
+
+    // Prepare update data - only include fields that are not undefined
+    const updateData: any = {}
+    if (title !== undefined) updateData.title = title
+    if (assistant_name !== undefined) updateData.assistant_name = assistant_name
+    if (assistant_avatar !== undefined) updateData.assistant_avatar = assistant_avatar
+    if (model_config_overrides !== undefined) updateData.model_config_overrides = model_config_overrides
+
+    // Update conversation
+    const { data: updatedConversation, error: updateError } = await supabase
+      .from('conversations')
+      .update(updateData)
+      .eq('id', conversationId)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error('Update conversation error:', updateError)
+      return new Response('Error updating conversation', { status: 500 })
+    }
+
+    return Response.json(updatedConversation)
   } catch (error) {
     console.error('Update conversation error:', error)
     return new Response('Internal server error', { status: 500 })

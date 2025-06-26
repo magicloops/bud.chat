@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -16,15 +17,28 @@ import {
   LogOut, 
   ChevronUp,
   Moon,
-  Sun
+  Sun,
+  Palette
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { useConversation } from '@/state/simpleChatStore'
+import { useBud } from '@/state/budStore'
 
 export function UserMenu() {
   const router = useRouter()
+  const pathname = usePathname()
   const [isLoading, setIsLoading] = useState(false)
   const { toggleTheme, isDarkMode, mounted } = useThemeToggle()
+  
+  // Extract conversation ID from pathname and get conversation/bud data
+  const conversationId = pathname?.match(/\/chat\/([^\/]+)/)?.[1]
+  const conversation = useConversation(conversationId || '')
+  const bud = useBud(conversation?.meta.source_bud_id || '')
+  
+  // Check if there's a custom theme active (from bud default)
+  const budConfig = bud?.default_json as any
+  const hasCustomTheme = budConfig?.customTheme
 
   const handleSignOut = async () => {
     try {
@@ -75,13 +89,15 @@ export function UserMenu() {
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={toggleTheme}>
-            {mounted ? (
+          <DropdownMenuItem onClick={hasCustomTheme ? undefined : toggleTheme} className={hasCustomTheme ? "opacity-50 cursor-not-allowed" : ""}>
+            {hasCustomTheme ? (
+              <Palette className="h-4 w-4 mr-2" />
+            ) : mounted ? (
               isDarkMode ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />
             ) : (
               <Moon className="h-4 w-4 mr-2" />
             )}
-            {mounted ? (isDarkMode ? "Light mode" : "Dark mode") : "Theme"}
+            {hasCustomTheme ? "Custom Theme" : mounted ? (isDarkMode ? "Light mode" : "Dark mode") : "Theme"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleSignOut} disabled={isLoading}>

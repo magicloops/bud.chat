@@ -69,6 +69,14 @@ export default function ChatPage({ params }: ChatPageProps) {
       
       setConversation(conversationData.id, conversation)
       
+      // Apply bud theme if available
+      if (conversationData.bud_config?.customTheme) {
+        const root = document.documentElement
+        Object.entries(conversationData.bud_config.customTheme.cssVariables).forEach(([key, value]) => {
+          root.style.setProperty(key, value as string)
+        })
+      }
+      
       // Switch workspace if needed
       if (conversationData.workspace_id && conversationData.workspace_id !== selectedWorkspace) {
         setSelectedWorkspace(conversationData.workspace_id)

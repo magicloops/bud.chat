@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { 
@@ -97,7 +96,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
           conversationsData.forEach((conv: any) => {
             const conversationMeta: ConversationMeta = {
               id: conv.id,
-              title: conv.title || 'New Chat',
+              title: conv.title, // Don't set default title
               workspace_id: conv.workspace_id,
               bud_id: conv.bud_id,
               created_at: conv.created_at
@@ -130,86 +129,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     loadConversations()
   }, [workspaceId])
 
-  // Set up realtime listener for conversation updates
-  useEffect(() => {
-    if (!workspaceId) {
-      return
-    }
-    const supabase = createClient()
-    
-    // Listen for conversation updates in this workspace
-    const conversationChannel = supabase
-      .channel(`conversations-${workspaceId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*', // Listen to all events to debug
-          schema: 'public',
-          table: 'conversations',
-          filter: `workspace_id=eq.${workspaceId}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            
-            // Add new conversation to the store
-            const newConv = payload.new as any
-            const conversationMeta: ConversationMeta = {
-              id: newConv.id,
-              title: newConv.title || 'New Chat',
-              workspace_id: newConv.workspace_id,
-              bud_id: newConv.bud_id,
-              created_at: newConv.created_at
-            }
-            
-            const conversation: Conversation = {
-              id: newConv.id,
-              messages: [],
-              isStreaming: false,
-              meta: conversationMeta
-            }
-            
-            setConversation(newConv.id, conversation)
-            addConversationToWorkspace(workspaceId, newConv.id)
-            
-          } else if (payload.eventType === 'UPDATE') {
-            // Update the conversation in the new store
-            const updatedConversation = payload.new as any
-            const existingConversation = conversationsRecord[updatedConversation.id]
-            
-            if (existingConversation) {
-              
-              const updatedConversationData: Conversation = {
-                ...existingConversation,
-                meta: {
-                  ...existingConversation.meta,
-                  title: updatedConversation.title,
-                  workspace_id: updatedConversation.workspace_id,
-                  created_at: updatedConversation.created_at,
-                  bud_id: updatedConversation.bud_id,
-                }
-              }
-              
-              // Update the conversation in the new store
-              setConversation(updatedConversation.id, updatedConversationData)
-            }
-          } else if (payload.eventType === 'DELETE') {
-            const deletedConversation = payload.old as any
-            removeConversationFromWorkspace(workspaceId, deletedConversation.id)
-          }
-        }
-      )
-      .subscribe()
-
-    // Cleanup subscription on unmount or workspace change
-    return () => {
-      supabase.removeChannel(conversationChannel)
-      
-      // Also cleanup any pending preload timeout
-      if (preloadTimeoutRef.current) {
-        clearTimeout(preloadTimeoutRef.current)
-      }
-    }
-  }, [workspaceId])
+  // Note: Realtime updates are now handled centrally in the chat store (simpleChatStore.ts)
+  // This prevents duplicate subscriptions and title conflicts
 
   const handleConversationDelete = useCallback(async (conversationId: ConversationId, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -311,7 +232,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
-          return conversationMeta.title || 'New Chat'
+          return conversationMeta.title || 'Untitled'
         }
         
         return (

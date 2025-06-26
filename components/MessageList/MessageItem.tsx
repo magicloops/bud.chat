@@ -57,6 +57,18 @@ export const MessageItem = memo(function MessageItem({
   // The conversation meta should already have the resolved identity (overrides or bud defaults)
   const assistantName = conversation?.meta?.assistant_name || 'Assistant'
   const assistantAvatar = conversation?.meta?.assistant_avatar || '🤖'
+  
+  // Debug logging for assistant identity changes
+  if (isAssistant) {
+    console.log('🤖 MessageItem render:', {
+      messageId: message.id,
+      conversationId: conversation?.id,
+      assistantName,
+      assistantAvatar,
+      rawAssistantName: conversation?.meta?.assistant_name,
+      rawAssistantAvatar: conversation?.meta?.assistant_avatar
+    })
+  }
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content)
@@ -213,14 +225,16 @@ export const MessageItem = memo(function MessageItem({
     </div>
   )
 }, (prevProps, nextProps) => {
-  // Only re-render if the message content, streaming state, or error state changes
-  // Ignore isOptimistic changes to prevent flicker
+  // Re-render if message content, streaming state, conversation identity, or position changes
   return (
     prevProps.message.id === nextProps.message.id &&
     prevProps.message.content === nextProps.message.content &&
     prevProps.message.updated_at === nextProps.message.updated_at &&
     prevProps.isStreaming === nextProps.isStreaming &&
     prevProps.index === nextProps.index &&
-    prevProps.isLast === nextProps.isLast
+    prevProps.isLast === nextProps.isLast &&
+    // IMPORTANT: Check conversation assistant identity for re-rendering
+    prevProps.conversation?.meta?.assistant_name === nextProps.conversation?.meta?.assistant_name &&
+    prevProps.conversation?.meta?.assistant_avatar === nextProps.conversation?.meta?.assistant_avatar
   )
 })

@@ -10,11 +10,11 @@ export interface UpdateBudRequest {
 // GET /api/buds/[id] - Get a specific bud
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient()
-    const budId = params.id
+    const { id: budId } = await params
 
     // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -70,11 +70,11 @@ export async function GET(
 // PUT /api/buds/[id] - Update a bud
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient()
-    const budId = params.id
+    const { id: budId } = await params
     const body: UpdateBudRequest = await request.json()
 
     // Get current user
@@ -165,11 +165,11 @@ export async function PUT(
 // DELETE /api/buds/[id] - Delete a bud
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient()
-    const budId = params.id
+    const { id: budId } = await params
 
     // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser()

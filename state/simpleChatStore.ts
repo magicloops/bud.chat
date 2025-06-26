@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
+import { createClient } from '@/lib/supabase/client'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // Simple, clean types - no complex mappings
 export interface Message {
@@ -41,6 +43,9 @@ interface SimpleChatStore {
   // Workspace conversation management for sidebar
   workspaceConversations: Record<string, string[]> // workspaceId -> conversationIds[]
   
+  // Realtime subscriptions
+  realtimeChannels: Record<string, RealtimeChannel> // workspaceId -> channel
+  
   // UI state
   ui: {
     selectedWorkspace: string | null
@@ -66,6 +71,11 @@ interface SimpleChatStore {
   
   // UI actions
   setSelectedWorkspace: (workspaceId: string | null) => void
+  
+  // Realtime actions
+  subscribeToWorkspace: (workspaceId: string) => void
+  unsubscribeFromWorkspace: (workspaceId: string) => void
+  cleanup: () => void
 }
 
 export const useSimpleChatStore = create<SimpleChatStore>()(
@@ -75,6 +85,7 @@ export const useSimpleChatStore = create<SimpleChatStore>()(
         // Initial state
         conversations: {},
         workspaceConversations: {},
+        realtimeChannels: {},
         ui: {
           selectedWorkspace: null,
         },
@@ -166,6 +177,129 @@ export const useSimpleChatStore = create<SimpleChatStore>()(
         setSelectedWorkspace: (workspaceId) => set((state) => {
           state.ui.selectedWorkspace = workspaceId
         }),
+
+        // Realtime actions
+        subscribeToWorkspace: (workspaceId) => {
+          const state = get()
+          
+          // Don't subscribe if already subscribed
+          if (state.realtimeChannels[workspaceId]) {
+            return
+          }
+
+          const supabase = createClient()
+          const channel = supabase
+            .channel(`workspace-${workspaceId}`)
+            .on(
+              'postgres_changes',
+              {
+                event: '*',
+                schema: 'public',
+                table: 'conversations',
+                filter: `workspace_id=eq.${workspaceId}`
+              },
+              (payload) => {
+                console.log('📡 Conversation update:', payload)
+                
+                if (payload.eventType === 'UPDATE') {
+                  const updatedConversation = payload.new as any
+                  console.log('📝 Updating conversation:', updatedConversation.id, 'title:', updatedConversation.title)
+                  
+                  set((state) => {
+                    if (state.conversations[updatedConversation.id]) {
+                      // Update existing conversation
+                      const currentTitle = state.conversations[updatedConversation.id].meta.title
+                      state.conversations[updatedConversation.id].meta = {
+                        ...state.conversations[updatedConversation.id].meta,
+                        title: updatedConversation.title,
+                        assistant_name: updatedConversation.assistant_name,
+                        assistant_avatar: updatedConversation.assistant_avatar,
+                        model_config_overrides: updatedConversation.model_config_overrides,
+                      }
+                      console.log('✅ Conversation updated in store:', currentTitle, '→', updatedConversation.title)
+                      console.log('🔍 Store state after update:', Object.keys(state.conversations).length, 'conversations')
+                    } else {
+                      console.log('⚠️ Conversation not found in store, queuing update:', updatedConversation.id)
+                      
+                      // Conversation not in store yet - retry after a delay
+                      setTimeout(() => {
+                        console.log('🔄 Retrying conversation update:', updatedConversation.id)
+                        const currentState = get()
+                        if (currentState.conversations[updatedConversation.id]) {
+                          set((retryState) => {
+                            retryState.conversations[updatedConversation.id].meta = {
+                              ...retryState.conversations[updatedConversation.id].meta,
+                              title: updatedConversation.title,
+                              assistant_name: updatedConversation.assistant_name,
+                              assistant_avatar: updatedConversation.assistant_avatar,
+                              model_config_overrides: updatedConversation.model_config_overrides,
+                            }
+                            console.log('✅ Delayed update successful:', updatedConversation.title)
+                          })
+                        } else {
+                          console.log('❌ Conversation still not found after retry:', updatedConversation.id)
+                        }
+                      }, 1000) // 1 second delay
+                    }
+                  })
+                } else if (payload.eventType === 'INSERT') {
+                  const newConversation = payload.new as any
+                  
+                  set((state) => {
+                    // Add to workspace conversations if not already there
+                    if (!state.workspaceConversations[workspaceId]) {
+                      state.workspaceConversations[workspaceId] = []
+                    }
+                    if (!state.workspaceConversations[workspaceId].includes(newConversation.id)) {
+                      state.workspaceConversations[workspaceId].unshift(newConversation.id)
+                    }
+                  })
+                } else if (payload.eventType === 'DELETE') {
+                  const deletedConversation = payload.old as any
+                  
+                  set((state) => {
+                    // Remove from conversations and workspace
+                    delete state.conversations[deletedConversation.id]
+                    if (state.workspaceConversations[workspaceId]) {
+                      state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId].filter(
+                        id => id !== deletedConversation.id
+                      )
+                    }
+                  })
+                }
+              }
+            )
+            .subscribe()
+
+          set((state) => {
+            state.realtimeChannels[workspaceId] = channel
+          })
+        },
+
+        unsubscribeFromWorkspace: (workspaceId) => {
+          const state = get()
+          const channel = state.realtimeChannels[workspaceId]
+          
+          if (channel) {
+            channel.unsubscribe()
+            set((state) => {
+              delete state.realtimeChannels[workspaceId]
+            })
+          }
+        },
+
+        cleanup: () => {
+          const state = get()
+          
+          // Unsubscribe from all channels
+          Object.values(state.realtimeChannels).forEach(channel => {
+            channel.unsubscribe()
+          })
+          
+          set((state) => {
+            state.realtimeChannels = {}
+          })
+        },
       })),
       {
         name: 'simple-chat-store',
@@ -213,3 +347,13 @@ export const useRemoveConversationFromWorkspace = () =>
 
 export const useSetWorkspaceConversations = () => 
   useSimpleChatStore((state) => state.setWorkspaceConversations)
+
+// Realtime hooks
+export const useSubscribeToWorkspace = () => 
+  useSimpleChatStore((state) => state.subscribeToWorkspace)
+
+export const useUnsubscribeFromWorkspace = () => 
+  useSimpleChatStore((state) => state.unsubscribeFromWorkspace)
+
+export const useCleanup = () => 
+  useSimpleChatStore((state) => state.cleanup)

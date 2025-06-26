@@ -8,6 +8,12 @@ import SettingsPanel from '@/components/settings-panel'
 import { Button } from '@/components/ui/button'
 import { PanelLeft, PanelRight } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
+import { 
+  useSelectedWorkspace, 
+  useSubscribeToWorkspace, 
+  useUnsubscribeFromWorkspace,
+  useCleanup 
+} from '@/state/simpleChatStore'
 
 export default function ChatLayout({
   children,
@@ -17,6 +23,12 @@ export default function ChatLayout({
   const { user, loading } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
+  
+  // Realtime subscriptions
+  const selectedWorkspace = useSelectedWorkspace()
+  const subscribeToWorkspace = useSubscribeToWorkspace()
+  const unsubscribeFromWorkspace = useUnsubscribeFromWorkspace()
+  const cleanup = useCleanup()
 
   // Load sidebar state from localStorage on mount
   useEffect(() => {
@@ -40,6 +52,28 @@ export default function ChatLayout({
       window.removeEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener)
     }
   }, [])
+
+  // Manage realtime subscriptions based on selected workspace
+  useEffect(() => {
+    if (!user || !selectedWorkspace) {
+      return
+    }
+
+    console.log('📡 Subscribing to workspace:', selectedWorkspace)
+    subscribeToWorkspace(selectedWorkspace)
+
+    return () => {
+      console.log('📡 Unsubscribing from workspace:', selectedWorkspace)
+      unsubscribeFromWorkspace(selectedWorkspace)
+    }
+  }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace])
+
+  // Cleanup all subscriptions on unmount
+  useEffect(() => {
+    return () => {
+      cleanup()
+    }
+  }, [cleanup])
 
   const handleSidebarToggle = (open: boolean) => {
     setSidebarOpen(open)
