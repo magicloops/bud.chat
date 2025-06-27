@@ -58,17 +58,6 @@ export const MessageItem = memo(function MessageItem({
   const assistantName = conversation?.meta?.assistant_name || 'Assistant'
   const assistantAvatar = conversation?.meta?.assistant_avatar || '🤖'
   
-  // Debug logging for assistant identity changes
-  if (isAssistant) {
-    console.log('🤖 MessageItem render:', {
-      messageId: message.id,
-      conversationId: conversation?.id,
-      assistantName,
-      assistantAvatar,
-      rawAssistantName: conversation?.meta?.assistant_name,
-      rawAssistantAvatar: conversation?.meta?.assistant_avatar
-    })
-  }
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content)
