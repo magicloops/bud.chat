@@ -4,6 +4,20 @@ This file contains important patterns, gotchas, and conventions for working with
 
 ---
 
+## ⚠️ Critical Development Guidelines
+
+### Package Manager
+- **ALWAYS use `pnpm`** - This project uses pnpm, not npm or yarn
+- Examples: `pnpm install`, `pnpm run dev`, `pnpm build`
+
+### Database Management
+- **NEVER run `pnpm supabase db reset`** - This will wipe out all existing data
+- Use `pnpm supabase db push` to apply new migrations
+- Use `pnpm supabase migration new <name>` to create new migrations
+- Test migrations on local database first before applying to production
+
+---
+
 ## State Management (Zustand)
 
 ### ⚠️ Derived State Pattern - Prevent Infinite Loops

@@ -18,9 +18,9 @@ export interface OptimisticMessage {
   id: MessageId // temp ID like 'temp-123'
   conversation_id: ConversationId
   order_key: string
-  role: 'user' | 'assistant' | 'system'
+  role: MessageRole
   content: string
-  json_meta: Record<string, any>
+  json_meta: Record<string, any> & Partial<ToolCallMetadata>
   version: number
   created_at: string
   updated_at: string
@@ -78,6 +78,21 @@ export interface BudConfig {
     name: string
     cssVariables: Record<string, string>
   }
+  mcpConfig?: MCPBudConfig
+}
+
+// MCP Configuration types
+export interface MCPBudConfig {
+  servers?: string[] // Array of server IDs
+  available_tools?: string[] // Array of "server_id.tool_name"
+  disabled_tools?: string[] // Array of "server_id.tool_name" to disable
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
+}
+
+export interface MCPConversationOverrides {
+  additional_servers?: string[] // Additional server IDs to include
+  disabled_tools?: string[] // Additional tools to disable
+  tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 }
 
 // UI State
@@ -105,10 +120,44 @@ export interface StreamDelta {
 }
 
 export interface StreamEvent {
-  type: 'messagesCreated' | 'token' | 'complete' | 'error'
+  type: 'messagesCreated' | 'token' | 'complete' | 'error' | 'tool_call' | 'tool_result'
   messageId?: MessageId
   userMessage?: ChatMessage
   assistantMessage?: ChatMessage
   content?: string
   error?: string
+  toolCall?: ToolCallEvent
+  toolResult?: ToolResultEvent
+}
+
+// MCP Tool calling types
+export interface ToolCallEvent {
+  id: string
+  name: string
+  arguments: Record<string, any>
+}
+
+export interface ToolResultEvent {
+  id: string
+  name: string
+  result: any
+  error?: string
+}
+
+// Enhanced message role to include tool messages
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+
+// Tool call message metadata
+export interface ToolCallMetadata {
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: {
+      name: string
+      arguments: string
+    }
+  }>
+  tool_call_id?: string
+  is_tool_call?: boolean
+  mcp_server_id?: string
 }

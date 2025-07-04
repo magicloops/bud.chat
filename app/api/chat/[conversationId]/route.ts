@@ -3,6 +3,8 @@ import { Database } from '@/lib/types/database'
 import OpenAI from 'openai'
 import { NextRequest } from 'next/server'
 import { generateKeyBetween } from 'fractional-indexing'
+import { createMCPClientForConversation } from '@/lib/mcp'
+import { MCPStreamingHandler } from '@/lib/mcp/streamingHandler'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -127,12 +129,28 @@ export async function POST(
           const streamStartTime = Date.now()
           console.log('🚀 PERF: Starting LLM request for existing conversation...')
           
-          // 1. Start LLM streaming immediately (messages already preloaded)
+          // 1. Initialize MCP client for existing conversation
+          let mcpClient = null
+          let availableTools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
+          
+          try {
+            mcpClient = await createMCPClientForConversation(conversationId, workspaceId)
+            if (mcpClient) {
+              availableTools = await mcpClient.getAvailableTools()
+              console.log(`🔧 MCP: Initialized with ${availableTools.length} tools`)
+            }
+          } catch (error) {
+            console.warn('MCP initialization failed:', error)
+          }
+
+          // 2. Start LLM streaming with MCP tools (messages already preloaded)
           const llmStartTime = Date.now()
           const openaiStream = await openai.chat.completions.create({
             model,
             messages: openaiMessages,
             stream: true,
+            tools: availableTools.length > 0 ? availableTools : undefined,
+            tool_choice: availableTools.length > 0 ? 'auto' : undefined
           })
           const llmSetupTime = Date.now() - llmStartTime
           console.log('⚡ PERF: LLM setup completed in:', llmSetupTime, 'ms')
@@ -176,7 +194,21 @@ export async function POST(
           const userMessagePromise = saveUserMessageInBackground()
           let userMessageSaved = false
 
-          // 3. Stream LLM response while database operations happen in parallel
+          // 3. Initialize MCP streaming handler
+          let mcpStreamingHandler: MCPStreamingHandler | null = null
+          if (mcpClient) {
+            mcpStreamingHandler = new MCPStreamingHandler({
+              conversationId,
+              supabase,
+              mcpClient,
+              encoder,
+              controller,
+              lastOrderKey: assistantOrderKey // Use the pre-generated assistant order key
+            })
+            console.log('🔧 MCP streaming handler initialized')
+          }
+
+          // 4. Stream LLM response while database operations happen in parallel
           let fullContent = ''
           let tokenCount = 0
           let firstTokenTime: number | null = null
@@ -184,7 +216,13 @@ export async function POST(
 
           for await (const chunk of openaiStream) {
             const chunkStartTime = Date.now()
-            const content = chunk.choices[0]?.delta?.content || ''
+            const delta = chunk.choices[0]?.delta
+            const content = delta?.content || ''
+
+            // Handle tool calls if MCP is available
+            if (mcpStreamingHandler && (delta?.tool_calls || delta?.content)) {
+              await mcpStreamingHandler.handleStreamChunk(chunk)
+            }
             
             if (content) {
               tokenCount++
@@ -204,23 +242,25 @@ export async function POST(
               }
               lastTokenTime = chunkStartTime
               
-              // Send token to client immediately with aggressive anti-buffering
-              const encodeStart = Date.now()
-              
-              // Use minimal JSON and add padding to force immediate transmission
-              const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
-              const chunk = encoder.encode(data)
-              controller.enqueue(chunk)
-              
-              // Send a keep-alive chunk to force flush (browsers batch small chunks)
-              if (tokenCount % 5 === 0) {
-                controller.enqueue(encoder.encode(': keep-alive\n\n'))
-              }
-              
-              const encodeTime = Date.now() - encodeStart
-              
-              if (encodeTime > 5) {
-                console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
+              // Send token to client immediately (if not handled by MCP)
+              if (!mcpStreamingHandler) {
+                const encodeStart = Date.now()
+                
+                // Use minimal JSON and add padding to force immediate transmission
+                const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
+                const chunk = encoder.encode(data)
+                controller.enqueue(chunk)
+                
+                // Send a keep-alive chunk to force flush (browsers batch small chunks)
+                if (tokenCount % 5 === 0) {
+                  controller.enqueue(encoder.encode(': keep-alive\n\n'))
+                }
+                
+                const encodeTime = Date.now() - encodeStart
+                
+                if (encodeTime > 5) {
+                  console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
+                }
               }
             }
 
@@ -239,7 +279,21 @@ export async function POST(
             }
           }
 
-          // 4. Wait for user message save if still pending
+          // 5. Process any pending tool calls
+          if (mcpStreamingHandler) {
+            try {
+              console.log('🔧 Processing tool calls...')
+              await mcpStreamingHandler.finishToolCalls()
+            } catch (error) {
+              console.error('❌ Error processing tool calls:', error)
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'error',
+                error: 'Tool execution failed'
+              })}\n\n`))
+            }
+          }
+
+          // 6. Wait for user message save if still pending
           if (!userMessageSaved) {
             try {
               await userMessagePromise
@@ -250,8 +304,9 @@ export async function POST(
             }
           }
 
-          // 5. Save assistant message to database (if user message was saved)
-          if (userMessageSaved && fullContent) {
+          // 7. Save assistant message to database (if user message was saved and there's content)
+          // Note: Tool call messages are already saved by MCPStreamingHandler
+          if (userMessageSaved && fullContent && !mcpStreamingHandler) {
             try {
               const assistantSaveStartTime = Date.now()
               console.log('💾 PERF: Saving assistant message to DB...')
@@ -282,6 +337,16 @@ export async function POST(
             }
           }
 
+          // 8. Clean up MCP resources
+          if (mcpClient) {
+            try {
+              await mcpClient.cleanup()
+              console.log('🧹 MCP client cleaned up')
+            } catch (error) {
+              console.warn('Failed to cleanup MCP client:', error)
+            }
+          }
+
           // 5. Send completion signal
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'complete',
@@ -293,6 +358,16 @@ export async function POST(
           
         } catch (error) {
           console.error('❌ Existing conversation streaming error:', error)
+          
+          // Clean up MCP resources in case of error
+          if (mcpClient) {
+            try {
+              await mcpClient.cleanup()
+            } catch (cleanupError) {
+              console.warn('Failed to cleanup MCP client after error:', cleanupError)
+            }
+          }
+          
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'error',
             error: 'Failed to generate response'

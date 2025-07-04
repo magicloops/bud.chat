@@ -6,6 +6,14 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import MarkdownRenderer from '@/components/markdown-renderer'
 import { Message, Conversation } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
+import { 
+  ToolCallMessage, 
+  ToolResultMessage,
+  isToolCallMessage,
+  isToolResultMessage,
+  extractToolCallsFromMessage,
+  extractToolResultFromMessage
+} from '@/components/ToolCall'
 import {
   Copy,
   Edit,
@@ -13,7 +21,8 @@ import {
   GitBranch,
   MoreHorizontal,
   Bot,
-  AlertCircle
+  AlertCircle,
+  Wrench
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -52,6 +61,13 @@ export const MessageItem = memo(function MessageItem({
   const isSystem = message.role === 'system'
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
+  const isTool = message.role === 'tool'
+  
+  // Tool call detection
+  const isToolCall = isToolCallMessage(message)
+  const isToolResult = isToolResultMessage(message)
+  const toolCalls = extractToolCallsFromMessage(message)
+  const toolResult = extractToolResultFromMessage(message)
   
   // Get assistant identity - all messages in a conversation should show the same identity
   // The conversation meta should already have the resolved identity (overrides or bud defaults)
@@ -137,6 +153,10 @@ export const MessageItem = memo(function MessageItem({
             <AvatarFallback>
               U
             </AvatarFallback>
+          ) : isTool || isToolResult ? (
+            <AvatarFallback>
+              <Wrench className="h-4 w-4" />
+            </AvatarFallback>
           ) : (
             <AvatarFallback>
               <span className="text-lg">{assistantAvatar}</span>
@@ -147,7 +167,7 @@ export const MessageItem = memo(function MessageItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-medium">
-              {isUser ? 'You' : assistantName}
+              {isUser ? 'You' : (isTool || isToolResult) ? 'Tool' : assistantName}
             </span>
             {isAssistant && message.json_meta?.model && message.json_meta.model !== 'greeting' && (
               <span className="text-xs text-muted-foreground/60">{message.json_meta.model}</span>
@@ -160,7 +180,39 @@ export const MessageItem = memo(function MessageItem({
             {isStreaming && !message.content && (
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
             )}
-            <MarkdownRenderer content={message.content} />
+            
+            {/* Tool Call Messages */}
+            {isToolCall && toolCalls.length > 0 && (
+              <ToolCallMessage 
+                toolCalls={toolCalls}
+                isExecuting={isStreaming}
+                className="mb-2"
+              />
+            )}
+            
+            {/* Tool Result Messages */}
+            {isToolResult && toolResult && (
+              <ToolResultMessage
+                toolCallId={toolResult.tool_call_id}
+                toolName={toolResult.tool_name}
+                result={toolResult.content}
+                error={toolResult.content.startsWith('Error:') ? toolResult.content : undefined}
+                isExecuting={isStreaming}
+                className="mb-2"
+              />
+            )}
+            
+            {/* Regular Content */}
+            {!isToolCall && !isToolResult && message.content && (
+              <MarkdownRenderer content={message.content} />
+            )}
+            
+            {/* Regular Content for Tool Call Messages with additional content */}
+            {isToolCall && message.content && (
+              <div className="mt-2">
+                <MarkdownRenderer content={message.content} />
+              </div>
+            )}
           </div>
           
           {/* Error Display */}

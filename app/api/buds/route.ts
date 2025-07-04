@@ -128,12 +128,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Extract MCP config from the main config
+    const { mcpConfig, ...budConfig } = config
+    
     // Create the bud
     const { data: bud, error: createError } = await supabase
       .from('buds')
       .insert({
         name,
-        default_json: config,
+        default_json: budConfig,
+        mcp_config: mcpConfig || {},
         workspace_id: workspaceId,
         owner_user_id: user.id
       })

@@ -9,7 +9,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 export interface Message {
   id: string
   conversation_id: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   created_at: string
   updated_at: string

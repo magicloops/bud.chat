@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Sparkles } from 'lucide-react'
 import { EmojiPicker } from '@/components/EmojiPicker'
+import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP'
 import { Bud, BudConfig } from '@/lib/types'
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers'
 
@@ -27,14 +28,21 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
   const [config, setConfig] = useState<BudConfig>(() => 
     bud ? getBudConfig(bud) : getDefaultBudConfig()
   )
+  const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(
+    config.mcpConfig || {}
+  )
   const [errors, setErrors] = useState<string[]>([])
 
   // Reset form when bud changes
   useEffect(() => {
     if (bud) {
-      setConfig(getBudConfig(bud))
+      const budConfig = getBudConfig(bud)
+      setConfig(budConfig)
+      setMcpConfig(budConfig.mcpConfig || {})
     } else {
-      setConfig(getDefaultBudConfig())
+      const defaultConfig = getDefaultBudConfig()
+      setConfig(defaultConfig)
+      setMcpConfig({})
     }
     setErrors([])
   }, [bud])
@@ -52,7 +60,12 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
     setErrors([])
     
     try {
-      await onSave(config, config.name)
+      // Include MCP configuration in the config
+      const finalConfig = {
+        ...config,
+        mcpConfig: Object.keys(mcpConfig).length > 0 ? mcpConfig : undefined
+      }
+      await onSave(finalConfig, config.name)
       onClose()
     } catch (error) {
       console.error('Failed to save bud:', error)
@@ -235,6 +248,15 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               </div>
             </CardContent>
           </Card>
+          
+          {/* MCP Configuration */}
+          <MCPConfigurationPanel
+            workspaceId={workspaceId}
+            config={mcpConfig}
+            onChange={setMcpConfig}
+            title="Tool Integration"
+            description="Enable external tools and capabilities for this Bud"
+          />
           
           {/* Optional Greeting */}
           <div>

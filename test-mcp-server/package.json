@@ -1,0 +1,14 @@
+{
+  "name": "test-mcp-server",
+  "version": "1.0.0",
+  "description": "Simple JavaScript eval MCP server for testing",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.2"
+  }
+}

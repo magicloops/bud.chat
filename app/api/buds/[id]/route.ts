@@ -131,9 +131,17 @@ export async function PUT(
     }
     
     if (body.config) {
-      // Merge with existing config
+      // Extract MCP config from the update
+      const { mcpConfig, ...budConfig } = body.config
+      
+      // Merge with existing config (excluding MCP config)
       const currentConfig = existingBud.default_json as BudConfig
-      updateData.default_json = { ...currentConfig, ...body.config }
+      updateData.default_json = { ...currentConfig, ...budConfig }
+      
+      // Update MCP config separately if provided
+      if (mcpConfig !== undefined) {
+        updateData.mcp_config = mcpConfig
+      }
     }
 
     // Update the bud
