@@ -49,8 +49,17 @@ function createMCPServer() {
 // Store transports by session ID
 const transports = {};
 
+// Add logging middleware
+app.use((req, res, next) => {
+  console.log(`📨 ${req.method} ${req.url}`)
+  console.log('Headers:', req.headers)
+  console.log('Body:', req.body)
+  next()
+})
+
 // Handle POST requests for client-to-server communication
 app.post('/mcp', async (req, res) => {
+  console.log('🔧 POST /mcp received')
   const sessionId = req.headers['mcp-session-id'];
   let transport;
 
@@ -74,15 +83,69 @@ app.post('/mcp', async (req, res) => {
 
     const server = createMCPServer();
     await server.connect(transport);
+  } else if (!sessionId && req.body.method === 'tools/list') {
+    // Handle tools/list request without session (for OpenAI Responses API)
+    console.log('📋 Handling tools/list request without session');
+    
+    try {
+      const server = createMCPServer();
+      // Simulate the tools/list response
+      const tools = [
+        {
+          name: "add",
+          title: "Addition Tool",
+          description: "Add two numbers",
+          input_schema: {
+            type: "object",
+            properties: {
+              a: { type: "number", description: "First number" },
+              b: { type: "number", description: "Second number" }
+            },
+            required: ["a", "b"],
+            additionalProperties: false
+          }
+        },
+        {
+          name: "calculate",
+          title: "Calculator",
+          description: "Perform mathematical calculations",
+          input_schema: {
+            type: "object",
+            properties: {
+              expression: { type: "string", description: "Mathematical expression to evaluate" }
+            },
+            required: ["expression"],
+            additionalProperties: false
+          }
+        }
+      ];
+
+      res.json({
+        jsonrpc: '2.0',
+        result: { tools },
+        id: req.body.id
+      });
+      return;
+    } catch (error) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal error: ' + error.message
+        },
+        id: req.body.id
+      });
+      return;
+    }
   } else {
     // Invalid request
     res.status(400).json({
       jsonrpc: '2.0',
       error: {
         code: -32000,
-        message: 'Bad Request: No valid session ID provided',
+        message: 'Bad Request: No valid session ID provided and not a tools/list request',
       },
-      id: null,
+      id: req.body.id || null,
     });
     return;
   }

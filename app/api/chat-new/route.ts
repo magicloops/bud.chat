@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { Database } from '@/lib/types/database'
 import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
 import { NextRequest } from 'next/server'
 import { generateKeyBetween } from 'fractional-indexing'
 import { createMCPClientForConversation, createMCPClientForBud } from '@/lib/mcp'
@@ -8,6 +9,10 @@ import { MCPStreamingHandler } from '@/lib/mcp/streamingHandler'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
+})
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
 // Helper function to generate a conversation title (async, non-blocking)
@@ -226,13 +231,223 @@ export async function POST(request: NextRequest) {
           let effectiveConfig = { model, temperature: 0.7 }
           let budData: any = null
 
-          // 2. Initialize MCP client from bud if available
+          // 2. Check for MCP configuration and use native MCP APIs if available
+          let shouldUseResponsesAPI = false
+          let shouldUseAnthropicMCP = false
+          let mcpServers: any[] = []
+          
+          try {
+            if (budId) {
+              console.log('🔧 MCP: Checking for MCP configuration in budId:', budId)
+              
+              // Get bud configuration including MCP config
+              const { data: bud, error: budError } = await supabase
+                .from('buds')
+                .select('*, mcp_config')
+                .eq('id', budId)
+                .single()
+
+              if (bud && !budError) {
+                const mcpConfig = bud.mcp_config || {}
+                
+                if (mcpConfig.servers?.length > 0) {
+                  // Fetch MCP server details
+                  const { data: servers, error: serversError } = await supabase
+                    .from('mcp_servers')
+                    .select('*')
+                    .in('id', mcpConfig.servers)
+                    .eq('workspace_id', workspaceId)
+
+                  if (servers && !serversError && servers.length > 0) {
+                    // Check if we're using a Claude model (Anthropic)
+                    const isClaudeModel = effectiveConfig.model.toLowerCase().includes('claude')
+                    
+                    if (isClaudeModel) {
+                      shouldUseAnthropicMCP = true
+                      mcpServers = servers.map(server => ({
+                        type: "url",
+                        url: server.endpoint,
+                        name: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
+                        ...(server.metadata?.authorization_token && {
+                          authorization_token: server.metadata.authorization_token
+                        })
+                      }))
+                      
+                      console.log('🚀 MCP: Using Anthropic native MCP with', mcpServers.length, 'MCP servers')
+                    } else {
+                      shouldUseResponsesAPI = true
+                      mcpServers = servers.map(server => ({
+                        type: "mcp",
+                        server_label: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
+                        server_url: server.endpoint,
+                        require_approval: server.metadata?.require_approval || "never",
+                        ...(server.metadata?.allowed_tools && {
+                          allowed_tools: server.metadata.allowed_tools
+                        })
+                      }))
+                      
+                      console.log('🚀 MCP: Using OpenAI Responses API with', mcpServers.length, 'MCP servers')
+                    }
+                    
+                    mcpServers.forEach(server => {
+                      console.log(`  - ${server.name || server.server_label}: ${server.url || server.server_url}`)
+                    })
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.warn('MCP configuration check failed:', error)
+          }
+
+          // If MCP is configured, use Responses API instead of streaming
+          if (shouldUseResponsesAPI) {
+            console.log('🔄 Redirecting to Responses API for MCP support')
+            
+            try {
+              // Use the last user message as input
+              const lastMessage = openaiMessages[openaiMessages.length - 1]
+              const input = lastMessage?.content || ''
+
+              // Add conversation history as context if there are previous messages
+              let contextualInput = input
+              if (openaiMessages.length > 1) {
+                const conversationContext = openaiMessages.slice(0, -1)
+                  .map(msg => `${msg.role}: ${msg.content}`)
+                  .join('\n\n')
+                
+                contextualInput = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`
+              }
+
+              // Create Responses API request
+              const responseRequest: any = {
+                model: effectiveConfig.model,
+                input: contextualInput,
+                tools: mcpServers
+              }
+
+              console.log('📤 Making Responses API stream call...')
+              const responseStream = await openai.responses.stream(responseRequest)
+              
+              let fullContent = ''
+              let currentMessage = ''
+              
+              console.log('🔄 Processing Responses API stream...')
+              
+              for await (const event of responseStream) {
+                console.log('📨 Stream event:', event.type, event.item_id ? `(${event.item_id})` : '')
+                
+                // Log the full event for debugging
+                if (event.type.includes('mcp')) {
+                  console.log('🔍 MCP Event Details:', JSON.stringify(event, null, 2))
+                }
+                
+                switch (event.type) {
+                  case 'response.created':
+                  case 'response.in_progress':
+                    // Just log these for debugging
+                    break
+                    
+                  case 'response.output_text.delta':
+                    // Stream text content to client
+                    const delta = event.delta
+                    if (delta) {
+                      currentMessage += delta
+                      fullContent += delta
+                      controller.enqueue(encoder.encode(`data: {"type":"token","content":${JSON.stringify(delta)}}\n\n`))
+                    }
+                    break
+                    
+                  case 'response.mcp_list_tools.completed':
+                    console.log('🛠️ MCP tools list completed')
+                    break
+                    
+                  case 'response.mcp_list_tools.in_progress':
+                    console.log('🔄 MCP listing tools...')
+                    break
+                    
+                  case 'response.mcp_call.in_progress':
+                    console.log('🔧 MCP tool call in progress...')
+                    // Optionally show tool progress to user
+                    controller.enqueue(encoder.encode(`data: {"type":"token","content":"\\n\\n🔍 *Searching for information...*\\n\\n"}\n\n`))
+                    break
+                    
+                  case 'response.mcp_call.arguments.delta':
+                  case 'response.mcp_call_arguments.delta': // Alternative format
+                    console.log('🔧 MCP tool arguments streaming...')
+                    break
+                    
+                  case 'response.mcp_call.arguments.done':
+                  case 'response.mcp_call_arguments.done': // Alternative format
+                    console.log('✅ MCP tool arguments finalized')
+                    break
+                    
+                  case 'response.mcp_call.completed':
+                    console.log('✅ MCP tool call completed')
+                    // Show completion to user
+                    controller.enqueue(encoder.encode(`data: {"type":"token","content":"✅ *Information retrieved*\\n\\n"}\n\n`))
+                    break
+                    
+                  case 'response.mcp_call.failed':
+                    console.error('❌ MCP tool call failed')
+                    controller.enqueue(encoder.encode(`data: {"type":"token","content":"❌ *Tool call failed*\\n\\n"}\n\n`))
+                    break
+                    
+                  case 'response.output_item.added':
+                    console.log('📄 Output item added:', event.item?.type)
+                    break
+                    
+                  case 'response.output_item.done':
+                    console.log('✅ Output item completed:', event.item?.type)
+                    // Log the full output item to see what we're getting
+                    if (event.item?.type === 'mcp_call') {
+                      console.log('📋 MCP Call Result:', JSON.stringify(event.item, null, 2))
+                    }
+                    break
+                    
+                  case 'response.completed':
+                    console.log('✅ Responses API stream completed')
+                    // Send completion event
+                    controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
+                    controller.close()
+                    return
+                    
+                  case 'response.failed':
+                    console.error('❌ Responses API stream failed:', event.response?.error)
+                    controller.enqueue(encoder.encode(`data: {"type":"error","error":"Responses API failed"}\n\n`))
+                    controller.close()
+                    return
+                    
+                  case 'error':
+                    console.error('❌ Stream error:', event.message)
+                    controller.enqueue(encoder.encode(`data: {"type":"error","error":${JSON.stringify(event.message)}}\n\n`))
+                    controller.close()
+                    return
+                    
+                  default:
+                    console.log('🔍 Unhandled stream event:', event.type)
+                }
+              }
+              
+              // Fallback completion if we get here
+              console.log('✅ Stream completed (fallback)')
+              controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
+              controller.close()
+              return
+              
+            } catch (responsesError) {
+              console.error('❌ Responses API failed, falling back to streaming:', responsesError)
+              // Fall through to normal streaming approach
+            }
+          }
+
+          // 3. Fallback: Use traditional streaming approach
           let mcpClient = null
           let availableTools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
           
           try {
-            if (budId) {
-              console.log('🔧 MCP: Initializing from budId:', budId)
+            if (budId && !shouldUseResponsesAPI) {
+              console.log('🔧 MCP: Initializing traditional MCP client from budId:', budId)
               mcpClient = await createMCPClientForBud(budId, workspaceId)
               if (mcpClient) {
                 availableTools = await mcpClient.getAvailableTools()
@@ -245,7 +460,7 @@ export async function POST(request: NextRequest) {
             console.warn('MCP initialization preparation failed:', error)
           }
 
-          // 3. Start LLM streaming with effective configuration
+          // 4. Start LLM streaming with effective configuration
           const llmStartTime = Date.now()
           const openaiStream = await openai.chat.completions.create({
             model: effectiveConfig.model,
