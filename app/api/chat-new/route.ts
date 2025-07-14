@@ -16,6 +16,30 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 })
 
+// Helper function to extract tool calls from conversation messages
+function extractToolCallsFromConversation(conversationMessages: any[]): any[] {
+  const toolCalls = []
+  
+  for (const message of conversationMessages) {
+    if (message.role === 'assistant' && message.content && Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block.type === 'tool_use') {
+          toolCalls.push({
+            id: block.id,
+            type: 'function',
+            function: {
+              name: block.name,
+              arguments: JSON.stringify(block.input || {})
+            }
+          })
+        }
+      }
+    }
+  }
+  
+  return toolCalls
+}
+
 // Helper function to generate a conversation title (async, non-blocking)
 async function generateConversationTitleInBackground(conversationId: string, messages: any[], supabase: any) {
   try {
@@ -597,11 +621,13 @@ export async function POST(request: NextRequest) {
               let response = await anthropic.messages.create(anthropicRequest)
               
               let finalContent = ''
+              let completeContent = '' // This will include tool indicators for database storage
               let conversationMessages = [...anthropicMessages.filter(msg => msg.role !== 'system')]
               
               // Process response and handle tool calls
               while (response.content.some(block => block.type === 'tool_use')) {
                 console.log('🔧 Processing tool calls...')
+                console.log('📋 Response content blocks:', response.content.map(block => block.type))
                 
                 let assistantContent = []
                 let toolResults = []
@@ -610,6 +636,7 @@ export async function POST(request: NextRequest) {
                 for (const block of response.content) {
                   if (block.type === 'text') {
                     finalContent += block.text
+                    completeContent += block.text
                     assistantContent.push(block)
                     // Stream text immediately
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -620,13 +647,16 @@ export async function POST(request: NextRequest) {
                     console.log('🔧 Tool call:', block.name, 'with args:', block.input)
                     assistantContent.push(block)
                     
+                    const toolIndicator = `\n\n🔧 *Using tool: ${block.name}*\n`
+                    completeContent += toolIndicator
+                    
                     // Show tool usage to user
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: "tool_start",
                       tool_name: block.name,
                       tool_id: block.id,
                       tool_arguments: JSON.stringify(block.input || {}),
-                      content: `\n\n🔧 *Using tool: ${block.name}*\n`
+                      content: toolIndicator
                     })}\n\n`))
                     
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -656,17 +686,30 @@ export async function POST(request: NextRequest) {
                         data: JSON.parse(truncatedDebugData)
                       })}\n\n`))
                       
+                      const toolCompleteIndicator = "✅ *Tool completed*\n\n"
+                      completeContent += toolCompleteIndicator
+                      
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                         type: "tool_complete",
                         tool_name: block.name,
                         tool_id: block.id,
-                        content: "✅ *Tool completed*\n\n"
+                        content: toolCompleteIndicator
                       })}\n\n`))
                       
                       // Prepare tool result for conversation
-                      const toolResultContent = Array.isArray(toolResult.content) 
+                      let toolResultContent = Array.isArray(toolResult.content) 
                         ? toolResult.content.map(block => block.type === 'text' ? block.text : JSON.stringify(block)).join('\n')
                         : String(toolResult.content || '')
+                      
+                      // Truncate very large tool results to avoid overwhelming Claude
+                      const MAX_TOOL_RESULT_LENGTH = 50000 // 50KB max
+                      if (toolResultContent.length > MAX_TOOL_RESULT_LENGTH) {
+                        console.log('⚠️ Tool result too large, truncating from', toolResultContent.length, 'to', MAX_TOOL_RESULT_LENGTH)
+                        toolResultContent = toolResultContent.substring(0, MAX_TOOL_RESULT_LENGTH) + '\n\n[Content truncated due to length...]'
+                      }
+                      
+                      console.log('📋 Tool result content length:', toolResultContent.length)
+                      console.log('📋 Tool result preview:', toolResultContent.substring(0, 200) + '...')
                       
                       toolResults.push({
                         type: 'tool_result',
@@ -676,11 +719,14 @@ export async function POST(request: NextRequest) {
                       
                     } catch (toolError) {
                       console.error('❌ Tool execution failed:', toolError)
+                      const toolErrorIndicator = "❌ *Tool execution failed*\n\n"
+                      completeContent += toolErrorIndicator
+                      
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                         type: "tool_error",
                         tool_name: block.name,
                         tool_id: block.id,
-                        content: "❌ *Tool execution failed*\n\n"
+                        content: toolErrorIndicator
                       })}\n\n`))
                       
                       // Add error result
@@ -708,25 +754,79 @@ export async function POST(request: NextRequest) {
                   })
                 }
                 
-                // Get next response from Claude with tool results
+                // Get next response from Claude with tool results (streaming)
                 console.log('📤 Getting follow-up response from Claude...')
                 console.log('📋 Conversation state before follow-up:')
                 console.log('  - Total messages:', conversationMessages.length)
                 console.log('  - Last 2 messages:', JSON.stringify(conversationMessages.slice(-2), null, 2))
+                console.log('📋 Full conversation context:')
+                conversationMessages.forEach((msg, i) => {
+                  console.log(`  ${i}: ${msg.role} - ${Array.isArray(msg.content) ? msg.content.length + ' blocks' : typeof msg.content}`)
+                  if (Array.isArray(msg.content)) {
+                    msg.content.forEach((block, j) => {
+                      console.log(`    ${j}: ${block.type} ${block.tool_use_id ? `(tool_use_id: ${block.tool_use_id})` : ''}`)
+                    })
+                  }
+                })
                 
-                response = await anthropic.messages.create({
+                const followUpStream = await anthropic.messages.stream({
                   model: effectiveConfig.model,
                   max_tokens: effectiveConfig.max_tokens || 4000,
                   temperature: effectiveConfig.temperature,
                   messages: conversationMessages,
-                  tools: anthropicTools
+                  tools: anthropicTools,
+                  system: systemMessage // Add system message to follow-up call
                 })
+                
+                // Process the streaming follow-up response
+                let followUpResponse = { content: [] }
+                let followUpContentLength = 0
+                console.log('🔄 Processing follow-up stream events...')
+                
+                for await (const event of followUpStream) {
+                  console.log('📨 Follow-up stream event:', event.type)
+                  
+                  if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+                    const deltaText = event.delta.text
+                    if (deltaText) {
+                      followUpContentLength += deltaText.length
+                      console.log('📝 Follow-up delta received:', deltaText.length, 'chars, total:', followUpContentLength)
+                      
+                      finalContent += deltaText
+                      completeContent += deltaText
+                      // Stream the follow-up response in real-time
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "token",
+                        content: deltaText
+                      })}\n\n`))
+                    }
+                  } else if (event.type === 'content_block_start') {
+                    console.log('📄 Follow-up content block started:', event.content_block?.type)
+                    followUpResponse.content.push(event.content_block)
+                  } else if (event.type === 'message_stop') {
+                    // Follow-up response complete
+                    console.log('✅ Follow-up response from Claude completed')
+                    console.log('📊 Total follow-up content length:', followUpContentLength)
+                    break
+                  }
+                }
+                
+                console.log('📋 Follow-up response content blocks:', followUpResponse.content.length)
+                
+                // Set response for the loop condition check
+                response = followUpResponse
               }
               
-              // Process final response (no more tool calls)
+              // Process final response (no more tool calls) - this handles any remaining content
+              // Note: Most content should already be streamed in the tool call loop above
+              console.log('📋 Final response content blocks:', response.content.map(block => `${block.type}${block.text ? ` (${block.text.length} chars)` : ''}`))
+              
               for (const block of response.content) {
-                if (block.type === 'text') {
+                if (block.type === 'text' && block.text) {
+                  // This should rarely execute since we stream during tool processing
+                  console.log('📝 Processing remaining text content:', block.text.length, 'chars')
                   finalContent += block.text
+                  completeContent += block.text
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                     type: "token",
                     content: block.text
@@ -735,9 +835,75 @@ export async function POST(request: NextRequest) {
               }
               
               console.log('✅ Manual MCP tool calling completed')
+              
+              // Create conversation in background and send conversation ID to frontend
+              try {
+                console.log('💾 Creating conversation in background...')
+                const conversationResult = await createConversationInBackground(messages, workspaceId, budId)
+                console.log('✅ Conversation created:', conversationResult.conversationId)
+                
+                // Send conversation created event to frontend
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: "conversationCreated",
+                  conversationId: conversationResult.conversationId
+                })}\n\n`))
+                
+                // Get the last order key from the conversation to position the assistant message correctly
+                const supabaseClient = await createClient()
+                const { data: lastMessage } = await supabaseClient
+                  .from('messages')
+                  .select('order_key')
+                  .eq('conversation_id', conversationResult.conversationId)
+                  .order('order_key', { ascending: false })
+                  .limit(1)
+                  .single()
+                
+                const lastOrderKey = lastMessage?.order_key || null
+                
+                // Add assistant message to the conversation after streaming is complete
+                const assistantMessage = {
+                  conversation_id: conversationResult.conversationId,
+                  role: 'assistant',
+                  content: completeContent,
+                  json_meta: {
+                    // Add tool call metadata if any tools were used
+                    ...(anthropicTools.length > 0 && conversationMessages.some(msg => msg.role === 'assistant') ? { 
+                      tool_calls: extractToolCallsFromConversation(conversationMessages) 
+                    } : {})
+                  },
+                  order_key: generateKeyBetween(lastOrderKey, null), // Position after the last message
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }
+                
+                // Save assistant message to database
+                console.log('💾 Saving assistant message to database...')
+                console.log('📝 Complete content length:', completeContent.length)
+                console.log('📝 Complete content preview:', completeContent.substring(0, 200) + '...')
+                console.log('📝 Complete content ends with:', completeContent.substring(Math.max(0, completeContent.length - 100)))
+                
+                const { error: messageError } = await supabaseClient
+                  .from('messages')
+                  .insert(assistantMessage)
+                
+                if (messageError) {
+                  console.error('❌ Failed to save assistant message:', messageError)
+                } else {
+                  console.log('✅ Assistant message saved to database')
+                }
+                
+                // Generate title in background (non-blocking)
+                generateConversationTitleInBackground(conversationResult.conversationId, [...messages, assistantMessage], await createClient())
+                  .catch(error => console.error('❌ Title generation failed:', error))
+                
+              } catch (conversationError) {
+                console.error('❌ Failed to create conversation:', conversationError)
+                // Continue anyway - the conversation can still be used temporarily
+              }
+              
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: "complete",
-                content: finalContent
+                content: completeContent
               })}\n\n`))
               
               // Clean up MCP client and session
@@ -865,6 +1031,62 @@ export async function POST(request: NextRequest) {
                     
                   case 'response.completed':
                     console.log('✅ Responses API stream completed')
+                    // Create conversation in background and send conversation ID to frontend
+                    try {
+                      console.log('💾 Creating conversation in background...')
+                      const conversationResult = await createConversationInBackground(messages, workspaceId, budId)
+                      console.log('✅ Conversation created:', conversationResult.conversationId)
+                      
+                      // Send conversation created event to frontend
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "conversationCreated",
+                        conversationId: conversationResult.conversationId
+                      })}\n\n`))
+                      
+                      // Get the last order key from the conversation to position the assistant message correctly
+                      const supabaseClient = await createClient()
+                      const { data: lastMessage } = await supabaseClient
+                        .from('messages')
+                        .select('order_key')
+                        .eq('conversation_id', conversationResult.conversationId)
+                        .order('order_key', { ascending: false })
+                        .limit(1)
+                        .single()
+                      
+                      const lastOrderKey = lastMessage?.order_key || null
+                      
+                      // Add assistant message to the conversation after streaming is complete
+                      const assistantMessage = {
+                        conversation_id: conversationResult.conversationId,
+                        role: 'assistant',
+                        content: fullContent,
+                        json_meta: {}, // OpenAI Responses API handles tool calls differently
+                        order_key: generateKeyBetween(lastOrderKey, null),
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                      }
+                      
+                      // Save assistant message to database
+                      console.log('💾 Saving assistant message to database...')
+                      const { error: messageError } = await supabaseClient
+                        .from('messages')
+                        .insert(assistantMessage)
+                      
+                      if (messageError) {
+                        console.error('❌ Failed to save assistant message:', messageError)
+                      } else {
+                        console.log('✅ Assistant message saved to database')
+                      }
+                      
+                      // Generate title in background (non-blocking)
+                      generateConversationTitleInBackground(conversationResult.conversationId, [...messages, assistantMessage], await createClient())
+                        .catch(error => console.error('❌ Title generation failed:', error))
+                      
+                    } catch (conversationError) {
+                      console.error('❌ Failed to create conversation:', conversationError)
+                      // Continue anyway - the conversation can still be used temporarily
+                    }
+                    
                     // Send completion event
                     controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
                     controller.close()
@@ -889,6 +1111,63 @@ export async function POST(request: NextRequest) {
               
               // Fallback completion if we get here
               console.log('✅ Stream completed (fallback)')
+              
+              // Create conversation in background and send conversation ID to frontend
+              try {
+                console.log('💾 Creating conversation in background...')
+                const conversationResult = await createConversationInBackground(messages, workspaceId, budId)
+                console.log('✅ Conversation created:', conversationResult.conversationId)
+                
+                // Send conversation created event to frontend
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: "conversationCreated",
+                  conversationId: conversationResult.conversationId
+                })}\n\n`))
+                
+                // Get the last order key from the conversation to position the assistant message correctly
+                const supabaseClient = await createClient()
+                const { data: lastMessage } = await supabaseClient
+                  .from('messages')
+                  .select('order_key')
+                  .eq('conversation_id', conversationResult.conversationId)
+                  .order('order_key', { ascending: false })
+                  .limit(1)
+                  .single()
+                
+                const lastOrderKey = lastMessage?.order_key || null
+                
+                // Add assistant message to the conversation after streaming is complete
+                const assistantMessage = {
+                  conversation_id: conversationResult.conversationId,
+                  role: 'assistant',
+                  content: fullContent,
+                  json_meta: {}, // Fallback path - no special tool metadata
+                  order_key: generateKeyBetween(lastOrderKey, null),
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }
+                
+                // Save assistant message to database
+                console.log('💾 Saving assistant message to database...')
+                const { error: messageError } = await supabaseClient
+                  .from('messages')
+                  .insert(assistantMessage)
+                
+                if (messageError) {
+                  console.error('❌ Failed to save assistant message:', messageError)
+                } else {
+                  console.log('✅ Assistant message saved to database')
+                }
+                
+                // Generate title in background (non-blocking)
+                generateConversationTitleInBackground(conversationResult.conversationId, [...messages, assistantMessage], await createClient())
+                  .catch(error => console.error('❌ Title generation failed:', error))
+                
+              } catch (conversationError) {
+                console.error('❌ Failed to create conversation:', conversationError)
+                // Continue anyway - the conversation can still be used temporarily
+              }
+              
               controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
               controller.close()
               return
