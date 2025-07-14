@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Bud, BudConfig } from '@/lib/types'
 import { Message } from '@/state/simpleChatStore'
 import { generateKeyBetween } from 'fractional-indexing'
+import { getDefaultModel } from './modelMapping'
 
 export interface CreateBudArgs {
   name: string
@@ -186,7 +187,7 @@ export function getDefaultBudConfig(): BudConfig {
   return {
     name: '',
     systemPrompt: 'You are a helpful, harmless, and honest AI assistant.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.7,
     maxTokens: 2048,
     avatar: '🤖'
@@ -263,7 +264,7 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
   assistant: {
     name: 'General Assistant',
     systemPrompt: 'You are a helpful, harmless, and honest AI assistant. You provide clear, accurate, and helpful responses to user questions.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.7,
     avatar: '🤖',
     greeting: 'Hello! I\'m here to help you with any questions or tasks you have. How can I assist you today?'
@@ -272,7 +273,7 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
   coder: {
     name: 'Coding Assistant',
     systemPrompt: 'You are an expert software developer and coding assistant. You help users write clean, efficient, and well-documented code. You explain concepts clearly and provide practical examples.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.3,
     avatar: '👨‍💻',
     greeting: 'Ready to code! I can help you with programming questions, code reviews, debugging, and best practices. What are you working on?'
@@ -281,7 +282,7 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
   writer: {
     name: 'Creative Writer',
     systemPrompt: 'You are a creative writing assistant. You help users with storytelling, creative writing, editing, and improving their prose. You are encouraging and provide constructive feedback.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.8,
     avatar: '✍️',
     greeting: 'Welcome to your creative writing space! I\'m here to help you craft compelling stories, improve your writing, or brainstorm ideas. What would you like to write about?'
@@ -290,7 +291,7 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
   analyst: {
     name: 'Data Analyst',
     systemPrompt: 'You are a data analysis expert. You help users understand data, create visualizations, perform statistical analysis, and derive insights from datasets. You explain complex concepts in simple terms.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.4,
     avatar: '📊',
     greeting: 'Hello! I\'m your data analysis partner. I can help you explore data, create charts, run statistical tests, and find meaningful insights. What data are you working with?'
@@ -299,7 +300,7 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
   tutor: {
     name: 'Learning Tutor',
     systemPrompt: 'You are a patient and knowledgeable tutor. You help users learn new concepts by breaking them down into understandable parts, providing examples, and encouraging questions.',
-    model: 'gpt-4o',
+    model: getDefaultModel(),
     temperature: 0.6,
     avatar: '🎓',
     greeting: 'Welcome to your personal learning session! I\'m here to help you understand any topic you\'re curious about. What would you like to learn today?'

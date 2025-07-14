@@ -105,6 +105,20 @@ export function ChatComposer({
                   appendToStreamingMessage(conversationId, data.content)
                   break
                   
+                case 'debug':
+                  // Emit debug event for debug panel
+                  if (typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true') {
+                    const debugEvent = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      timestamp: new Date().toISOString(),
+                      type: data.debug_type,
+                      data: data.data,
+                      conversationId: conversationId
+                    }
+                    window.dispatchEvent(new CustomEvent('debug-event', { detail: debugEvent }))
+                  }
+                  break
+                  
                 case 'complete':
                   finishStreaming(conversationId, data.content)
                   onMessageSent?.(assistantMessage.id)

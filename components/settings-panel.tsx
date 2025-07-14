@@ -16,6 +16,7 @@ import { BudConfig } from "@/lib/types"
 import { useConversation, useSetConversation } from "@/state/simpleChatStore"
 import { useBud, useUpdateBud } from "@/state/budStore"
 import { EmojiPicker } from "@/components/EmojiPicker"
+import { getModelsForUI } from "@/lib/modelMapping"
 
 interface ConversationOverrides {
   name?: string
@@ -68,7 +69,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   // Form state with default values from bud config and overrides from conversation
   const [chatName, setChatName] = useState("")
   const [assistantName, setAssistantName] = useState("")
-  const [aiModel, setAiModel] = useState("")
+  const [aiModel, setAiModel] = useState(selectedModel) // Initialize with selectedModel instead of empty string
   const [systemPrompt, setSystemPrompt] = useState("")
   const [temperature, setTemperature] = useState(1)
   const [maxTokens, setMaxTokens] = useState<number | undefined>(undefined)
@@ -77,11 +78,19 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   // Update form values when props change
   useEffect(() => {
+    // Get available models to validate
+    const availableModels = getModelsForUI().map(m => m.value)
+    
     if (panelMode === 'bud') {
       // Bud mode: Use bud config values directly
       setChatName(budConfig?.name || "")
       setAssistantName(budConfig?.name || "")
-      setAiModel(budConfig?.model || selectedModel)
+      const budModel = budConfig?.model || selectedModel
+      
+      // Validate model exists in available options
+      const validModel = availableModels.includes(budModel) ? budModel : selectedModel
+      console.log('🔧 Settings Panel - Bud mode model:', { budConfigModel: budConfig?.model, selectedModel, finalModel: budModel, validModel, availableModels: availableModels.slice(0, 3) })
+      setAiModel(validModel)
       setSystemPrompt(budConfig?.systemPrompt || "")
       setTemperature(budConfig?.temperature || 1)
       setMaxTokens(budConfig?.maxTokens || undefined)
@@ -90,7 +99,12 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       // Chat mode: Use conversation overrides with bud fallbacks
       setChatName(conversation?.meta.title || "")
       setAssistantName(conversationOverrides?.assistantName || conversation?.meta.assistant_name || budConfig?.name || "")
-      setAiModel(conversationOverrides?.model || budConfig?.model || selectedModel)
+      const chatModel = conversationOverrides?.model || budConfig?.model || selectedModel
+      
+      // Validate model exists in available options
+      const validModel = availableModels.includes(chatModel) ? chatModel : selectedModel
+      console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, selectedModel, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) })
+      setAiModel(validModel)
       setSystemPrompt(conversationOverrides?.systemPrompt || budConfig?.systemPrompt || "")
       setTemperature(conversationOverrides?.temperature || budConfig?.temperature || 1)
       setMaxTokens(conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined)
@@ -502,8 +516,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <HelpCircle className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <Select 
-                  value={aiModel} 
+                  value={aiModel || selectedModel} // Use selectedModel as fallback, ensure we have a valid value
                   onValueChange={(value) => {
+                    console.log('Model selection changed:', value) // Debug log
                     setAiModel(value)
                     setSelectedModel(value)
                     handleFieldChange('model', value)
@@ -513,13 +528,11 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     <SelectValue placeholder="Select model" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="o3">OpenAI: o3</SelectItem>
-                    <SelectItem value="o1">OpenAI: o1</SelectItem>
-                    <SelectItem value="o1-mini">OpenAI: o1-mini</SelectItem>
-                    <SelectItem value="gpt-4o">OpenAI: GPT-4o</SelectItem>
-                    <SelectItem value="gpt-4o-mini">OpenAI: GPT-4o-mini</SelectItem>
-                    <SelectItem value="gpt-4-turbo">OpenAI: GPT-4 Turbo</SelectItem>
-                    <SelectItem value="gpt-4">OpenAI: GPT-4</SelectItem>
+                    {getModelsForUI().map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'}: {model.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -601,6 +614,32 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   }}
                   className="w-full"
                 />
+              </div>
+              
+              {/* Debug Mode Toggle */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium">Debug Mode</label>
+                  <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="debug-mode"
+                    checked={typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true'}
+                    onChange={(e) => {
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('debug-mode', e.target.checked.toString())
+                        // Trigger a custom event to notify components
+                        window.dispatchEvent(new CustomEvent('debug-mode-changed', { detail: e.target.checked }))
+                      }
+                    }}
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                  />
+                  <label htmlFor="debug-mode" className="text-sm">
+                    Show debug information and internal events
+                  </label>
+                </div>
               </div>
             </CollapsibleContent>
           </Collapsible>

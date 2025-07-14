@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth/auth-provider"
 import { QueryProvider } from "@/components/providers/query-provider"
 import { ModelProvider } from "@/contexts/model-context"
 import { Toaster } from "@/components/ui/toaster"
+import { DebugPanel } from "@/components/DebugPanel"
 
 export const metadata = {
   title: "bud.chat",
@@ -42,6 +43,7 @@ export default function RootLayout({
               </ModelProvider>
             </QueryProvider>
             <Toaster />
+            <DebugPanel />
           </AuthProvider>
         </ThemeProvider>
       </body>

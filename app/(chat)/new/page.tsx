@@ -255,18 +255,79 @@ export default function NewChatPage() {
                   )
                   break
                   
+                case 'debug':
+                  // Emit debug event for debug panel
+                  if (typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true') {
+                    const debugEvent = {
+                      id: Math.random().toString(36).substr(2, 9),
+                      timestamp: new Date().toISOString(),
+                      type: data.debug_type,
+                      data: data.data,
+                      conversationId: conversationId || 'new-conversation'
+                    }
+                    window.dispatchEvent(new CustomEvent('debug-event', { detail: debugEvent }))
+                  }
+                  break
+                  
+                case 'tool_start':
+                  // Handle tool start - add the tool call to metadata and content
+                  setMessages(prevMessages => 
+                    prevMessages.map(msg => 
+                      msg.id === assistantPlaceholder.id 
+                        ? { 
+                            ...msg, 
+                            content: msg.content + data.content, 
+                            updated_at: new Date().toISOString(),
+                            json_meta: { 
+                              ...msg.json_meta, 
+                              tool_calls: [...(msg.json_meta?.tool_calls || []), {
+                                id: data.tool_id,
+                                type: 'function',
+                                function: {
+                                  name: data.tool_name,
+                                  arguments: data.tool_arguments || '{}'
+                                }
+                              }]
+                            }
+                          }
+                        : msg
+                    )
+                  )
+                  break
+                  
+                case 'tool_complete':
+                case 'tool_error':
+                  // Handle tool completion - just add content but preserve tool calls
+                  setMessages(prevMessages => 
+                    prevMessages.map(msg => 
+                      msg.id === assistantPlaceholder.id 
+                        ? { 
+                            ...msg, 
+                            content: msg.content + data.content, 
+                            updated_at: new Date().toISOString()
+                          }
+                        : msg
+                    )
+                  )
+                  break
+                  
                 case 'complete':
                   setIsStreaming(false)
                   setStreamingMessageId(null)
                   
-                  // Update final content
+                  // Update final content while preserving tool call metadata
                   const finalMessages = newMessages.map(msg => 
                     msg.id === assistantPlaceholder.id 
                       ? { 
                           ...msg, 
                           content: data.content,
                           updated_at: new Date().toISOString(),
-                          json_meta: { ...msg.json_meta, isStreaming: false }
+                          json_meta: { 
+                            ...msg.json_meta, 
+                            isStreaming: false,
+                            // Preserve tool calls from streaming
+                            toolCalls: msg.json_meta?.toolCalls || []
+                          }
                         }
                       : msg
                   )

@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server'
 import { generateKeyBetween } from 'fractional-indexing'
 import { createMCPClientForConversation, createMCPClientForBud } from '@/lib/mcp'
 import { MCPStreamingHandler } from '@/lib/mcp/streamingHandler'
+import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -228,13 +229,17 @@ export async function POST(request: NextRequest) {
           console.log('🚀 PERF: Starting LLM request...')
           
           // 1. Get effective model configuration (will get bud from conversation creation)
-          let effectiveConfig = { model, temperature: 0.7 }
+          // Map friendly model name to actual API model name
+          const apiModelName = getApiModelName(model)
+          console.log(`🔄 Model mapping: ${model} → ${apiModelName}`)
+          let effectiveConfig = { model: apiModelName, temperature: 0.7 }
           let budData: any = null
 
           // 2. Check for MCP configuration and use native MCP APIs if available
           let shouldUseResponsesAPI = false
           let shouldUseAnthropicMCP = false
           let mcpServers: any[] = []
+          let mcpClient = null // Declare at higher scope for error cleanup
           
           try {
             if (budId) {
@@ -259,23 +264,21 @@ export async function POST(request: NextRequest) {
                     .eq('workspace_id', workspaceId)
 
                   if (servers && !serversError && servers.length > 0) {
-                    // Check if we're using a Claude model (Anthropic)
-                    const isClaudeModel = effectiveConfig.model.toLowerCase().includes('claude')
+                    // Detect model and choose MCP approach
+                    const isClaudeModelDetected = isClaudeModel(model)
                     
-                    if (isClaudeModel) {
-                      shouldUseAnthropicMCP = true
-                      mcpServers = servers.map(server => ({
-                        type: "url",
-                        url: server.endpoint,
-                        name: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
-                        ...(server.metadata?.authorization_token && {
-                          authorization_token: server.metadata.authorization_token
-                        })
-                      }))
-                      
-                      console.log('🚀 MCP: Using Anthropic native MCP with', mcpServers.length, 'MCP servers')
+                    console.log(`🔧 MCP: Model detected: ${model} (Claude: ${isClaudeModelDetected})`)
+                    
+                    if (isClaudeModelDetected) {
+                      // Use manual MCP tool calling with Anthropic for Claude models
+                      shouldUseAnthropicMCP = false // Don't use native MCP
+                      shouldUseResponsesAPI = false // Don't use OpenAI Responses API
+                      console.log('🔧 MCP: Using manual tool calling with Anthropic for Claude model')
                     } else {
+                      // Use OpenAI Responses API for OpenAI models
                       shouldUseResponsesAPI = true
+                      console.log('🔧 MCP: Using OpenAI Responses API for OpenAI model')
+                      
                       mcpServers = servers.map(server => ({
                         type: "mcp",
                         server_label: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
@@ -300,8 +303,459 @@ export async function POST(request: NextRequest) {
             console.warn('MCP configuration check failed:', error)
           }
 
-          // If MCP is configured, use Responses API instead of streaming
-          if (shouldUseResponsesAPI) {
+          // If MCP is configured, decide which approach to use
+          if (shouldUseAnthropicMCP) {
+            console.log('🔄 Claude model detected with MCP - re-enabling Anthropic native MCP for proper tool handling')
+            // Re-enable Anthropic native MCP since we have a Claude model
+          }
+          
+          if (shouldUseAnthropicMCP) {
+            console.log('🔄 Using Anthropic native MCP support')
+            
+            try {
+              // Convert OpenAI format messages to Anthropic format
+              const anthropicMessages = openaiMessages.map(msg => ({
+                role: msg.role === 'system' ? 'user' : msg.role, // Anthropic doesn't have system role in messages
+                content: msg.content
+              }))
+              
+              // Extract system message if present
+              const systemMessage = openaiMessages.find(msg => msg.role === 'system')?.content
+              
+              // Create Anthropic MCP request
+              const anthropicRequest: any = {
+                model: effectiveConfig.model,
+                max_tokens: effectiveConfig.max_tokens || 4000,
+                temperature: effectiveConfig.temperature,
+                messages: anthropicMessages.filter(msg => msg.role !== 'system'),
+                mcp_servers: mcpServers,
+                stream: true
+              }
+              
+              // Add system message if present
+              if (systemMessage) {
+                anthropicRequest.system = systemMessage
+                console.log('📝 System message length:', systemMessage.length)
+                console.log('📝 System message preview:', systemMessage.substring(0, 200) + '...')
+              } else {
+                console.log('⚠️  No system message found')
+              }
+              
+              console.log('📤 Making Anthropic MCP stream call...')
+              console.log('📤 Request summary:', {
+                model: anthropicRequest.model,
+                messageCount: anthropicRequest.messages.length,
+                mcpServerCount: anthropicRequest.mcp_servers.length,
+                hasSystemMessage: !!anthropicRequest.system
+              })
+              const anthropicStream = await anthropic.messages.stream(anthropicRequest, {
+                headers: {
+                  'anthropic-beta': 'mcp-client-2025-04-04'
+                }
+              })
+              
+              let fullContent = ''
+              let currentMessage = ''
+              let allContentBlocks: any[] = []
+              
+              console.log('🔄 Processing Anthropic MCP stream...')
+              
+              for await (const event of anthropicStream) {
+                console.log('📨 Anthropic stream event:', event.type)
+                
+                switch (event.type) {
+                  case 'message_start':
+                    console.log('🚀 Anthropic message started')
+                    // Store the initial message for access to full content later
+                    allContentBlocks = []
+                    break
+                    
+                  case 'content_block_delta':
+                    if (event.delta.type === 'text_delta') {
+                      const delta = event.delta.text
+                      if (delta) {
+                        currentMessage += delta
+                        fullContent += delta
+                        console.log('📝 Text delta received:', delta.length, 'chars')
+                        controller.enqueue(encoder.encode(`data: {"type":"token","content":${JSON.stringify(delta)}}\n\n`))
+                      }
+                    } else {
+                      console.log('🔍 Non-text delta received:', event.delta.type)
+                    }
+                    break
+                    
+                  case 'content_block_start':
+                    console.log('📄 Content block started:', event.content_block?.type, 'at block index:', allContentBlocks.length)
+                    
+                    // Store the content block for later processing
+                    if (event.content_block) {
+                      allContentBlocks.push(event.content_block)
+                      
+                      // Log detailed info for mcp_tool_result
+                      if (event.content_block.type === 'mcp_tool_result') {
+                        console.log('📋 MCP tool result content preview:', event.content_block)
+                      }
+                    }
+                    
+                    // Send debug event and tool notification for MCP blocks
+                    if (event.content_block?.type === 'mcp_tool_use') {
+                      console.log('🔧 MCP tool use started:', event.content_block)
+                      // Send a visual indicator to the user
+                      controller.enqueue(encoder.encode(`data: {"type":"debug","debug_type":"mcp_tool_use","data":${JSON.stringify(event.content_block)}}\n\n`))
+                      controller.enqueue(encoder.encode(`data: {"type":"token","content":"\\n\\n🔧 *Using tool: ${event.content_block.name || 'Unknown'}*\\n"}\n\n`))
+                    } else if (event.content_block?.type === 'text') {
+                      console.log('📝 Text block started - this should contain assistant response')
+                    }
+                    break
+                    
+                  case 'content_block_stop':
+                    console.log('✅ Content block completed')
+                    
+                    // Send debug event for MCP tool results
+                    if (event.content_block?.type === 'mcp_tool_result') {
+                      console.log('📋 MCP tool result details:')
+                      console.log('  - Type:', event.content_block.type)
+                      console.log('  - Tool use ID:', event.content_block.tool_use_id)
+                      console.log('  - Is error:', event.content_block.is_error)
+                      console.log('  - Content preview:', JSON.stringify(event.content_block.content).substring(0, 200) + '...')
+                      console.log('  - Full result:', JSON.stringify(event.content_block, null, 2))
+                      
+                      controller.enqueue(encoder.encode(`data: {"type":"debug","debug_type":"mcp_tool_result","data":${JSON.stringify(event.content_block)}}\n\n`))
+                      controller.enqueue(encoder.encode(`data: {"type":"token","content":"✅ *Tool completed*\\n\\n"}\n\n`))
+                    }
+                    break
+                    
+                  case 'message_delta':
+                    // Handle usage information
+                    if (event.usage) {
+                      console.log('📊 Usage:', event.usage)
+                    }
+                    break
+                    
+                  case 'message_stop':
+                    console.log('✅ Anthropic MCP stream completed')
+                    console.log('📊 Content blocks received:', allContentBlocks.length)
+                    console.log('📊 Content block types:', allContentBlocks.map(block => block.type).join(', '))
+                    console.log('📝 Final content length:', fullContent.length)
+                    console.log('📝 Final content preview:', fullContent.substring(0, 200) + '...')
+                    
+                    // Check if we're missing expected content
+                    const hasToolUse = allContentBlocks.some(block => block.type === 'mcp_tool_use')
+                    const hasToolResult = allContentBlocks.some(block => block.type === 'mcp_tool_result')
+                    const textBlocks = allContentBlocks.filter(block => block.type === 'text')
+                    
+                    console.log('🔍 MCP Analysis:')
+                    console.log('  - Has tool use:', hasToolUse)
+                    console.log('  - Has tool result:', hasToolResult)
+                    console.log('  - Text blocks:', textBlocks.length)
+                    
+                    if (hasToolUse && hasToolResult && textBlocks.length === 1) {
+                      console.warn('⚠️  Potential issue: Tool executed but no follow-up text content after tool result')
+                      console.warn('⚠️  This suggests the assistant may not be generating a response based on the tool results')
+                    }
+                    
+                    // If we have very little content, there might be an issue
+                    if (fullContent.length < 10) {
+                      console.warn('⚠️  Very little content streamed, this might indicate an issue with MCP response handling')
+                      // Send a fallback message
+                      const fallbackContent = fullContent || 'I processed your request using the available tools, but the response content was not properly captured. Please try again.'
+                      controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fallbackContent)}}\n\n`))
+                    } else {
+                      controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
+                    }
+                    
+                    controller.close()
+                    return
+                    
+                  case 'error':
+                    console.error('❌ Anthropic stream error:', event.error)
+                    controller.enqueue(encoder.encode(`data: {"type":"error","error":${JSON.stringify(event.error?.message || 'Stream error')}}\n\n`))
+                    controller.close()
+                    return
+                    
+                  default:
+                    console.log('🔍 Unhandled Anthropic event:', event.type)
+                }
+              }
+              
+              // Fallback completion if we get here
+              console.log('✅ Anthropic stream completed (fallback)')
+              controller.enqueue(encoder.encode(`data: {"type":"complete","content":${JSON.stringify(fullContent)}}\n\n`))
+              controller.close()
+              return
+              
+            } catch (anthropicError) {
+              console.error('❌ Anthropic MCP failed, falling back to streaming:', anthropicError)
+              // Fall through to normal streaming approach
+            }
+          }
+
+          // 2b. Manual tool calling with Anthropic for Claude models
+          if (isClaudeModel(model) && !shouldUseResponsesAPI && !shouldUseAnthropicMCP && budId) {
+            console.log('🔄 Using manual tool calling with Anthropic + MCP')
+            
+            try {
+              // Get bud configuration including MCP config again for manual approach
+              const { data: bud, error: budError } = await supabase
+                .from('buds')
+                .select('*, mcp_config')
+                .eq('id', budId)
+                .single()
+
+              if (!bud || budError) {
+                throw new Error('Could not fetch bud configuration for manual MCP')
+              }
+
+              const mcpConfig = bud.mcp_config || {}
+              
+              if (!mcpConfig.servers?.length) {
+                throw new Error('No MCP servers configured in bud')
+              }
+              
+              // Create direct MCP HTTP client connection 
+              const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+              const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+              
+              // Get MCP servers
+              const { data: servers, error: serversError } = await supabase
+                .from('mcp_servers')
+                .select('*')
+                .in('id', mcpConfig.servers)
+                .eq('workspace_id', workspaceId)
+
+              if (!servers || serversError || servers.length === 0) {
+                throw new Error('No MCP servers found for manual tool calling')
+              }
+              
+              // Connect to the first MCP server with session management
+              const serverEndpoint = servers[0].endpoint
+              console.log('🔗 Connecting to MCP server via HTTP with session management:', serverEndpoint)
+              
+              const transport = new StreamableHTTPClientTransport(new URL(serverEndpoint), {
+                // Enable session management for future dynamic server additions
+                sessionId: undefined, // Let the server generate a session ID
+                reconnection: {
+                  maxReconnectionDelay: 30000,
+                  initialReconnectionDelay: 1000,
+                  reconnectionDelayMultiplier: 2,
+                  maxReconnectionAttempts: 5
+                }
+              })
+              
+              const mcpClient = new Client({
+                name: "bud-chat-client",
+                version: "1.0.0"
+              }, {
+                capabilities: {
+                  tools: {}
+                }
+              })
+              
+              await mcpClient.connect(transport)
+              console.log('✅ MCP client connected with session management')
+              
+              // List available tools
+              const { tools: mcpTools } = await mcpClient.listTools()
+              console.log('🛠️ Available tools from MCP server:', mcpTools.map(t => t.name))
+              
+              if (mcpTools.length === 0) {
+                console.warn('⚠️ No tools available from MCP server')
+                throw new Error('No MCP tools available')
+              }
+              
+              // Convert MCP tools to Anthropic format
+              const anthropicTools = mcpTools.map(tool => ({
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.inputSchema
+              }))
+              
+              // Convert OpenAI format messages to Anthropic format
+              const anthropicMessages = openaiMessages.map(msg => ({
+                role: msg.role === 'system' ? 'user' : msg.role,
+                content: msg.content
+              }))
+              
+              // Extract system message if present
+              const systemMessage = openaiMessages.find(msg => msg.role === 'system')?.content
+              
+              // Create initial Anthropic request with tools
+              const anthropicRequest: any = {
+                model: effectiveConfig.model,
+                max_tokens: effectiveConfig.max_tokens || 4000,
+                temperature: effectiveConfig.temperature,
+                messages: anthropicMessages.filter(msg => msg.role !== 'system'),
+                tools: anthropicTools,
+                stream: false // Start with non-streaming for tool handling
+              }
+              
+              if (systemMessage) {
+                anthropicRequest.system = systemMessage
+              }
+              
+              console.log('📤 Making initial Anthropic call with tools...')
+              let response = await anthropic.messages.create(anthropicRequest)
+              
+              let finalContent = ''
+              let conversationMessages = [...anthropicMessages.filter(msg => msg.role !== 'system')]
+              
+              // Process response and handle tool calls
+              while (response.content.some(block => block.type === 'tool_use')) {
+                console.log('🔧 Processing tool calls...')
+                
+                let assistantContent = []
+                let toolResults = []
+                
+                // First pass: collect all content and execute tools
+                for (const block of response.content) {
+                  if (block.type === 'text') {
+                    finalContent += block.text
+                    assistantContent.push(block)
+                    // Stream text immediately
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: "token",
+                      content: block.text
+                    })}\n\n`))
+                  } else if (block.type === 'tool_use') {
+                    console.log('🔧 Tool call:', block.name, 'with args:', block.input)
+                    assistantContent.push(block)
+                    
+                    // Show tool usage to user
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: "tool_start",
+                      tool_name: block.name,
+                      tool_id: block.id,
+                      tool_arguments: JSON.stringify(block.input || {}),
+                      content: `\n\n🔧 *Using tool: ${block.name}*\n`
+                    })}\n\n`))
+                    
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: "debug",
+                      debug_type: "mcp_tool_use",
+                      data: block
+                    })}\n\n`))
+                    
+                    try {
+                      // Execute tool via MCP
+                      const toolResult = await mcpClient.callTool({
+                        name: block.name,
+                        arguments: block.input || {}
+                      })
+                      
+                      console.log('✅ Tool result received:', toolResult.content?.length || 0, 'content blocks')
+                      
+                      // Safely encode debug data - truncate if too large
+                      const debugData = JSON.stringify(toolResult)
+                      const truncatedDebugData = debugData.length > 10000 
+                        ? JSON.stringify({...toolResult, content: '[TRUNCATED - too large for debug]'})
+                        : debugData
+                      
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "debug",
+                        debug_type: "mcp_tool_result", 
+                        data: JSON.parse(truncatedDebugData)
+                      })}\n\n`))
+                      
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "tool_complete",
+                        tool_name: block.name,
+                        tool_id: block.id,
+                        content: "✅ *Tool completed*\n\n"
+                      })}\n\n`))
+                      
+                      // Prepare tool result for conversation
+                      const toolResultContent = Array.isArray(toolResult.content) 
+                        ? toolResult.content.map(block => block.type === 'text' ? block.text : JSON.stringify(block)).join('\n')
+                        : String(toolResult.content || '')
+                      
+                      toolResults.push({
+                        type: 'tool_result',
+                        tool_use_id: block.id,
+                        content: toolResultContent
+                      })
+                      
+                    } catch (toolError) {
+                      console.error('❌ Tool execution failed:', toolError)
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "tool_error",
+                        tool_name: block.name,
+                        tool_id: block.id,
+                        content: "❌ *Tool execution failed*\n\n"
+                      })}\n\n`))
+                      
+                      // Add error result
+                      toolResults.push({
+                        type: 'tool_result',
+                        tool_use_id: block.id,
+                        content: `Tool execution failed: ${toolError.message}`,
+                        is_error: true
+                      })
+                    }
+                  }
+                }
+                
+                // Add assistant message with all tool calls
+                conversationMessages.push({
+                  role: 'assistant',
+                  content: assistantContent
+                })
+                
+                // Add all tool results as a single user message
+                if (toolResults.length > 0) {
+                  conversationMessages.push({
+                    role: 'user',
+                    content: toolResults
+                  })
+                }
+                
+                // Get next response from Claude with tool results
+                console.log('📤 Getting follow-up response from Claude...')
+                console.log('📋 Conversation state before follow-up:')
+                console.log('  - Total messages:', conversationMessages.length)
+                console.log('  - Last 2 messages:', JSON.stringify(conversationMessages.slice(-2), null, 2))
+                
+                response = await anthropic.messages.create({
+                  model: effectiveConfig.model,
+                  max_tokens: effectiveConfig.max_tokens || 4000,
+                  temperature: effectiveConfig.temperature,
+                  messages: conversationMessages,
+                  tools: anthropicTools
+                })
+              }
+              
+              // Process final response (no more tool calls)
+              for (const block of response.content) {
+                if (block.type === 'text') {
+                  finalContent += block.text
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    type: "token",
+                    content: block.text
+                  })}\n\n`))
+                }
+              }
+              
+              console.log('✅ Manual MCP tool calling completed')
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: "complete",
+                content: finalContent
+              })}\n\n`))
+              
+              // Clean up MCP client and session
+              try {
+                await mcpClient.close()
+                console.log('🧹 MCP client session closed properly')
+              } catch (closeError) {
+                console.warn('⚠️ Error closing MCP client session:', closeError)
+              }
+              
+              controller.close()
+              return
+              
+            } catch (manualMcpError) {
+              console.error('❌ Manual MCP tool calling failed:', manualMcpError)
+              // Fall through to normal streaming approach
+            }
+          } else if (shouldUseResponsesAPI) {
             console.log('🔄 Redirecting to Responses API for MCP support')
             
             try {
@@ -320,11 +774,15 @@ export async function POST(request: NextRequest) {
               }
 
               // Create Responses API request
+              // Always use GPT-4o for MCP calls since OpenAI's Responses API is most reliable
+              const mcpModel = 'gpt-4o'
               const responseRequest: any = {
-                model: effectiveConfig.model,
+                model: mcpModel,
                 input: contextualInput,
                 tools: mcpServers
               }
+              
+              console.log(`🔄 MCP: Using ${mcpModel} for tool execution (original model: ${effectiveConfig.model})`)
 
               console.log('📤 Making Responses API stream call...')
               const responseStream = await openai.responses.stream(responseRequest)
@@ -441,8 +899,7 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // 3. Fallback: Use traditional streaming approach
-          let mcpClient = null
+          // 3. Fallback: Use traditional streaming approach  
           let availableTools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
           
           try {

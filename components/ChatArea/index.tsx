@@ -4,6 +4,7 @@ import { MessageList } from '@/components/MessageList'
 import { ChatComposer } from '@/components/ChatComposer'
 import { Message, useConversation } from '@/state/simpleChatStore'
 import { cn } from '@/lib/utils'
+import { getDefaultModel } from '@/lib/modelMapping'
 
 interface ChatAreaProps {
   // For local state (new conversations)
@@ -60,7 +61,24 @@ export function ChatArea({
   const latestAssistantMessage = conversation?.messages
     ?.filter(m => m.role === 'assistant')
     ?.slice(-1)[0]
-  const model = latestAssistantMessage?.json_meta?.model || 'claude-3.5-sonnet'
+  
+  // Resolve model in proper priority order:
+  // 1. Conversation model overrides
+  // 2. Source bud's model configuration  
+  // 3. Latest assistant message model (for historical accuracy)
+  // 4. System default model
+  const model = conversation?.meta.model_config_overrides?.model ||
+                (budData?.default_json as any)?.model ||
+                latestAssistantMessage?.json_meta?.model ||
+                getDefaultModel()
+  
+  console.log('🎯 ChatArea model resolution:', { 
+    conversationOverride: conversation?.meta.model_config_overrides?.model,
+    budModel: (budData?.default_json as any)?.model,
+    messageModel: latestAssistantMessage?.json_meta?.model,
+    defaultModel: getDefaultModel(),
+    finalModel: model
+  })
 
   return (
     <div className={cn("flex flex-col h-full", className)}>

@@ -14,6 +14,7 @@ import { EmojiPicker } from '@/components/EmojiPicker'
 import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP'
 import { Bud, BudConfig } from '@/lib/types'
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers'
+import { getModelsForUI } from '@/lib/modelMapping'
 
 interface BudFormProps {
   bud?: Bud
@@ -187,30 +188,16 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gpt-4o">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-4o
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="gpt-4o-mini">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-4o Mini
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="gpt-3.5-turbo">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-3.5 Turbo
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="claude-3.5-sonnet">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">Anthropic</Badge>
-                          Claude 3.5 Sonnet
-                        </div>
-                      </SelectItem>
+                      {getModelsForUI().map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={model.provider === 'anthropic' ? 'outline' : 'secondary'}>
+                              {model.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                            </Badge>
+                            {model.label}
+                          </div>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

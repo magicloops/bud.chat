@@ -1,6 +1,7 @@
 "use client"
 
 import React, { createContext, useContext, useState, ReactNode } from 'react'
+import { getDefaultModel } from '@/lib/modelMapping'
 
 interface ModelContextType {
   selectedModel: string
@@ -10,7 +11,7 @@ interface ModelContextType {
 const ModelContext = createContext<ModelContextType | undefined>(undefined)
 
 export function ModelProvider({ children }: { children: ReactNode }) {
-  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o')
+  const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel())
 
   return (
     <ModelContext.Provider value={{ selectedModel, setSelectedModel }}>
