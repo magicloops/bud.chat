@@ -72,14 +72,6 @@ export function ChatArea({
                 latestAssistantMessage?.json_meta?.model ||
                 getDefaultModel()
   
-  console.log('🎯 ChatArea model resolution:', { 
-    conversationOverride: conversation?.meta.model_config_overrides?.model,
-    budModel: (budData?.default_json as any)?.model,
-    messageModel: latestAssistantMessage?.json_meta?.model,
-    defaultModel: getDefaultModel(),
-    finalModel: model
-  })
-
   return (
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
