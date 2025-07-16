@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
+import { saveEvent } from '@/lib/db/events'
+import { createTextEvent } from '@/lib/types/events'
+import { generateKeyBetween } from 'fractional-indexing'
 
 export async function GET(request: NextRequest) {
   try {
@@ -133,48 +136,31 @@ export async function POST(request: NextRequest) {
       return new Response('Error creating conversation', { status: 500 })
     }
 
-    // Add system message if provided
+    // Add system event if provided
     if (systemPrompt) {
-      const { error: systemMsgError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: conversation.id,
-          order_key: 'a0',
-          role: 'system',
-          content: systemPrompt,
-          json_meta: {}
-        })
-
-      if (systemMsgError) {
-        console.error('Error creating system message:', systemMsgError)
+      try {
+        const systemEvent = createTextEvent('system', systemPrompt)
+        await saveEvent(conversation.id, systemEvent, 'a0')
+      } catch (systemEventError) {
+        console.error('Error creating system event:', systemEventError)
         // Don't fail the conversation creation for this
       }
     }
 
-    // Add initial messages if provided
+    // Add initial events if provided
     if (initialMessages && initialMessages.length > 0) {
       let lastOrderKey = systemPrompt ? 'a0' : undefined
       
       for (const message of initialMessages) {
-        const { generateKeyBetween } = await import('fractional-indexing')
-        const orderKey = generateKeyBetween(lastOrderKey, null)
-        
-        const { error: messageError } = await supabase
-          .from('messages')
-          .insert({
-            conversation_id: conversation.id,
-            order_key: orderKey,
-            role: message.role,
-            content: message.content,
-            json_meta: message.metadata || {}
-          })
-
-        if (messageError) {
-          console.error(`Error creating initial message:`, messageError)
+        try {
+          const orderKey = generateKeyBetween(lastOrderKey, null)
+          const event = createTextEvent(message.role, message.content)
+          await saveEvent(conversation.id, event, orderKey)
+          lastOrderKey = orderKey
+        } catch (eventError) {
+          console.error(`Error creating initial event:`, eventError)
           // Don't fail the conversation creation for this
         }
-        
-        lastOrderKey = orderKey
       }
     }
 

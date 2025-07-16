@@ -33,6 +33,11 @@ export function createAssistantPlaceholderEvent(): Event {
 }
 
 /**
+ * Legacy compatibility - alias for createAssistantPlaceholderEvent
+ */
+export const createAssistantPlaceholder = createAssistantPlaceholderEvent
+
+/**
  * Update event conversation IDs for database persistence
  */
 export function updateEventsConversationId(events: Event[], conversationId: string): Event[] {

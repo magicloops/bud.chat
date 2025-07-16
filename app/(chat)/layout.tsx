@@ -13,7 +13,7 @@ import {
   useSubscribeToWorkspace, 
   useUnsubscribeFromWorkspace,
   useCleanup 
-} from '@/state/simpleChatStore'
+} from '@/state/eventChatStore'
 
 export default function ChatLayout({
   children,

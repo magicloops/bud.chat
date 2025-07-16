@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
+import { getConversationEvents } from '@/lib/db/events'
 
 export async function GET(
   request: NextRequest,
@@ -8,7 +9,7 @@ export async function GET(
   try {
     const { id: conversationId } = await params
     const { searchParams } = new URL(request.url)
-    const includeMessages = searchParams.get('include_messages') === 'true'
+    const includeEvents = searchParams.get('include_events') === 'true'
 
     const supabase = await createClient()
 
@@ -29,6 +30,7 @@ export async function GET(
         assistant_name,
         assistant_avatar,
         model_config_overrides,
+        mcp_config_overrides,
         buds:source_bud_id (
           id,
           default_json
@@ -83,24 +85,20 @@ export async function GET(
     // Remove the nested bud data from response (we've extracted what we need)
     delete responseData.buds
 
-    // If messages are requested, fetch them too
-    if (includeMessages) {
-      const { data: messages, error: messagesError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('order_key', { ascending: true })
-
-      if (messagesError) {
-        console.error('Error fetching messages:', messagesError)
-        return new Response('Error fetching messages', { status: 500 })
+    // If events are requested, fetch them too
+    if (includeEvents) {
+      try {
+        const events = await getConversationEvents(conversationId)
+        
+        // Events are already sorted by order_key
+        return Response.json({
+          ...responseData,
+          events: events || []
+        })
+      } catch (eventsError) {
+        console.error('Error fetching events:', eventsError)
+        return new Response('Error fetching events', { status: 500 })
       }
-
-      // Messages are already sorted by order_key
-      return Response.json({
-        ...responseData,
-        messages: messages || []
-      })
     }
 
     return Response.json(responseData)
@@ -124,7 +122,7 @@ export async function PATCH(
     }
 
     const body = await request.json()
-    const { title, assistant_name, assistant_avatar, model_config_overrides } = body
+    const { title, assistant_name, assistant_avatar, model_config_overrides, mcp_config_overrides } = body
 
     // Verify user has access through workspace membership
     const { data: conversation, error: convError } = await supabase
@@ -158,6 +156,7 @@ export async function PATCH(
     if (assistant_name !== undefined) updateData.assistant_name = assistant_name
     if (assistant_avatar !== undefined) updateData.assistant_avatar = assistant_avatar
     if (model_config_overrides !== undefined) updateData.model_config_overrides = model_config_overrides
+    if (mcp_config_overrides !== undefined) updateData.mcp_config_overrides = mcp_config_overrides
 
     // Update conversation
     const { data: updatedConversation, error: updateError } = await supabase
@@ -219,15 +218,15 @@ export async function DELETE(
       return new Response('Access denied', { status: 403 })
     }
 
-    // Delete messages first, then conversation (no cascade delete configured)
-    const { error: messagesDeleteError } = await supabase
-      .from('messages')
+    // Delete events first, then conversation (no cascade delete configured)
+    const { error: eventsDeleteError } = await supabase
+      .from('events')
       .delete()
       .eq('conversation_id', conversationId)
 
-    if (messagesDeleteError) {
-      console.error('Error deleting messages:', messagesDeleteError)
-      return new Response(`Error deleting messages: ${messagesDeleteError.message}`, { status: 500 })
+    if (eventsDeleteError) {
+      console.error('Error deleting events:', eventsDeleteError)
+      return new Response(`Error deleting events: ${eventsDeleteError.message}`, { status: 500 })
     }
 
     // Now delete the conversation

@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConversationList } from './ConversationList'
 import { WorkspaceSelector } from './WorkspaceSelector'
 import { UserMenu } from './UserMenu'
-import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/simpleChatStore'
+import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/eventChatStore'
 import { 
   useWorkspaces, 
   useSetWorkspaces, 

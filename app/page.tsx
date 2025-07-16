@@ -8,7 +8,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { Button } from '@/components/ui/button'
 import { MessageSquare, PanelLeft } from 'lucide-react'
 import { Loader2 } from 'lucide-react'
-import { useSelectedWorkspace } from '@/state/simpleChatStore'
+import { useSelectedWorkspace } from '@/state/eventChatStore'
 import { BudSelectionGrid } from '@/components/BudSelectionGrid'
 
 export default function HomePage() {

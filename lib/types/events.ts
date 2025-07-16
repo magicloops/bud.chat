@@ -55,6 +55,12 @@ export class EventLog {
     for (const event of this.events) {
       for (const segment of event.segments) {
         if (segment.type === 'tool_call') {
+          console.log('🔍 Found tool call segment:', {
+            id: segment.id,
+            name: segment.name,
+            args: segment.args,
+            argsType: typeof segment.args
+          })
           toolCalls.set(segment.id, {
             id: segment.id,
             name: segment.name,
@@ -67,7 +73,17 @@ export class EventLog {
     }
 
     // Return tool calls that don't have results
-    return Array.from(toolCalls.values())
+    const unresolvedCalls = Array.from(toolCalls.values())
+      .filter(call => !resolvedIds.has(call.id));
+    
+    console.log('🔧 Unresolved tool calls:', unresolvedCalls.map(call => ({
+      id: call.id,
+      name: call.name,
+      args: call.args,
+      argsType: typeof call.args
+    })));
+    
+    return unresolvedCalls
       .filter(call => !resolvedIds.has(call.id));
   }
 
@@ -124,7 +140,7 @@ export class EventLog {
       for (const segment of event.segments) {
         switch (segment.type) {
           case 'text':
-            if (segment.text.trim()) {
+            if (segment.text && segment.text.trim()) {
               content.push({
                 type: 'text',
                 text: segment.text
@@ -188,7 +204,9 @@ export class EventLog {
       for (const segment of event.segments) {
         switch (segment.type) {
           case 'text':
-            content += segment.text;
+            if (segment.text) {
+              content += segment.text;
+            }
             break;
           case 'tool_call':
             tool_calls.push({
@@ -228,7 +246,7 @@ export class EventLog {
     for (const event of this.events) {
       if (event.role === 'system') {
         for (const segment of event.segments) {
-          if (segment.type === 'text') {
+          if (segment.type === 'text' && segment.text) {
             systemTexts.push(segment.text);
           }
         }

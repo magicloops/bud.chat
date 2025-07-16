@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useWorkspaces, useSetWorkspaces } from '@/state/workspaceStore'
-import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useSimpleChatStore } from '@/state/simpleChatStore'
+import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useEventChatStore } from '@/state/eventChatStore'
 import { Building2, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { NewWorkspaceModal } from './NewWorkspaceModal'
@@ -38,7 +38,7 @@ export function WorkspaceSelector() {
     localStorage.setItem('lastSelectedWorkspaceId', workspaceId)
     
     // Get workspace conversations directly from store
-    const storeState = useSimpleChatStore.getState()
+    const storeState = useEventChatStore.getState()
     const workspaceConversationIds = storeState.workspaceConversations[workspaceId]
     
     if (workspaceConversationIds && workspaceConversationIds.length > 0) {

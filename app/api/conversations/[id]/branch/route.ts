@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
+import { getConversationEvents, saveEvent } from '@/lib/db/events'
 
 export async function POST(
   request: NextRequest,
@@ -111,112 +112,98 @@ export async function POST(
     
     console.log('🌿 New conversation created:', newConversation.id)
 
-    // Get all messages for the conversation (no sorting needed)
-    console.log('🌿 Fetching messages...')
-    const { data: allMessages, error: msgsError } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', originalConversationId)
-
-    if (msgsError) {
-      console.log('🌿 Error fetching messages:', msgsError)
-      return new Response('Error fetching messages to copy', { status: 500 })
-    }
+    // Get all events for the conversation (already sorted by order_key)
+    console.log('🌿 Fetching events...')
+    const allEvents = await getConversationEvents(originalConversationId)
     
-    console.log('🌿 Messages fetched:', allMessages?.length || 0)
+    console.log('🌿 Events fetched:', allEvents?.length || 0)
 
-    // Sort messages by order_key to get proper sequence
-    const sortedMessages = allMessages.sort((a, b) => a.order_key.localeCompare(b.order_key))
+    // Events are already sorted by order_key from getConversationEvents
+    const sortedEvents = allEvents
     
     // Validate that branchPosition is within bounds
-    if (branchPosition >= sortedMessages.length) {
+    if (branchPosition >= sortedEvents.length) {
       console.error('🌿 Branch position out of bounds:', {
         branchPosition,
-        totalMessages: sortedMessages.length,
-        maxValidPosition: sortedMessages.length - 1
+        totalEvents: sortedEvents.length,
+        maxValidPosition: sortedEvents.length - 1
       })
       return new Response('Branch position is out of bounds', { status: 400 })
     }
     
-    // Get the message at the specified position
-    const branchMessageFromDB = sortedMessages[branchPosition]
-    console.log('🌿 Branch message at position', branchPosition, ':', {
-      id: branchMessageFromDB.id,
-      role: branchMessageFromDB.role,
-      content_preview: branchMessageFromDB.content.substring(0, 50)
+    // Get the event at the specified position
+    const branchEventFromDB = sortedEvents[branchPosition]
+    const eventText = branchEventFromDB.segments
+      .filter(s => s.type === 'text')
+      .map(s => s.text)
+      .join('')
+    
+    console.log('🌿 Branch event at position', branchPosition, ':', {
+      id: branchEventFromDB.id,
+      role: branchEventFromDB.role,
+      content_preview: eventText.substring(0, 50)
     })
     
-    // Optional verification: check if the message matches what the frontend expects
-    if (branchMessage.role !== branchMessageFromDB.role) {
+    // Optional verification: check if the event matches what the frontend expects
+    if (branchMessage.role !== branchEventFromDB.role) {
       console.warn('🌿 Role mismatch at branch position:', {
         expected: branchMessage.role,
-        actual: branchMessageFromDB.role,
+        actual: branchEventFromDB.role,
         position: branchPosition
       })
       // Continue anyway - the position is authoritative
     }
 
-    // Get messages up to and including the branch point
-    const relevantMessages = sortedMessages.slice(0, branchPosition + 1)
+    // Get events up to and including the branch point
+    const relevantEvents = sortedEvents.slice(0, branchPosition + 1)
     
     console.log('Branch operation details:', {
       originalConversationId,
       branchPosition,
-      branchMessageId: branchMessageFromDB.id,
-      totalMessages: allMessages.length,
-      branchMessageRole: branchMessageFromDB.role,
-      chainLength: relevantMessages.length
+      branchEventId: branchEventFromDB.id,
+      totalEvents: allEvents.length,
+      branchEventRole: branchEventFromDB.role,
+      chainLength: relevantEvents.length
     })
     
-    console.log('Messages to copy (ordered by order_key):', {
-      messagesToCopy: relevantMessages.length,
-      messageChain: relevantMessages.map(m => ({ id: m.id, role: m.role, order_key: m.order_key }))
+    console.log('Events to copy (ordered by order_key):', {
+      eventsToCopy: relevantEvents.length,
+      eventChain: relevantEvents.map(e => ({ id: e.id, role: e.role, order_key: e.order_key }))
     })
 
-    // Initialize insertedMessages for return value
-    let insertedMessages = []
+    // Initialize insertedEvents for return value
+    let insertedEvents = []
 
-    // Copy messages to new conversation, preserving the parent-child chain structure
-    if (relevantMessages.length > 0) {
-      const messagesToInsert = relevantMessages.map((msg, index) => ({
-        conversation_id: newConversation.id,
-        order_key: msg.order_key, // Keep original order keys for proper sequencing
-        role: msg.role,
-        content: msg.content,
-        json_meta: msg.json_meta || {}
-      }))
-
-      const { data: insertedMessagesResult, error: insertError } = await supabase
-        .from('messages')
-        .insert(messagesToInsert)
-        .select()
-
-      insertedMessages = insertedMessagesResult || []
-
-      if (insertError) {
-        console.error('Error inserting branched messages:', insertError)
-        // Clean up the conversation if message copying fails
+    // Copy events to new conversation, preserving the parent-child chain structure
+    if (relevantEvents.length > 0) {
+      try {
+        for (const event of relevantEvents) {
+          const savedEvent = await saveEvent(newConversation.id, event, event.order_key)
+          insertedEvents.push(savedEvent)
+        }
+        console.log('🌿 Events copied successfully, order preserved by order_key')
+      } catch (insertError) {
+        console.error('Error inserting branched events:', insertError)
+        // Clean up the conversation if event copying fails
         await supabase
           .from('conversations')
           .delete()
           .eq('id', newConversation.id)
         
-        return new Response('Error copying messages to branched conversation', { status: 500 })
+        return new Response('Error copying events to branched conversation', { status: 500 })
       }
-
-      console.log('🌿 Messages copied successfully, order preserved by order_key')
     }
 
     const response = {
       branchedConversation: newConversation,
       originalConversation: originalConversationId,
-      messagesCopied: relevantMessages.length,
+      eventsCopied: relevantEvents.length,
       branchPosition: branchPosition, // The position that was branched from
-      branchMessageId: branchMessageFromDB.id, // The actual DB message ID that was branched from
-      totalMessages: allMessages?.length || 0,
-      insertedMessages: insertedMessages // Return the new messages with their IDs
+      branchEventId: branchEventFromDB.id, // The actual DB event ID that was branched from
+      totalEvents: allEvents?.length || 0,
+      insertedEvents: insertedEvents // Return the new events with their IDs
     }
-    console.log('🌿 Returning success response:', { messagesCopied: response.messagesCopied, newConvId: response.branchedConversation.id })
+    console.log('🌿 Returning success response:', { eventsCopied: response.eventsCopied, newConvId: response.branchedConversation.id })
     return Response.json(response)
   } catch (error) {
     console.error('🌿 Branch conversation error:', error)

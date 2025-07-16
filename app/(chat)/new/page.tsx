@@ -2,24 +2,24 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ChatArea } from '@/components/ChatArea'
+import { EventStream } from '@/components/EventStream'
 import { 
-  Message, 
+  Event,
   useSelectedWorkspace, 
   useSetConversation,
   ConversationMeta,
   Conversation,
-  useSimpleChatStore
-} from '@/state/simpleChatStore'
+  useEventChatStore
+} from '@/state/eventChatStore'
 import { 
-  createGreetingMessage, 
-  createUserMessage, 
+  createGreetingEvent, 
+  createUserEvent, 
   createAssistantPlaceholder,
-  createSystemMessages,
-  updateMessagesConversationId
-} from '@/lib/messageHelpers'
+  createSystemEvents,
+  updateEventsConversationId
+} from '@/lib/eventMessageHelpers'
 import { 
-  createBudInitialMessages,
+  createBudInitialEvents,
   budManager
 } from '@/lib/budHelpers'
 import { Bud } from '@/lib/types'
@@ -37,20 +37,20 @@ export default function NewChatPage() {
   const storeBud = useBud(budId || '')
   const [bud, setBud] = useState<Bud | null>(null)
   
-  // State for messages and loading
+  // State for events and loading
   const [budLoading, setBudLoading] = useState(!!budId)
-  const [messages, setMessages] = useState<Message[]>([])
+  const [events, setEvents] = useState<Event[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
+  const [streamingEventId, setStreamingEventId] = useState<string | null>(null)
 
   // Load bud if budId is provided
   useEffect(() => {
     const loadBud = async () => {
       if (!budId) {
-        // No bud specified, use default messages and clear any custom theme
-        setMessages([
-          createGreetingMessage(),
-          ...createSystemMessages()
+        // No bud specified, use default events and clear any custom theme
+        setEvents([
+          createGreetingEvent(),
+          ...createSystemEvents()
         ])
         
         // Clear any existing custom theme and reset to default
@@ -89,9 +89,9 @@ export default function NewChatPage() {
         const loadedBud = await budManager.getBud(budId)
         setBud(loadedBud)
         
-        // Initialize messages with bud configuration
-        const budMessages = createBudInitialMessages(loadedBud)
-        setMessages(budMessages)
+        // Initialize events with bud configuration
+        const budEvents = createBudInitialEvents(loadedBud)
+        setEvents(budEvents)
         
         // Apply bud's theme or reset to default
         const budConfig = loadedBud.default_json as any
@@ -132,10 +132,10 @@ export default function NewChatPage() {
         }
       } catch (error) {
         console.error('Failed to load bud:', error)
-        // Fallback to default messages
-        setMessages([
-          createGreetingMessage(),
-          ...createSystemMessages()
+        // Fallback to default events
+        setEvents([
+          createGreetingEvent(),
+          ...createSystemEvents()
         ])
       } finally {
         setBudLoading(false)
@@ -145,16 +145,16 @@ export default function NewChatPage() {
     loadBud()
   }, [budId])
 
-  // Watch for bud updates from store and regenerate messages
+  // Watch for bud updates from store and regenerate events
   useEffect(() => {
     if (!budId || !storeBud) return
     
     // Update local bud state
     setBud(storeBud)
     
-    // Regenerate messages with updated bud configuration
-    const budMessages = createBudInitialMessages(storeBud)
-    setMessages(budMessages)
+    // Regenerate events with updated bud configuration
+    const budEvents = createBudInitialEvents(storeBud)
+    setEvents(budEvents)
     
     // Apply updated theme
     const budConfig = storeBud.default_json as any
@@ -190,13 +190,13 @@ export default function NewChatPage() {
 
     
     // 1. Optimistic UI updates (instant)
-    const userMessage = createUserMessage(content)
+    const userEvent = createUserEvent(content)
     const assistantPlaceholder = createAssistantPlaceholder()
     
-    const newMessages = [...messages, userMessage, assistantPlaceholder]
-    setMessages(newMessages)
+    const newEvents = [...events, userEvent, assistantPlaceholder]
+    setEvents(newEvents)
     setIsStreaming(true)
-    setStreamingMessageId(assistantPlaceholder.id)
+    setStreamingEventId(assistantPlaceholder.id)
 
     try {
       // 2. Start streaming immediately - no database blocking!
@@ -207,7 +207,7 @@ export default function NewChatPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: newMessages.filter(m => m.role !== 'assistant' || !m.json_meta?.isStreaming), // Don't send placeholder
+          messages: [userEvent], // Only send the user's message for new conversations
           workspaceId: selectedWorkspace,
           budId: bud?.id,
           model: bud ? (bud.default_json as any).model || 'gpt-4o' : 'gpt-4o'
@@ -246,11 +246,17 @@ export default function NewChatPage() {
                   break
                   
                 case 'token':
-                  setMessages(prevMessages => 
-                    prevMessages.map(msg => 
-                      msg.id === assistantPlaceholder.id 
-                        ? { ...msg, content: msg.content + data.content, updated_at: new Date().toISOString() }
-                        : msg
+                  setEvents(prevEvents => 
+                    prevEvents.map(event => 
+                      event.id === assistantPlaceholder.id 
+                        ? { 
+                            ...event, 
+                            segments: event.segments.map(s => 
+                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                            ),
+                            ts: Date.now()
+                          }
+                        : event
                     )
                   )
                   break
@@ -270,27 +276,25 @@ export default function NewChatPage() {
                   break
                   
                 case 'tool_start':
-                  // Handle tool start - add the tool call to metadata and content
-                  setMessages(prevMessages => 
-                    prevMessages.map(msg => 
-                      msg.id === assistantPlaceholder.id 
+                  // Handle tool start - add the tool call segment
+                  setEvents(prevEvents => 
+                    prevEvents.map(event => 
+                      event.id === assistantPlaceholder.id 
                         ? { 
-                            ...msg, 
-                            content: msg.content + data.content, 
-                            updated_at: new Date().toISOString(),
-                            json_meta: { 
-                              ...msg.json_meta, 
-                              tool_calls: [...(msg.json_meta?.tool_calls || []), {
+                            ...event, 
+                            segments: [
+                              ...event.segments.filter(s => s.type === 'text').map(s => ({ ...s, text: s.text + data.content })),
+                              ...event.segments.filter(s => s.type !== 'text'),
+                              {
+                                type: 'tool_call',
                                 id: data.tool_id,
-                                type: 'function',
-                                function: {
-                                  name: data.tool_name,
-                                  arguments: data.tool_arguments || '{}'
-                                }
-                              }]
-                            }
+                                name: data.tool_name,
+                                args: data.tool_arguments || {}
+                              }
+                            ],
+                            ts: Date.now()
                           }
-                        : msg
+                        : event
                     )
                   )
                   break
@@ -298,40 +302,38 @@ export default function NewChatPage() {
                 case 'tool_complete':
                 case 'tool_error':
                   // Handle tool completion - just add content but preserve tool calls
-                  setMessages(prevMessages => 
-                    prevMessages.map(msg => 
-                      msg.id === assistantPlaceholder.id 
+                  setEvents(prevEvents => 
+                    prevEvents.map(event => 
+                      event.id === assistantPlaceholder.id 
                         ? { 
-                            ...msg, 
-                            content: msg.content + data.content, 
-                            updated_at: new Date().toISOString()
+                            ...event, 
+                            segments: event.segments.map(s => 
+                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                            ),
+                            ts: Date.now()
                           }
-                        : msg
+                        : event
                     )
                   )
                   break
                   
                 case 'complete':
                   setIsStreaming(false)
-                  setStreamingMessageId(null)
+                  setStreamingEventId(null)
                   
-                  // Update final content while preserving tool call metadata
-                  const finalMessages = newMessages.map(msg => 
-                    msg.id === assistantPlaceholder.id 
+                  // Update final content while preserving tool call segments
+                  const finalEvents = newEvents.map(event => 
+                    event.id === assistantPlaceholder.id 
                       ? { 
-                          ...msg, 
-                          content: data.content,
-                          updated_at: new Date().toISOString(),
-                          json_meta: { 
-                            ...msg.json_meta, 
-                            isStreaming: false,
-                            // Preserve tool calls from streaming
-                            toolCalls: msg.json_meta?.toolCalls || []
-                          }
+                          ...event, 
+                          segments: event.segments.map(s => 
+                            s.type === 'text' ? { ...s, text: data.content } : s
+                          ),
+                          ts: Date.now()
                         }
-                      : msg
+                      : event
                   )
-                  setMessages(finalMessages)
+                  setEvents(finalEvents)
                   
                   // CRITICAL: Seamless transition
                   if (conversationId) {
@@ -340,7 +342,7 @@ export default function NewChatPage() {
                     // 4. Pre-populate Zustand store with local state
                     const budConfig = bud?.default_json as any
                     // Check if conversation already exists in store (from realtime update)
-                    const existingConversation = setConversation ? useSimpleChatStore.getState().conversations[conversationId] : null
+                    const existingConversation = setConversation ? useEventChatStore.getState().conversations[conversationId] : null
                     
                     const conversationMeta: ConversationMeta = {
                       id: conversationId,
@@ -356,7 +358,7 @@ export default function NewChatPage() {
                     
                     const conversation: Conversation = {
                       id: conversationId,
-                      messages: updateMessagesConversationId(finalMessages, conversationId),
+                      events: updateEventsConversationId(finalEvents, conversationId),
                       isStreaming: false,
                       meta: conversationMeta
                     }
@@ -371,7 +373,8 @@ export default function NewChatPage() {
                 case 'error':
                   console.error('Streaming error:', data.error)
                   setIsStreaming(false)
-                  setStreamingMessageId(null)
+                  setStreamingEventId(null)
+                  // TODO: Show error to user
                   break
               }
             } catch (e) {
@@ -383,10 +386,10 @@ export default function NewChatPage() {
     } catch (error) {
       console.error('Failed to start streaming:', error)
       setIsStreaming(false)
-      setStreamingMessageId(null)
+      setStreamingEventId(null)
       // TODO: Show error to user
     }
-  }, [messages, selectedWorkspace, setConversation, router])
+  }, [events, selectedWorkspace, setConversation, router])
 
   // Show workspace selection prompt (layout handles auth)
   if (!selectedWorkspace) {
@@ -416,8 +419,8 @@ export default function NewChatPage() {
     : "Start a new conversation..."
 
   return (
-    <ChatArea
-      messages={messages}
+    <EventStream
+      events={events}
       isStreaming={isStreaming}
       onSendMessage={handleSendMessage}
       placeholder={placeholder}

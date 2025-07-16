@@ -150,6 +150,11 @@ export function anthropicStreamDeltaToEvent(
         // Update tool call args - we need to accumulate the JSON
         try {
           const partialJson = delta.delta.partial_json || '';
+          console.log('🔧 Accumulating tool call JSON:', { 
+            toolId: segment.id, 
+            toolName: segment.name, 
+            partialJson: partialJson.substring(0, 100) + (partialJson.length > 100 ? '...' : '')
+          });
           // For now, we'll store the partial JSON and parse it on completion
           if (!segment.args) {
             segment.args = {};
@@ -172,8 +177,17 @@ export function anthropicStreamDeltaToEvent(
         // Parse the accumulated JSON
         try {
           const partialJson = (completedSegment.args as any)._partial_json;
+          console.log('🔧 Finalizing tool call JSON:', { 
+            toolId: completedSegment.id, 
+            toolName: completedSegment.name, 
+            partialJson: partialJson?.substring(0, 200) + (partialJson?.length > 200 ? '...' : ''),
+            hasPartialJson: !!partialJson
+          });
           if (partialJson) {
             completedSegment.args = JSON.parse(partialJson);
+            console.log('✅ Parsed tool call args:', completedSegment.args);
+          } else {
+            console.log('⚠️ No partial JSON found for tool call');
           }
         } catch (e) {
           console.error('Failed to parse final tool call JSON:', e);

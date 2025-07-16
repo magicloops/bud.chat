@@ -14,7 +14,7 @@ import {
   useConversation,
   Conversation,
   ConversationMeta
-} from '@/state/simpleChatStore'
+} from '@/state/eventChatStore'
 import { usePathname } from 'next/navigation'
 import { WorkspaceId, ConversationId } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -104,7 +104,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             
             const conversation: Conversation = {
               id: conv.id,
-              messages: [], // Messages will be loaded when conversation is opened
+              events: [], // Events will be loaded when conversation is opened
               isStreaming: false,
               meta: conversationMeta
             }
@@ -175,17 +175,17 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     preloadTimeoutRef.current = setTimeout(async () => {
       const existingConversation = conversationsRecord[conversationId]
       
-      // Only preload if conversation exists but has no messages
-      if (existingConversation && existingConversation.messages.length === 0) {
+      // Only preload if conversation exists but has no events
+      if (existingConversation && existingConversation.events.length === 0) {
         try {
-          const response = await fetch(`/api/conversations/${conversationId}?include_messages=true`)
+          const response = await fetch(`/api/conversations/${conversationId}?include_events=true`)
           if (response.ok) {
             const conversationData = await response.json()
             
-            // Update the existing conversation with messages
+            // Update the existing conversation with events
             const updatedConversation: Conversation = {
               ...existingConversation,
-              messages: conversationData.messages || []
+              events: conversationData.events || []
             }
             
             setConversation(conversationId, updatedConversation)

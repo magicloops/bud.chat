@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { Bud, BudConfig } from '@/lib/types'
-import { Message } from '@/state/simpleChatStore'
+import { Event } from '@/state/eventChatStore'
+import { createTextEvent } from '@/lib/types/events'
 import { generateKeyBetween } from 'fractional-indexing'
 import { getDefaultModel } from './modelMapping'
 
@@ -98,59 +99,33 @@ export function getBudConfig(bud: Bud): BudConfig {
   return bud.default_json as BudConfig
 }
 
-export function createBudSystemMessage(bud: Bud, conversationId: string = 'temp'): Message {
+export function createBudSystemEvent(bud: Bud, conversationId: string = 'temp'): Event {
   const config = getBudConfig(bud)
   
-  return {
-    id: `system-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    conversation_id: conversationId,
-    role: 'system',
-    content: config.systemPrompt,
-    order_key: generateKeyBetween(null, null),
-    json_meta: { 
-      budId: bud.id, 
-      type: 'system',
-      budName: config.name
-    },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
+  return createTextEvent('system', config.systemPrompt)
 }
 
-export function createBudGreetingMessage(bud: Bud, conversationId: string = 'temp'): Message | null {
+export function createBudGreetingEvent(bud: Bud, conversationId: string = 'temp'): Event | null {
   const config = getBudConfig(bud)
   
   if (!config.greeting) return null
   
-  return {
-    id: `greeting-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    conversation_id: conversationId,
-    role: 'assistant',
-    content: config.greeting,
-    order_key: generateKeyBetween(null, null),
-    json_meta: { 
-      budId: bud.id, 
-      type: 'greeting',
-      budName: config.name
-    },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
+  return createTextEvent('assistant', config.greeting)
 }
 
-export function createBudInitialMessages(bud: Bud, conversationId: string = 'temp'): Message[] {
-  const messages: Message[] = []
+export function createBudInitialEvents(bud: Bud, conversationId: string = 'temp'): Event[] {
+  const events: Event[] = []
   
-  // Always add system message
-  messages.push(createBudSystemMessage(bud, conversationId))
+  // Always add system event
+  events.push(createBudSystemEvent(bud, conversationId))
   
   // Add greeting if present
-  const greeting = createBudGreetingMessage(bud, conversationId)
+  const greeting = createBudGreetingEvent(bud, conversationId)
   if (greeting) {
-    messages.push(greeting)
+    events.push(greeting)
   }
   
-  return messages
+  return events
 }
 
 export function validateBudConfig(config: Partial<BudConfig>): string[] {

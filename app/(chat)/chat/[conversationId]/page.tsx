@@ -2,7 +2,7 @@
 
 import { use, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChatArea } from '@/components/ChatArea'
+import { EventStream } from '@/components/EventStream'
 import { Loader2 } from 'lucide-react'
 import { 
   useConversation, 
@@ -11,7 +11,7 @@ import {
   useSetSelectedWorkspace,
   Conversation,
   ConversationMeta 
-} from '@/state/simpleChatStore'
+} from '@/state/eventChatStore'
 
 interface ChatPageProps {
   params: Promise<{ conversationId: string }>
@@ -32,7 +32,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const { data: conversationData, isLoading, error } = useQuery({
     queryKey: ['conversation', conversationId],
     queryFn: async () => {
-      const response = await fetch(`/api/conversations/${conversationId}?include_messages=true`)
+      const response = await fetch(`/api/conversations/${conversationId}?include_events=true`)
       if (!response.ok) {
         throw new Error(`Failed to fetch conversation: ${response.status}`)
       }
@@ -47,7 +47,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   // Load conversation data into store when received from server
   useEffect(() => {
-    if (conversationData && (!existingConversation || existingConversation.messages.length === 0)) {
+    if (conversationData && (!existingConversation || existingConversation.events.length === 0)) {
       const conversationMeta: ConversationMeta = {
         id: conversationData.id,
         title: conversationData.title || 'Chat',
@@ -57,12 +57,13 @@ export default function ChatPage({ params }: ChatPageProps) {
         assistant_name: conversationData.effective_assistant_name,
         assistant_avatar: conversationData.effective_assistant_avatar,
         model_config_overrides: conversationData.model_config_overrides,
+        mcp_config_overrides: conversationData.mcp_config_overrides,
         created_at: conversationData.created_at
       }
       
       const conversation: Conversation = {
         id: conversationData.id,
-        messages: conversationData.messages || [],
+        events: conversationData.events || [],
         isStreaming: false,
         meta: conversationMeta
       }
@@ -127,7 +128,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   // Render chat interface with store state
   return (
-    <ChatArea
+    <EventStream
       conversationId={conversationId}
       placeholder="Type your message..."
     />

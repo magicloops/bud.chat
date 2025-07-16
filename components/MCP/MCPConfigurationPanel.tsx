@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -50,7 +49,7 @@ export function MCPConfigurationPanel({
     }
     
     onChange?.(newConfig)
-  }, [selectedServers, toolChoice, disabledTools, onChange])
+  }, [selectedServers, toolChoice, disabledTools])
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
     setSelectedServers(prev => {
@@ -85,18 +84,22 @@ export function MCPConfigurationPanel({
   const hasConfiguration = selectedServers.length > 0 || disabledTools.length > 0
 
   return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Wrench className="h-5 w-5" />
-          {title}
-        </CardTitle>
-        {description && (
-          <CardDescription>{description}</CardDescription>
-        )}
-      </CardHeader>
+    <div className={className}>
+      {(title || description) && (
+        <div className="mb-4">
+          {title && (
+            <h3 className="flex items-center gap-2 text-base font-medium">
+              <Wrench className="h-4 w-4" />
+              {title}
+            </h3>
+          )}
+          {description && (
+            <p className="text-sm text-muted-foreground mt-1">{description}</p>
+          )}
+        </div>
+      )}
       
-      <CardContent className="space-y-6">
+      <div className="space-y-6">
         {/* Tool Choice Setting */}
         <div className="space-y-2">
           <Label htmlFor="tool-choice">Tool Usage</Label>
@@ -146,21 +149,21 @@ export function MCPConfigurationPanel({
         {hasConfiguration && (
           <>
             <Separator />
-            <div className="space-y-3">
-              <Label>Configuration Summary</Label>
-              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Servers:</span>
-                  <span className="text-sm">{selectedServers.length} selected</span>
+            <div className="space-y-2">
+              <Label className="text-sm">Configuration Summary</Label>
+              <div className="p-2 bg-muted/50 rounded text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Servers:</span>
+                  <span>{selectedServers.length} selected</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">Tool Choice:</span>
-                  <Badge variant="outline">{toolChoice}</Badge>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Tool Choice:</span>
+                  <Badge variant="outline" className="text-xs px-1.5 py-0.5">{toolChoice}</Badge>
                 </div>
                 {disabledTools.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Disabled Tools:</span>
-                    <span className="text-sm">{disabledTools.length} disabled</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium">Disabled Tools:</span>
+                    <span>{disabledTools.length} disabled</span>
                   </div>
                 )}
               </div>
@@ -169,11 +172,11 @@ export function MCPConfigurationPanel({
         )}
 
         {/* Help Text */}
-        <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
-          <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-          <div className="text-xs text-blue-700 dark:text-blue-300">
+        <div className="flex items-start gap-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded text-xs">
+          <Info className="h-3 w-3 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+          <div className="text-blue-700 dark:text-blue-300">
             <p className="font-medium mb-1">How MCP Tools Work:</p>
-            <ul className="space-y-1 list-disc list-inside">
+            <ul className="space-y-0.5 list-disc list-inside text-xs">
               <li>Select MCP servers to make their tools available</li>
               <li>The AI will automatically use tools when helpful</li>
               <li>Tool results are displayed in the conversation</li>
@@ -181,7 +184,7 @@ export function MCPConfigurationPanel({
             </ul>
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

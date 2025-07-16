@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
@@ -175,71 +174,72 @@ export function MCPServerList({
         const isTesting = testingServers.has(server.id)
         
         return (
-          <Card key={server.id} className={cn(
-            "transition-colors",
+          <div key={server.id} className={cn(
+            "border rounded-lg p-3 transition-colors",
             isSelected && "ring-2 ring-primary"
           )}>
-            <CardHeader className="pb-3">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-3">
-                  {onServerToggle && (
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={(checked) => handleServerToggle(server.id, checked as boolean)}
-                      className="mt-1"
-                    />
-                  )}
-                  <div className="flex-1">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Wrench className="h-4 w-4" />
-                      {server.name}
-                      <Badge variant={server.is_active ? "default" : "secondary"}>
-                        {server.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {server.transport_type}
-                      </Badge>
-                    </CardTitle>
-                    {server.metadata?.description && (
-                      <CardDescription className="mt-1">
-                        {server.metadata.description}
-                      </CardDescription>
-                    )}
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                {onServerToggle && (
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={(checked) => handleServerToggle(server.id, checked as boolean)}
+                    className="mt-0.5"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1 mb-1">
+                    <Wrench className="h-3 w-3 flex-shrink-0" />
+                    <span className="text-sm font-medium truncate">{server.name}</span>
                   </div>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge variant={server.is_active ? "default" : "secondary"} className="text-xs px-1.5 py-0.5">
+                      {server.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs px-1.5 py-0.5">
+                      {server.transport_type}
+                    </Badge>
+                  </div>
+                  {server.metadata?.description && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {server.metadata.description}
+                    </p>
+                  )}
                 </div>
                 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => testServerConnection(server.id)}
                     disabled={isTesting}
+                    className="h-6 w-6 p-0"
                   >
                     {isTesting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <Loader2 className="h-3 w-3 animate-spin" />
                     ) : (
-                      <TestTube className="h-4 w-4" />
+                      <TestTube className="h-3 w-3" />
                     )}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm">
-                    <Settings className="h-4 w-4" />
+                  <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0">
+                    <Settings className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
-            </CardHeader>
+            </div>
             
             {/* Show tools if expanded or tool selection is enabled */}
             {(showToolSelection || isSelected) && server.mcp_tools && server.mcp_tools.length > 0 && (
-              <CardContent className="pt-0">
-                <div className="text-sm font-medium mb-2">Available Tools:</div>
-                <div className="grid grid-cols-1 gap-2">
+              <div className="mt-2 pt-2 border-t">
+                <div className="text-xs font-medium mb-2">Available Tools:</div>
+                <div className="space-y-1">
                   {server.mcp_tools.map((tool) => (
-                    <div key={tool.id} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                      <div>
-                        <div className="font-medium text-sm">{tool.name}</div>
+                    <div key={tool.id} className="flex items-center justify-between p-1.5 bg-muted/50 rounded text-xs">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{tool.name}</div>
                         {tool.description && (
-                          <div className="text-xs text-muted-foreground">{tool.description}</div>
+                          <div className="text-muted-foreground line-clamp-1">{tool.description}</div>
                         )}
                       </div>
                       {onToolToggle && (
@@ -247,14 +247,15 @@ export function MCPServerList({
                           checked={tool.is_enabled}
                           onCheckedChange={(checked) => handleToolToggle(server.id, tool.name, checked)}
                           size="sm"
+                          className="ml-2 flex-shrink-0"
                         />
                       )}
                     </div>
                   ))}
                 </div>
-              </CardContent>
+              </div>
             )}
-          </Card>
+          </div>
         )
       })}
     </div>

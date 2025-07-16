@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo, useCallback } from "react"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,14 +9,16 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { ChevronDown, ChevronRight, HelpCircle, Palette, PanelRightClose, Save } from "lucide-react"
+import { ChevronDown, ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench } from "lucide-react"
 import { useModel } from "@/contexts/model-context"
 import { useToast } from "@/hooks/use-toast"
 import { BudConfig } from "@/lib/types"
-import { useConversation, useSetConversation } from "@/state/simpleChatStore"
+import { useConversation, useSetConversation } from "@/state/eventChatStore"
 import { useBud, useUpdateBud } from "@/state/budStore"
 import { EmojiPicker } from "@/components/EmojiPicker"
-import { getModelsForUI } from "@/lib/modelMapping"
+import { getModelsForUI, getDefaultModel } from "@/lib/modelMapping"
+import { MCPConfigurationPanel } from "@/components/MCP/MCPConfigurationPanel"
+import type { MCPConfiguration } from "@/components/MCP/MCPConfigurationPanel"
 
 interface ConversationOverrides {
   name?: string
@@ -26,6 +28,7 @@ interface ConversationOverrides {
   temperature?: number
   maxTokens?: number
   avatar?: string
+  mcpConfig?: MCPConfiguration
 }
 
 interface SettingsPanelProps {
@@ -54,6 +57,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const setConversation = useSetConversation()
   const updateBud = useUpdateBud()
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [mcpOpen, setMcpOpen] = useState(false)
   const [showThemeDialog, setShowThemeDialog] = useState(false)
   const [themePrompt, setThemePrompt] = useState("")
   const [isGeneratingTheme, setIsGeneratingTheme] = useState(false)
@@ -65,55 +69,93 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   // Get bud config and conversation overrides  
   const budConfig = bud?.default_json as BudConfig | undefined
   const conversationOverrides = conversation?.meta.model_config_overrides as ConversationOverrides | undefined
+  const mcpOverrides = conversation?.meta.mcp_config_overrides as MCPConfiguration | undefined
 
   // Form state with default values from bud config and overrides from conversation
   const [chatName, setChatName] = useState("")
   const [assistantName, setAssistantName] = useState("")
-  const [aiModel, setAiModel] = useState(selectedModel) // Initialize with selectedModel instead of empty string
+  const [aiModel, setAiModel] = useState(selectedModel || getDefaultModel()) // Initialize with selectedModel or default
   const [systemPrompt, setSystemPrompt] = useState("")
   const [temperature, setTemperature] = useState(1)
   const [maxTokens, setMaxTokens] = useState<number | undefined>(undefined)
   const [avatar, setAvatar] = useState("")
   const [currentTheme, setCurrentTheme] = useState<{name: string, cssVariables: Record<string, string>} | undefined>(undefined)
+  const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>({})
 
   // Update form values when props change
   useEffect(() => {
+    // Only update if we have meaningful data to work with
+    if (panelMode === 'chat' && !conversation) {
+      return // Don't update until conversation is loaded
+    }
+    if (panelMode === 'bud' && !bud) {
+      return // Don't update until bud is loaded
+    }
+
+    // Debug logging
+    console.log('🔧 Settings Panel - Data loaded:', {
+      panelMode,
+      conversation: conversation?.meta,
+      bud: bud?.default_json,
+      conversationOverrides,
+      mcpOverrides,
+      budConfig: budConfig ? { name: budConfig.name, avatar: budConfig.avatar, model: budConfig.model, mcpConfig: budConfig.mcpConfig } : null
+    })
+    
     // Get available models to validate
     const availableModels = getModelsForUI().map(m => m.value)
     
     if (panelMode === 'bud') {
       // Bud mode: Use bud config values directly
-      setChatName(budConfig?.name || "")
-      setAssistantName(budConfig?.name || "")
-      const budModel = budConfig?.model || selectedModel
+      const newChatName = budConfig?.name || ""
+      const newAssistantName = budConfig?.name || ""
+      const budModel = budConfig?.model || getDefaultModel()
       
       // Validate model exists in available options
-      const validModel = availableModels.includes(budModel) ? budModel : selectedModel
-      console.log('🔧 Settings Panel - Bud mode model:', { budConfigModel: budConfig?.model, selectedModel, finalModel: budModel, validModel, availableModels: availableModels.slice(0, 3) })
+      const validModel = availableModels.includes(budModel) ? budModel : getDefaultModel()
+      console.log('🔧 Settings Panel - Bud mode model:', { budConfigModel: budConfig?.model, finalModel: budModel, validModel, availableModels: availableModels.slice(0, 3) })
+      
+      setChatName(newChatName)
+      setAssistantName(newAssistantName)
       setAiModel(validModel)
       setSystemPrompt(budConfig?.systemPrompt || "")
       setTemperature(budConfig?.temperature || 1)
       setMaxTokens(budConfig?.maxTokens || undefined)
       setAvatar(budConfig?.avatar || "")
+      setMcpConfig(budConfig?.mcpConfig || {})
     } else {
       // Chat mode: Use conversation overrides with bud fallbacks
-      setChatName(conversation?.meta.title || "")
-      setAssistantName(conversationOverrides?.assistantName || conversation?.meta.assistant_name || budConfig?.name || "")
-      const chatModel = conversationOverrides?.model || budConfig?.model || selectedModel
+      const newChatName = conversation?.meta.title || ""
+      const newAssistantName = conversationOverrides?.assistantName || conversation?.meta.assistant_name || budConfig?.name || ""
+      const chatModel = conversationOverrides?.model || budConfig?.model || getDefaultModel()
       
       // Validate model exists in available options
-      const validModel = availableModels.includes(chatModel) ? chatModel : selectedModel
-      console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, selectedModel, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) })
+      const validModel = availableModels.includes(chatModel) ? chatModel : getDefaultModel()
+      console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) })
+      
+      setChatName(newChatName)
+      setAssistantName(newAssistantName)
       setAiModel(validModel)
       setSystemPrompt(conversationOverrides?.systemPrompt || budConfig?.systemPrompt || "")
       setTemperature(conversationOverrides?.temperature || budConfig?.temperature || 1)
       setMaxTokens(conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined)
-      setAvatar(conversationOverrides?.avatar || budConfig?.avatar || "")
+      setAvatar(conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || "")
+      setMcpConfig(mcpOverrides || budConfig?.mcpConfig || {})
     }
     
     setCurrentTheme(budConfig?.customTheme)
     setHasUnsavedChanges(false)
-  }, [panelMode, conversation, bud, conversationOverrides, budConfig, selectedModel])
+  }, [
+    panelMode, 
+    conversation?.id, 
+    conversation?.meta?.title,
+    conversation?.meta?.assistant_name,
+    conversation?.meta?.assistant_avatar,
+    bud?.id,
+    conversationOverrides ? JSON.stringify(conversationOverrides) : 'undefined',
+    mcpOverrides ? JSON.stringify(mcpOverrides) : 'undefined',
+    budConfig ? JSON.stringify(budConfig) : 'undefined'
+  ])
 
   // Handle value changes - track for save confirmation in both modes
   const handleFieldChange = (field: string, value: any) => {
@@ -142,8 +184,17 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       case 'avatar':
         setAvatar(value)
         break
+      case 'mcpConfig':
+        setMcpConfig(value)
+        break
     }
   }
+
+  // Stable callback for MCP configuration changes
+  const handleMcpConfigChange = useCallback((config: MCPConfiguration) => {
+    setMcpConfig(config)
+    setHasUnsavedChanges(true)
+  }, [])
 
 
   const generateTheme = async () => {
@@ -240,7 +291,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           temperature: temperature,
           maxTokens: maxTokens,
           avatar: avatar || currentConfig.avatar || '',
-          customTheme: currentTheme
+          customTheme: currentTheme,
+          mcpConfig: mcpConfig
         }
         
         await updateBud(bud.id, { config: updatedConfig })
@@ -275,7 +327,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         systemPrompt: systemPrompt !== (budConfig?.systemPrompt || "") ? systemPrompt : undefined,
         temperature: temperature !== (budConfig?.temperature || 1) ? temperature : undefined,
         maxTokens: maxTokens !== (budConfig?.maxTokens || undefined) ? maxTokens : undefined,
-        avatar: avatar !== (budConfig?.avatar || "") ? avatar : undefined
+        avatar: avatar !== (budConfig?.avatar || "") ? avatar : undefined,
+        mcpConfig: JSON.stringify(mcpConfig) !== JSON.stringify(budConfig?.mcpConfig || {}) ? mcpConfig : undefined
       }
       
       // Remove undefined values
@@ -308,7 +361,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             title: chatName || null,
             assistant_name: assistantName, // Use exact form value
             assistant_avatar: avatar, // Use exact form value
-            model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides : null 
+            model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides : null,
+            mcp_config_overrides: Object.keys(mcpConfig).length > 0 ? mcpConfig : null 
           })
         })
       } catch (error) {
@@ -325,7 +379,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           temperature: temperature,
           maxTokens: maxTokens,
           avatar: avatar || budConfig?.avatar || '',
-          customTheme: currentTheme
+          customTheme: currentTheme,
+          mcpConfig: mcpConfig
         }
         
         await updateBud(bud.id, { config: updatedBudConfig })
@@ -350,7 +405,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             body: JSON.stringify({ 
               assistant_name: assistantName, // Set to bud name
               assistant_avatar: avatar, // Set to bud avatar
-              model_config_overrides: null // Clear model overrides
+              model_config_overrides: null, // Clear model overrides
+              mcp_config_overrides: null // Clear MCP overrides since they're now in the bud
             })
           })
         } catch (error) {
@@ -446,6 +502,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             <div className="text-center py-8">
               <p className="text-muted-foreground">Start a conversation to access chat settings</p>
             </div>
+          ) : panelMode === 'chat' && conversationId && !conversation ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Loading conversation...</p>
+            </div>
           ) : (
             <>
           {/* Settings */}
@@ -516,13 +576,12 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <HelpCircle className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <Select 
-                  value={aiModel || selectedModel} // Use selectedModel as fallback, ensure we have a valid value
+                  value={aiModel}
                   onValueChange={(value) => {
                     console.log('Model selection changed:', value) // Debug log
-                    setAiModel(value)
-                    setSelectedModel(value)
                     handleFieldChange('model', value)
                   }}
+                  key={`model-select-${aiModel}`}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
@@ -556,6 +615,33 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 />
               </div>
           </div>
+
+          {/* MCP Configuration */}
+          {(conversation?.meta.workspace_id || bud?.workspace_id) && (
+            <Collapsible open={mcpOpen} onOpenChange={setMcpOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" className="flex w-full items-center justify-between p-0 h-auto">
+                  <div className="flex items-center gap-2">
+                    <ChevronRight className={`h-5 w-5 transition-transform ${mcpOpen ? "rotate-90" : ""}`} />
+                    <Wrench className="h-5 w-5" />
+                    <span className="text-lg font-semibold">MCP Tools</span>
+                  </div>
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-4 space-y-6">
+                <MCPConfigurationPanel
+                  workspaceId={conversation?.meta.workspace_id || bud?.workspace_id || ''}
+                  config={mcpConfig}
+                  onChange={handleMcpConfigChange}
+                  title="" // Remove the title since it's in the collapsible header
+                  description={panelMode === 'bud' 
+                    ? 'Configure MCP tools for this assistant. These settings will be inherited by new conversations.' 
+                    : 'Configure MCP tools for this conversation. Changes will be applied based on your save choice.'
+                  }
+                />
+              </CollapsibleContent>
+            </Collapsible>
+          )}
 
           {/* Advanced */}
           <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>

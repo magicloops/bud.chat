@@ -82,6 +82,36 @@ export class EventStreamBuilder {
   }
 
   /**
+   * Get tool call ID at a specific index (for streaming updates)
+   * The index corresponds to Anthropic's content block index, not tool call index
+   */
+  getToolCallIdAtIndex(index: number): string | null {
+    // Count content blocks up to the given index to find the corresponding tool call
+    let contentBlockIndex = 0;
+    
+    // Check segments first (completed content blocks)
+    for (const segment of this.segments) {
+      if (contentBlockIndex === index) {
+        if (segment.type === 'tool_call') {
+          return segment.id;
+        }
+        return null;
+      }
+      contentBlockIndex++;
+    }
+    
+    // Check pending tool calls (current streaming content blocks)
+    const pendingIds = Array.from(this.pendingToolCalls.keys());
+    const pendingToolCallIndex = index - contentBlockIndex;
+    
+    if (pendingToolCallIndex >= 0 && pendingToolCallIndex < pendingIds.length) {
+      return pendingIds[pendingToolCallIndex];
+    }
+    
+    return null;
+  }
+
+  /**
    * Add a tool result to the current event
    */
   addToolResult(id: string, output: object): void {

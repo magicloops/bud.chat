@@ -15,6 +15,7 @@ export interface EventConversationMeta {
   assistant_name?: string
   assistant_avatar?: string
   model_config_overrides?: Record<string, any>
+  mcp_config_overrides?: Record<string, any>
   created_at: string
 }
 
@@ -214,6 +215,7 @@ export const useEventChatStore = create<EventChatStore>()(
                         assistant_name: updatedConversation.assistant_name,
                         assistant_avatar: updatedConversation.assistant_avatar,
                         model_config_overrides: updatedConversation.model_config_overrides,
+                        mcp_config_overrides: updatedConversation.mcp_config_overrides,
                       }
                       console.log('✅ Conversation updated in store:', currentTitle, '→', updatedConversation.title)
                     } else {
@@ -231,6 +233,7 @@ export const useEventChatStore = create<EventChatStore>()(
                               assistant_name: updatedConversation.assistant_name,
                               assistant_avatar: updatedConversation.assistant_avatar,
                               model_config_overrides: updatedConversation.model_config_overrides,
+                              mcp_config_overrides: updatedConversation.mcp_config_overrides,
                             }
                             console.log('✅ Delayed update successful:', updatedConversation.title)
                           })
@@ -453,3 +456,21 @@ export const useEventUnsubscribeFromWorkspace = () =>
 
 export const useEventCleanup = () => 
   useEventChatStore((state) => state.cleanup)
+
+// Legacy-compatible exports to match the original store naming
+export const useSelectedWorkspace = useEventSelectedWorkspace
+export const useSetSelectedWorkspace = useEventSetSelectedWorkspace
+export const useConversations = useEventConversations
+export const useConversation = useEventConversation
+export const useSetConversation = useEventSetConversation
+export const useWorkspaceConversations = useEventWorkspaceConversations
+export const useAddConversationToWorkspace = useEventAddConversationToWorkspace
+export const useRemoveConversationFromWorkspace = useEventRemoveConversationFromWorkspace
+export const useSetWorkspaceConversations = useEventSetWorkspaceConversations
+export const useSubscribeToWorkspace = useEventSubscribeToWorkspace
+export const useUnsubscribeFromWorkspace = useEventUnsubscribeFromWorkspace
+export const useCleanup = useEventCleanup
+
+// Type exports for compatibility
+export type { EventConversation as Conversation, EventConversationMeta as ConversationMeta }
+export type { Event }
