@@ -236,7 +236,7 @@ export function EventList({
     <div 
       ref={scrollRef}
       className={cn(
-        "h-full overflow-y-auto overflow-x-hidden",
+        "h-full overflow-y-auto overflow-x-hidden @container",
         className
       )}
       onScroll={handleScroll}
@@ -253,6 +253,8 @@ export function EventList({
             onEdit={handleEventEdit}
             onDelete={handleEventDelete}
             onBranch={handleEventBranch}
+            allEvents={displayEvents}
+            previousEvent={index > 0 ? displayEvents[index - 1] : undefined}
           />
         ))}
       </div>

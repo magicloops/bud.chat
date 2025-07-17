@@ -1,6 +1,6 @@
 'use client'
 
-import { memo } from 'react'
+import { memo, useState } from 'react'
 import { Event, Segment } from '@/lib/types/events'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -11,7 +11,9 @@ import {
   Wrench, 
   CheckCircle, 
   XCircle, 
-  Clock 
+  Clock,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import MarkdownRenderer from '@/components/markdown-renderer'
@@ -20,11 +22,13 @@ interface EventMessageProps {
   event: Event
   isStreaming?: boolean
   className?: string
+  allEvents?: Event[]
 }
 
 interface SegmentRendererProps {
   segment: Segment
   isStreaming?: boolean
+  allEvents?: Event[]
 }
 
 const RoleIcon = ({ role }: { role: Event['role'] }) => {
@@ -60,10 +64,27 @@ const TextSegment = memo(function TextSegment({
 })
 
 const ToolCallSegment = memo(function ToolCallSegment({ 
-  segment 
+  segment,
+  allEvents,
+  isStreaming
 }: { 
   segment: { type: 'tool_call'; id: string; name: string; args: object }
+  allEvents?: Event[]
+  isStreaming?: boolean
 }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  // Find the corresponding tool result from all events
+  const toolResult = allEvents ? findToolResult(allEvents, segment.id) : null
+  const hasResult = toolResult !== null
+  const resultSegment = toolResult?.segments.find(s => s.type === 'tool_result' && s.id === segment.id) as 
+    { type: 'tool_result'; id: string; output: object } | undefined
+  
+  const hasError = resultSegment && resultSegment.output && typeof resultSegment.output === 'object' && 'error' in resultSegment.output
+  const resultContent = hasError 
+    ? (resultSegment.output as any).error 
+    : resultSegment ? ((resultSegment.output as any).content || JSON.stringify(resultSegment.output)) : null
+
   return (
     <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 my-2">
       <CardHeader className="pb-2">
@@ -73,6 +94,22 @@ const ToolCallSegment = memo(function ToolCallSegment({
           <Badge variant="secondary" className="text-xs">
             {segment.id.substring(0, 8)}
           </Badge>
+          {hasResult && (
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {isExpanded ? (
+                <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronRight className="h-3 w-3" />
+              )}
+              {hasError ? 'Error' : 'Result'}
+            </button>
+          )}
+          {!hasResult && !isStreaming && (
+            <Clock className="h-3 w-3 text-muted-foreground animate-pulse ml-auto" />
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
@@ -82,6 +119,41 @@ const ToolCallSegment = memo(function ToolCallSegment({
             {JSON.stringify(segment.args, null, 2)}
           </pre>
         </div>
+        
+        {/* Collapsible tool result */}
+        {hasResult && isExpanded && (
+          <div className="mt-3 border-t pt-3">
+            <div className="flex items-center gap-2 mb-2">
+              {hasError ? (
+                <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+              ) : (
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+              )}
+              <span className="text-sm font-medium">
+                {hasError ? 'Tool Error' : 'Tool Result'}
+              </span>
+            </div>
+            <div className="text-sm">
+              <div className="text-muted-foreground mb-1">
+                {hasError ? 'Error:' : 'Output:'}
+              </div>
+              <div className={cn(
+                "rounded p-2 text-xs overflow-x-auto",
+                hasError 
+                  ? "bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800"
+                  : "bg-muted"
+              )}>
+                {hasError ? (
+                  <div className="text-red-600 dark:text-red-400">
+                    {resultContent}
+                  </div>
+                ) : (
+                  <MarkdownRenderer content={resultContent || ''} />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -139,15 +211,17 @@ const ToolResultSegment = memo(function ToolResultSegment({
 
 const SegmentRenderer = memo(function SegmentRenderer({ 
   segment, 
-  isStreaming 
-}: SegmentRendererProps) {
+  isStreaming,
+  allEvents
+}: SegmentRendererProps & { allEvents?: Event[] }) {
   switch (segment.type) {
     case 'text':
       return <TextSegment segment={segment} isStreaming={isStreaming} />
     case 'tool_call':
-      return <ToolCallSegment segment={segment} />
+      return <ToolCallSegment segment={segment} allEvents={allEvents} isStreaming={isStreaming} />
     case 'tool_result':
-      return <ToolResultSegment segment={segment} />
+      // Tool results are now rendered within tool calls, so we hide standalone results
+      return null
     default:
       return null
   }
@@ -156,8 +230,9 @@ const SegmentRenderer = memo(function SegmentRenderer({
 const EventMessage = memo(function EventMessage({ 
   event, 
   isStreaming = false,
-  className 
-}: EventMessageProps) {
+  className,
+  allEvents
+}: EventMessageProps & { allEvents?: Event[] }) {
   const getRoleLabel = (role: Event['role']) => {
     switch (role) {
       case 'system': return 'System'
@@ -187,6 +262,11 @@ const EventMessage = memo(function EventMessage({
   if (event.segments.length === 0) {
     return null
   }
+  
+  // Hide standalone tool result events (they're now shown within tool calls)
+  if (event.role === 'tool') {
+    return null
+  }
 
   // For system messages, render more compactly
   if (event.role === 'system') {
@@ -200,7 +280,7 @@ const EventMessage = memo(function EventMessage({
         </div>
         <div className="text-sm text-muted-foreground">
           {event.segments.map((segment, i) => (
-            <SegmentRenderer key={i} segment={segment} isStreaming={false} />
+            <SegmentRenderer key={i} segment={segment} isStreaming={false} allEvents={allEvents} />
           ))}
         </div>
       </div>
@@ -236,13 +316,27 @@ const EventMessage = memo(function EventMessage({
           </div>
           
           <div className="space-y-2">
-            {event.segments.map((segment, i) => (
-              <SegmentRenderer 
-                key={i} 
-                segment={segment} 
-                isStreaming={isStreaming && i === event.segments.length - 1} 
-              />
-            ))}
+            {/* Render segments in order: text first, then tool calls */}
+            {event.segments
+              .filter(s => s.type === 'text')
+              .map((segment, i) => (
+                <SegmentRenderer 
+                  key={`text-${i}`} 
+                  segment={segment} 
+                  isStreaming={isStreaming && event.segments.filter(s => s.type === 'tool_call').length === 0} 
+                  allEvents={allEvents}
+                />
+              ))}
+            {event.segments
+              .filter(s => s.type === 'tool_call')
+              .map((segment, i) => (
+                <SegmentRenderer 
+                  key={`tool-${i}`} 
+                  segment={segment} 
+                  isStreaming={isStreaming} 
+                  allEvents={allEvents}
+                />
+              ))}
           </div>
         </div>
       </div>
