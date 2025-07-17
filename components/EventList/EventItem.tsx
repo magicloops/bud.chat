@@ -151,13 +151,29 @@ export const EventItem = memo(function EventItem({
 
   // Render continuation view for assistant messages following other assistant/tool messages
   if (shouldShowAsContinuation) {
+    const containerClasses = cn(
+      "mb-6 group @[768px]:pr-[42px]", 
+      index === 0 && "pt-4"
+    )
+    
     return (
-      <div className={`mb-6 group @md:pr-[42px] ${index === 0 ? "pt-4" : ""}`}>
+      <div className={containerClasses}>
         <div className="flex items-start gap-3">
-          {/* Empty space for avatar alignment */}
-          <div className="w-8 h-8"></div>
+          {/* Invisible avatar for spacing */}
+          <div className="w-8 h-8 opacity-0">
+            <div className="w-8 h-8 rounded-full"></div>
+          </div>
           
           <div className="flex-1 min-w-0">
+            {/* Invisible header for spacing */}
+            <div className="flex items-center gap-2 mb-1 opacity-0">
+              <span className="text-sm font-medium">
+                {assistantName}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                · {formatEventDuration(event, index)}
+              </span>
+            </div>
             <div className="relative">
             {isStreaming && !textContent && (
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
@@ -302,51 +318,56 @@ export const EventItem = memo(function EventItem({
               </div>
             )}
             </div>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={handleCopy}>
-                  <Copy className="h-4 w-4 mr-2" />
-                  Copy
-                </DropdownMenuItem>
-                {canEdit && (
-                  <DropdownMenuItem onClick={handleEdit}>
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit
-                  </DropdownMenuItem>
-                )}
-                {canBranch && (
-                  <DropdownMenuItem onClick={handleBranch}>
-                    <GitBranch className="h-4 w-4 mr-2" />
-                    Branch
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                {canDelete && (
-                  <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Delete
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
         </div>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleCopy}>
+              <Copy className="h-4 w-4 mr-2" />
+              Copy
+            </DropdownMenuItem>
+            {canEdit && (
+              <DropdownMenuItem onClick={handleEdit}>
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </DropdownMenuItem>
+            )}
+            {canBranch && (
+              <DropdownMenuItem onClick={handleBranch}>
+                <GitBranch className="h-4 w-4 mr-2" />
+                Branch
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            {canDelete && (
+              <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     )
   }
 
+  const regularContainerClasses = cn(
+    "mb-6 group @[768px]:pr-[42px]",
+    index === 0 && "pt-4"
+  )
+
   return (
-    <div className={`mb-6 group @md:pr-[42px] ${index === 0 ? "pt-4" : ""}`}>
+    <div className={regularContainerClasses}>
       <div className="flex items-start gap-3">
         <Avatar className="h-8 w-8">
           {isUser ? (
