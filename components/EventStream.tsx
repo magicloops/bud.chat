@@ -132,32 +132,133 @@ export function EventStream({
                   const currentStore = useEventChatStore.getState()
                   const currentConv = currentStore.conversations[conversationId]
                   if (currentConv) {
-                    const updatedEvents = currentConv.events.map(event => 
+                    const placeholderEvent = currentConv.events.find(e => e.id === assistantPlaceholder.id)
+                    const hasToolCalls = placeholderEvent?.segments.some(s => s.type === 'tool_call')
+                    
+                    // Check if we need to create a new assistant event after tool calls
+                    if (hasToolCalls && currentConv.streamingEventId === assistantPlaceholder.id) {
+                      // Create a new assistant event for the final response after tool calls
+                      const newAssistantEvent = {
+                        id: crypto.randomUUID(),
+                        role: 'assistant' as const,
+                        segments: [{ type: 'text' as const, text: data.content }],
+                        ts: Date.now()
+                      }
+                      
+                      // Add the new assistant event at the end and update streaming ID
+                      currentStore.setConversation(conversationId, {
+                        ...currentConv,
+                        events: [...currentConv.events, newAssistantEvent],
+                        streamingEventId: newAssistantEvent.id
+                      })
+                    } else {
+                      // Update the current streaming event (either original placeholder or new assistant event)
+                      const streamingId = currentConv.streamingEventId || assistantPlaceholder.id
+                      const updatedEvents = currentConv.events.map(event => 
+                        event.id === streamingId 
+                          ? { 
+                              ...event, 
+                              segments: event.segments.map(s => 
+                                s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                              ),
+                              ts: Date.now()
+                            }
+                          : event
+                      )
+                      currentStore.setConversation(conversationId, {
+                        ...currentConv,
+                        events: updatedEvents
+                      })
+                    }
+                    
+                    console.log('🔄 Updated streaming event, current text length:', 
+                      currentConv.events.find(e => e.id === (currentConv.streamingEventId || assistantPlaceholder.id))?.segments.find(s => s.type === 'text')?.text.length || 0)
+                  }
+                  break
+                  
+                case 'tool_start':
+                  // Tool execution started - add tool call segment to streaming event
+                  console.log('🔧 Tool started:', data.tool_name, data.tool_id)
+                  const toolStartStore = useEventChatStore.getState()
+                  const toolStartConv = toolStartStore.conversations[conversationId]
+                  if (toolStartConv) {
+                    const updatedEventsToolStart = toolStartConv.events.map(event => 
                       event.id === assistantPlaceholder.id 
                         ? { 
                             ...event, 
-                            segments: event.segments.map(s => 
-                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                            segments: [
+                              ...event.segments,
+                              {
+                                type: 'tool_call' as const,
+                                id: data.tool_id,
+                                name: data.tool_name,
+                                args: {} // Will be populated when tool completes
+                              }
+                            ],
+                            ts: Date.now()
+                          }
+                        : event
+                    )
+                    toolStartStore.setConversation(conversationId, {
+                      ...toolStartConv,
+                      events: updatedEventsToolStart
+                    })
+                  }
+                  break
+                  
+                case 'tool_finalized':
+                  // Tool call finalized with complete arguments - update the tool call
+                  console.log('🔧 Tool finalized:', data.tool_name, data.tool_id, data.args)
+                  const toolFinalizedStore = useEventChatStore.getState()
+                  const toolFinalizedConv = toolFinalizedStore.conversations[conversationId]
+                  if (toolFinalizedConv) {
+                    const updatedEventsFinalized = toolFinalizedConv.events.map(event => 
+                      event.id === assistantPlaceholder.id 
+                        ? { 
+                            ...event, 
+                            segments: event.segments.map(segment => 
+                              segment.type === 'tool_call' && segment.id === data.tool_id
+                                ? { ...segment, args: data.args }
+                                : segment
                             ),
                             ts: Date.now()
                           }
                         : event
                     )
-                    currentStore.setConversation(conversationId, {
-                      ...currentConv,
-                      events: updatedEvents
+                    toolFinalizedStore.setConversation(conversationId, {
+                      ...toolFinalizedConv,
+                      events: updatedEventsFinalized
                     })
-                    console.log('🔄 Updated streaming event, current text length:', 
-                      updatedEvents.find(e => e.id === assistantPlaceholder.id)?.segments.find(s => s.type === 'text')?.text.length || 0)
                   }
                   break
                   
-                case 'tool_start':
-                  // Tool execution started
+                case 'tool_result':
+                  // Tool result received - add as a separate event
+                  console.log('📋 Tool result received:', data.tool_id, data.output)
+                  const toolResultStore = useEventChatStore.getState()
+                  const toolResultConv = toolResultStore.conversations[conversationId]
+                  if (toolResultConv) {
+                    const toolResultEvent = {
+                      id: crypto.randomUUID(),
+                      role: 'tool' as const,
+                      segments: [{
+                        type: 'tool_result' as const,
+                        id: data.tool_id,
+                        output: data.output
+                      }],
+                      ts: Date.now()
+                    }
+                    
+                    toolResultStore.setConversation(conversationId, {
+                      ...toolResultConv,
+                      events: [...toolResultConv.events, toolResultEvent]
+                    })
+                  }
                   break
                   
                 case 'tool_complete':
-                  // Tool execution completed
+                  // Tool execution completed - update UI to show completion
+                  console.log('✅ Tool completed:', data.tool_id)
                   break
                   
                 case 'complete':

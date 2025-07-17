@@ -277,6 +277,14 @@ export async function POST(
                 // Save tool result to database
                 await saveEvent(toolResultEvent, { conversationId })
                 
+                // Stream tool result to user
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: "tool_result",
+                  tool_id: result.id,
+                  output: result.output,
+                  error: result.error || null
+                })}\n\n`))
+                
                 // Stream tool completion to user
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                   type: "tool_complete",
@@ -410,6 +418,17 @@ export async function POST(
                     
                     // Save assistant event to database
                     await saveEvent(finalEvent, { conversationId })
+                    
+                    // Stream finalized tool calls with complete arguments
+                    const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call')
+                    for (const toolCall of toolCallSegments) {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: "tool_finalized",
+                        tool_id: toolCall.id,
+                        tool_name: toolCall.name,
+                        args: toolCall.args
+                      })}\n\n`))
+                    }
                     
                     // If no tool calls, we're done
                     if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
