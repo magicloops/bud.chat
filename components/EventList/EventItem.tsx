@@ -319,44 +319,44 @@ export const EventItem = memo(function EventItem({
             )}
             </div>
           </div>
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleCopy}>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy
+              </DropdownMenuItem>
+              {canEdit && (
+                <DropdownMenuItem onClick={handleEdit}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit
+                </DropdownMenuItem>
+              )}
+              {canBranch && (
+                <DropdownMenuItem onClick={handleBranch}>
+                  <GitBranch className="h-4 w-4 mr-2" />
+                  Branch
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              {canDelete && (
+                <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleCopy}>
-              <Copy className="h-4 w-4 mr-2" />
-              Copy
-            </DropdownMenuItem>
-            {canEdit && (
-              <DropdownMenuItem onClick={handleEdit}>
-                <Edit className="h-4 w-4 mr-2" />
-                Edit
-              </DropdownMenuItem>
-            )}
-            {canBranch && (
-              <DropdownMenuItem onClick={handleBranch}>
-                <GitBranch className="h-4 w-4 mr-2" />
-                Branch
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            {canDelete && (
-              <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
     )
   }
