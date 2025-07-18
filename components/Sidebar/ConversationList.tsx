@@ -129,7 +129,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     loadConversations()
   }, [workspaceId])
 
-  // Note: Realtime updates are now handled centrally in the chat store (simpleChatStore.ts)
+  // Note: Realtime updates are now handled centrally in the event chat store (eventChatStore.ts)
   // This prevents duplicate subscriptions and title conflicts
 
   const handleConversationDelete = useCallback(async (conversationId: ConversationId, e: React.MouseEvent) => {

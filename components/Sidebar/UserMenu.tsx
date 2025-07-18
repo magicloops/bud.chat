@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { useConversation } from '@/state/simpleChatStore'
+import { useConversation } from '@/state/eventChatStore'
 import { useBud } from '@/state/budStore'
 
 export function UserMenu() {
