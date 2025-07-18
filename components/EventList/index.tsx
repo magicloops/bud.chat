@@ -39,6 +39,7 @@ export function EventList({
   const displayEvents = events || conversation?.events || []
   const actualIsStreaming = isStreaming || conversation?.isStreaming || false
   
+  
   // Store action refs - stable references to prevent re-renders
   const setConversationRef = useRef(useEventChatStore.getState().setConversation)
   const addConversationToWorkspaceRef = useRef(useEventChatStore.getState().addConversationToWorkspace)
@@ -111,10 +112,35 @@ export function EventList({
     }
   }, [conversationId, scrollToBottom]) // Reset when conversation changes
 
-  const handleEventEdit = useCallback((eventId: string, newContent: string) => {
-    // TODO: Implement event editing
-    console.log('Edit event:', eventId, newContent)
-  }, [])
+  const handleEventEdit = useCallback(async (eventId: string, newContent: string) => {
+    if (!conversationId) return
+    
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/events/${eventId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: newContent
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to update event')
+      }
+      
+      const result = await response.json()
+      console.log('Event updated successfully:', result)
+      
+      // TODO: Update the event in the local state/store
+      // For now, we'll rely on the optimistic update in the UI
+      
+    } catch (error) {
+      console.error('Error updating event:', error)
+      // TODO: Show error message to user
+    }
+  }, [conversationId])
 
   const handleEventDelete = useCallback((eventId: string) => {
     // TODO: Implement event deletion

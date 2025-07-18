@@ -57,7 +57,7 @@ export function eventsToAnthropicMessages(events: Event[]): {
 } {
   const eventLog = new EventLog(events);
   const messages = eventLog.toProviderMessages('anthropic') as AnthropicMessage[];
-  const system = eventLog.getSystemMessage();
+  const system = eventLog.getSystemParameter();
   
   return { messages, system };
 }

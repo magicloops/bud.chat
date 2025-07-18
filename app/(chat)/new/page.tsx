@@ -207,7 +207,7 @@ export default function NewChatPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          messages: [userEvent], // Only send the user's message for new conversations
+          messages: [...events, userEvent], // Send all events including system messages
           workspaceId: selectedWorkspace,
           budId: bud?.id,
           model: bud ? (bud.default_json as any).model || 'gpt-4o' : 'gpt-4o'

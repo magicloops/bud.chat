@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useState, useCallback } from 'react'
+import { memo, useState, useCallback, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import MarkdownRenderer from '@/components/markdown-renderer'
@@ -53,10 +53,6 @@ export const EventItem = memo(function EventItem({
   allEvents,
   previousEvent,
 }: EventItemProps) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
-  const error = null // TODO: Implement error handling in new architecture
-
   const isSystem = event.role === 'system'
   const isUser = event.role === 'user'
   const isAssistant = event.role === 'assistant'
@@ -67,6 +63,17 @@ export const EventItem = memo(function EventItem({
     .filter(s => s.type === 'text')
     .map(s => s.text)
     .join('')
+  
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingContent, setEditingContent] = useState('')
+  const [localTextContent, setLocalTextContent] = useState(textContent)
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
+  const error = null // TODO: Implement error handling in new architecture
+  
+  // Update local content when the event changes
+  useEffect(() => {
+    setLocalTextContent(textContent)
+  }, [textContent])
   
   // Extract tool calls and results
   const toolCalls = event.segments.filter(s => s.type === 'tool_call')
@@ -131,14 +138,66 @@ export const EventItem = memo(function EventItem({
   const shouldShowAsContinuation = isAssistant && previousEvent && 
     (previousEvent.role === 'assistant' || previousEvent.role === 'tool')
 
-  // Don't render system messages in the old style
+  // Render system messages with editing capability
   if (isSystem) {
     return (
       <div className="mb-6 group">
-        <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg">
-          <div className="text-sm text-muted-foreground font-mono">
-            {textContent}
-          </div>
+        <div className="bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg relative">
+          {isEditing ? (
+            <div className="space-y-3">
+              <textarea
+                value={editingContent}
+                onChange={(e) => setEditingContent(e.target.value)}
+                className="w-full min-h-[100px] p-2 text-sm font-mono bg-transparent border border-yellow-300 dark:border-yellow-600 rounded resize-none focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                placeholder="Enter system prompt..."
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    // Optimistically update the local content
+                    setLocalTextContent(editingContent)
+                    
+                    // Save the edited content
+                    if (onEdit) {
+                      onEdit(event.id, editingContent)
+                    }
+                    setIsEditing(false)
+                  }}
+                  className="px-3 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700 transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => {
+                    setIsEditing(false)
+                    setEditingContent(localTextContent) // Reset to local content
+                  }}
+                  className="px-3 py-1 bg-gray-400 text-white text-xs rounded hover:bg-gray-500 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="text-sm text-muted-foreground font-mono">
+                {localTextContent}
+              </div>
+              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => {
+                    setEditingContent(localTextContent)
+                    setIsEditing(true)
+                  }}
+                  className="p-1 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-100 rounded transition-colors"
+                  title="Edit system message"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     )

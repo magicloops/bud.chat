@@ -71,6 +71,7 @@ export async function getConversationEvents(conversationId: string): Promise<Eve
     throw new Error(`Failed to get conversation events: ${error.message}`);
   }
   
+  
   // Convert database events to events
   return data.map(dbEvent => ({
     id: dbEvent.id,

@@ -596,24 +596,26 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </Select>
               </div>
 
-              {/* AI Goals / Instructions */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label htmlFor="ai-goals" className="text-sm font-medium">
-                    AI Goals / Instructions
-                  </label>
+              {/* AI Goals / Instructions - only show in bud mode */}
+              {panelMode === 'bud' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="ai-goals" className="text-sm font-medium">
+                      AI Goals / Instructions
+                    </label>
+                  </div>
+                  <Textarea
+                    id="ai-goals"
+                    placeholder="Your Bud's goal, personality, and info it needs. (Recommended)"
+                    className="min-h-[100px]"
+                    value={systemPrompt}
+                    onChange={(e) => {
+                      setSystemPrompt(e.target.value)
+                      handleFieldChange('systemPrompt', e.target.value)
+                    }}
+                  />
                 </div>
-                <Textarea
-                  id="ai-goals"
-                  placeholder="Your Bud's goal, personality, and info it needs. (Recommended)"
-                  className="min-h-[100px]"
-                  value={systemPrompt}
-                  onChange={(e) => {
-                    setSystemPrompt(e.target.value)
-                    handleFieldChange('systemPrompt', e.target.value)
-                  }}
-                />
-              </div>
+              )}
           </div>
 
           {/* MCP Configuration */}

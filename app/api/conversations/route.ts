@@ -140,7 +140,10 @@ export async function POST(request: NextRequest) {
     if (systemPrompt) {
       try {
         const systemEvent = createTextEvent('system', systemPrompt)
-        await saveEvent(conversation.id, systemEvent, 'a0')
+        await saveEvent(systemEvent, {
+          conversationId: conversation.id,
+          orderKey: 'a0'
+        })
       } catch (systemEventError) {
         console.error('Error creating system event:', systemEventError)
         // Don't fail the conversation creation for this
@@ -155,7 +158,10 @@ export async function POST(request: NextRequest) {
         try {
           const orderKey = generateKeyBetween(lastOrderKey, null)
           const event = createTextEvent(message.role, message.content)
-          await saveEvent(conversation.id, event, orderKey)
+          await saveEvent(event, {
+            conversationId: conversation.id,
+            orderKey: orderKey
+          })
           lastOrderKey = orderKey
         } catch (eventError) {
           console.error(`Error creating initial event:`, eventError)

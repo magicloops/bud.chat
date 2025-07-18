@@ -126,12 +126,29 @@ export class EventLog {
     throw new Error(`Unsupported provider: ${provider}`);
   }
 
+  // Get system parameter for Anthropic API (first event only, if it's a system message)
+  getSystemParameter(): string {
+    if (this.events.length === 0) return '';
+    
+    const firstEvent = this.events[0];
+    if (firstEvent.role === 'system') {
+      for (const segment of firstEvent.segments) {
+        if (segment.type === 'text' && segment.text && segment.text.trim()) {
+          return segment.text.trim();
+        }
+      }
+    }
+    return '';
+  }
+
   private toAnthropicMessages(): any[] {
     const messages: any[] = [];
     
-    for (const event of this.events) {
-      if (event.role === 'system') {
-        // System messages are handled separately in Anthropic
+    for (let i = 0; i < this.events.length; i++) {
+      const event = this.events[i];
+      
+      if (i === 0 && event.role === 'system') {
+        // First event is a system message, skip it (becomes system parameter)
         continue;
       }
 

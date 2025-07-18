@@ -48,6 +48,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   // Load conversation data into store when received from server
   useEffect(() => {
     if (conversationData && (!existingConversation || existingConversation.events.length === 0)) {
+      
       const conversationMeta: ConversationMeta = {
         id: conversationData.id,
         title: conversationData.title || 'Chat',
