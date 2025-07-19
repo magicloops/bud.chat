@@ -13,7 +13,7 @@ import {
   useSetWorkspaces, 
   useSetWorkspacesLoading 
 } from '@/state/workspaceStore';
-import { Plus, PanelLeftClose, PanelLeft, Settings } from 'lucide-react';
+import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getRandomHeaderFont } from '@/lib/fontRotation';
 
@@ -98,11 +98,6 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     router.push('/');
   };
 
-  const handleManageBuds = () => {
-    if (selectedWorkspaceId) {
-      router.push(`/workspace/${selectedWorkspaceId}/buds`);
-    }
-  };
 
   const toggleSidebar = () => {
     onClose();
@@ -125,14 +120,6 @@ export function Sidebar({ className, onClose }: SidebarProps) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleNewConversation}
-              className="h-8 w-8"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
               onClick={toggleSidebar}
               className="h-8 w-8"
             >
@@ -141,23 +128,22 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           </div>
         </div>
 
+        {/* New Chat Button */}
+        <div className="mb-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNewConversation}
+            className="w-full justify-start"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Chat
+          </Button>
+        </div>
+
         {/* Workspace Selector */}
         <WorkspaceSelector />
 
-        {/* Workspace Actions */}
-        {selectedWorkspaceId && (
-          <div className="mt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleManageBuds}
-              className="w-full justify-start"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Manage Buds
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Conversations - Constrained scroll area */}

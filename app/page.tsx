@@ -77,13 +77,8 @@ export default function HomePage() {
 
       {/* Main Welcome Area */}
       <div className="flex-1 flex flex-col border-l min-w-0">
-        {/* Header */}
-        <div className="flex items-center justify-center p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 relative">
-          <span className="font-medium">Welcome to bud.chat</span>
-        </div>
-
         {/* Main Content */}
-        <div className="flex-1">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {selectedWorkspace ? (
             // Show Bud selection grid when workspace is selected
             <BudSelectionGrid workspaceId={selectedWorkspace} />

@@ -95,14 +95,30 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="p-6 border-b bg-background/95 backdrop-blur">
-        <div className="mb-4">
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Sparkles className="h-6 w-6 text-primary" />
-            Choose Your Bud
-          </h1>
-          <p className="text-muted-foreground">
-            Select an AI assistant to start a conversation, or create a new one.
-          </p>
+        {/* Title and Stats Row */}
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-semibold flex items-center gap-2">
+              <Sparkles className="h-6 w-6 text-primary" />
+              Choose Your Bud
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Select an AI assistant to start a conversation, or create a new one.
+            </p>
+          </div>
+          
+          {/* Stats on the right */}
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>{buds.length} total buds</span>
+            {searchQuery && (
+              <span>{filteredBuds.length} matching search</span>
+            )}
+            {selectedModel && (
+              <Badge variant="secondary" className="text-xs">
+                {selectedModel}
+              </Badge>
+            )}
+          </div>
         </div>
 
         {/* Search and Filters */}
@@ -131,23 +147,10 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
             </select>
           </div>
         </div>
-
-        {/* Stats */}
-        <div className="flex items-center gap-4 mt-4 text-sm text-muted-foreground">
-          <span>{buds.length} total buds</span>
-          {searchQuery && (
-            <span>{filteredBuds.length} matching search</span>
-          )}
-          {selectedModel && (
-            <Badge variant="secondary" className="text-xs">
-              {selectedModel}
-            </Badge>
-          )}
-        </div>
       </div>
 
       {/* Grid Content */}
-      <div className="flex-1 p-6 overflow-y-auto">
+      <div className="flex-1 min-h-0 p-6 overflow-y-auto">
         {loading ? (
           // Loading skeletons
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

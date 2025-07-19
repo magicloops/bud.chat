@@ -18,11 +18,12 @@ import {
   ChevronUp,
   Moon,
   Sun,
-  Palette
+  Palette,
+  Cog
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { useConversation } from '@/state/eventChatStore';
+import { useConversation, useSelectedWorkspace } from '@/state/eventChatStore';
 import { useBud } from '@/state/budStore';
 
 export function UserMenu() {
@@ -66,6 +67,14 @@ export function UserMenu() {
     console.log('Open profile');
   };
 
+  const selectedWorkspaceId = useSelectedWorkspace();
+  
+  const handleManageBuds = () => {
+    if (selectedWorkspaceId) {
+      router.push(`/workspace/${selectedWorkspaceId}/buds`);
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -88,6 +97,12 @@ export function UserMenu() {
           <Settings className="h-4 w-4 mr-2" />
             Settings
         </DropdownMenuItem>
+        {selectedWorkspaceId && (
+          <DropdownMenuItem onClick={handleManageBuds}>
+            <Cog className="h-4 w-4 mr-2" />
+            Manage Buds
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={hasCustomTheme ? undefined : toggleTheme} className={hasCustomTheme ? 'opacity-50 cursor-not-allowed' : ''}>
           {hasCustomTheme ? (
