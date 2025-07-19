@@ -1,63 +1,63 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import { useWorkspaces, useSetWorkspaces } from '@/state/workspaceStore'
-import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useEventChatStore } from '@/state/eventChatStore'
-import { Building2, Plus } from 'lucide-react'
-import { useRouter } from 'next/navigation'
-import { NewWorkspaceModal } from './NewWorkspaceModal'
+} from '@/components/ui/select';
+import { useWorkspaces, useSetWorkspaces } from '@/state/workspaceStore';
+import { useSelectedWorkspace, useSetSelectedWorkspace, useConversations, useEventChatStore } from '@/state/eventChatStore';
+import { Building2, Plus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { NewWorkspaceModal } from './NewWorkspaceModal';
 
 export function WorkspaceSelector() {
-  const router = useRouter()
-  const workspaces = useWorkspaces()
-  const setWorkspaces = useSetWorkspaces()
-  const selectedWorkspaceId = useSelectedWorkspace()
-  const setSelectedWorkspace = useSetSelectedWorkspace()
-  const conversationsRecord = useConversations()
-  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false)
+  const router = useRouter();
+  const workspaces = useWorkspaces();
+  const setWorkspaces = useSetWorkspaces();
+  const selectedWorkspaceId = useSelectedWorkspace();
+  const setSelectedWorkspace = useSetSelectedWorkspace();
+  const conversationsRecord = useConversations();
+  const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
 
-  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
+  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId);
 
   const handleWorkspaceChange = (workspaceId: string) => {
     // Handle "new-workspace" special case
     if (workspaceId === 'new-workspace') {
-      setShowNewWorkspaceModal(true)
-      return
+      setShowNewWorkspaceModal(true);
+      return;
     }
     
-    setSelectedWorkspace(workspaceId)
+    setSelectedWorkspace(workspaceId);
     // Save to localStorage for persistence
-    localStorage.setItem('lastSelectedWorkspaceId', workspaceId)
+    localStorage.setItem('lastSelectedWorkspaceId', workspaceId);
     
     // Get workspace conversations directly from store
-    const storeState = useEventChatStore.getState()
-    const workspaceConversationIds = storeState.workspaceConversations[workspaceId]
+    const storeState = useEventChatStore.getState();
+    const workspaceConversationIds = storeState.workspaceConversations[workspaceId];
     
     if (workspaceConversationIds && workspaceConversationIds.length > 0) {
       // Find the most recent conversation by created_at
       const workspaceConversations = workspaceConversationIds
         .map(id => storeState.conversations[id])
         .filter(Boolean)
-        .sort((a, b) => new Date(b.meta.created_at).getTime() - new Date(a.meta.created_at).getTime())
+        .sort((a, b) => new Date(b.meta.created_at).getTime() - new Date(a.meta.created_at).getTime());
       
       if (workspaceConversations.length > 0) {
-        const mostRecentConversation = workspaceConversations[0]
-        router.push(`/chat/${mostRecentConversation.id}`)
-        return
+        const mostRecentConversation = workspaceConversations[0];
+        router.push(`/chat/${mostRecentConversation.id}`);
+        return;
       }
     }
     
     // Fall back to home route to select a bud if no conversations exist
-    router.push('/')
-  }
+    router.push('/');
+  };
 
   const handleCreateWorkspace = async (name: string) => {
     try {
@@ -69,30 +69,30 @@ export function WorkspaceSelector() {
         body: JSON.stringify({
           name,
         }),
-      })
+      });
 
       if (response.ok) {
-        const newWorkspace = await response.json()
+        const newWorkspace = await response.json();
         
         // Update the workspaces in the store
-        const updatedWorkspaces = [...workspaces, newWorkspace]
-        setWorkspaces(updatedWorkspaces)
+        const updatedWorkspaces = [...workspaces, newWorkspace];
+        setWorkspaces(updatedWorkspaces);
         
         // Switch to the new workspace
-        setSelectedWorkspace(newWorkspace.id)
-        localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id)
+        setSelectedWorkspace(newWorkspace.id);
+        localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id);
         
         // Navigate to home route to select a bud in the new workspace
-        router.push('/')
+        router.push('/');
       } else {
-        console.error('Failed to create workspace')
-        throw new Error('Failed to create workspace')
+        console.error('Failed to create workspace');
+        throw new Error('Failed to create workspace');
       }
     } catch (error) {
-      console.error('Error creating workspace:', error)
-      throw error
+      console.error('Error creating workspace:', error);
+      throw error;
     }
-  }
+  };
 
   if (workspaces.length === 0) {
     return (
@@ -111,7 +111,7 @@ export function WorkspaceSelector() {
           onCreateWorkspace={handleCreateWorkspace}
         />
       </>
-    )
+    );
   }
 
   return (
@@ -154,5 +154,5 @@ export function WorkspaceSelector() {
         onCreateWorkspace={handleCreateWorkspace}
       />
     </>
-  )
+  );
 }

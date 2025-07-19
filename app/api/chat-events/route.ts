@@ -1,24 +1,24 @@
 // Event-based chat API - vendor-agnostic implementation
 
-import { createClient } from '@/lib/supabase/server'
-import { NextRequest } from 'next/server'
-import { EventStreamBuilder } from '@/lib/streaming/eventBuilder'
-import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events'
-import { saveEvent, getConversationEvents } from '@/lib/db/events'
-import { eventsToAnthropicMessages, anthropicStreamDeltaToEvent, extractPendingToolCalls } from '@/lib/providers/anthropic'
-import { eventsToOpenAIMessages, openaiStreamDeltaToEvent } from '@/lib/providers/openai'
-import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
-import { generateKeyBetween } from 'fractional-indexing'
-import OpenAI from 'openai'
-import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest } from 'next/server';
+import { EventStreamBuilder } from '@/lib/streaming/eventBuilder';
+import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events';
+import { saveEvent, getConversationEvents } from '@/lib/db/events';
+import { eventsToAnthropicMessages, anthropicStreamDeltaToEvent, extractPendingToolCalls } from '@/lib/providers/anthropic';
+import { eventsToOpenAIMessages, openaiStreamDeltaToEvent } from '@/lib/providers/openai';
+import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
+import { generateKeyBetween } from 'fractional-indexing';
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
-})
+});
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
-})
+});
 
 // Helper function to create conversation in background
 async function createConversationInBackground(
@@ -26,22 +26,22 @@ async function createConversationInBackground(
   workspaceId: string,
   budId?: string
 ): Promise<{ conversationId: string; bud?: any }> {
-  const supabase = await createClient()
+  const supabase = await createClient();
   
   try {
-    console.log('💾 Creating conversation in background...')
+    console.log('💾 Creating conversation in background...');
     
     // Fetch bud if budId is provided
-    let bud = null
+    let bud = null;
     if (budId) {
       const { data, error } = await supabase
         .from('buds')
         .select('*')
         .eq('id', budId)
-        .single()
+        .single();
       
       if (data && !error) {
-        bud = data
+        bud = data;
       }
     }
     
@@ -54,19 +54,19 @@ async function createConversationInBackground(
         created_at: new Date().toISOString()
       })
       .select()
-      .single()
+      .single();
 
     if (convError || !conversation) {
-      throw new Error('Failed to create conversation')
+      throw new Error('Failed to create conversation');
     }
 
     // Save all events to database
-    const eventInserts = []
-    let previousOrderKey: string | null = null
+    const eventInserts = [];
+    let previousOrderKey: string | null = null;
     
     for (const event of events) {
-      const orderKey = generateKeyBetween(previousOrderKey, null)
-      previousOrderKey = orderKey
+      const orderKey = generateKeyBetween(previousOrderKey, null);
+      previousOrderKey = orderKey;
       
       eventInserts.push({
         id: event.id,
@@ -76,25 +76,25 @@ async function createConversationInBackground(
         ts: event.ts,
         order_key: orderKey,
         created_at: new Date().toISOString()
-      })
+      });
     }
 
     if (eventInserts.length > 0) {
       const { error: eventsError } = await supabase
         .from('events')
-        .insert(eventInserts)
+        .insert(eventInserts);
 
       if (eventsError) {
-        console.error('❌ Error saving events:', eventsError)
-        throw new Error('Failed to save events')
+        console.error('❌ Error saving events:', eventsError);
+        throw new Error('Failed to save events');
       }
     }
 
-    console.log('✅ Conversation and events created:', conversation.id)
-    return { conversationId: conversation.id, bud }
+    console.log('✅ Conversation and events created:', conversation.id);
+    return { conversationId: conversation.id, bud };
   } catch (error) {
-    console.error('❌ Background conversation creation failed:', error)
-    throw error
+    console.error('❌ Background conversation creation failed:', error);
+    throw error;
   }
 }
 
@@ -104,7 +104,7 @@ async function executeMCPToolCalls(
   workspaceId: string,
   budId?: string
 ): Promise<Array<{ id: string; output: object; error?: string }>> {
-  const results = []
+  const results = [];
   
   if (!budId) {
     // No MCP configuration available
@@ -112,21 +112,21 @@ async function executeMCPToolCalls(
       id: call.id,
       output: { error: 'No MCP configuration available' },
       error: 'No MCP configuration available'
-    }))
+    }));
   }
 
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
     
     // Get bud and MCP configuration
     const { data: bud, error: budError } = await supabase
       .from('buds')
       .select('*, mcp_config')
       .eq('id', budId)
-      .single()
+      .single();
 
     if (!bud || budError || !bud.mcp_config?.servers?.length) {
-      throw new Error('No MCP servers configured')
+      throw new Error('No MCP servers configured');
     }
 
     // Get MCP servers
@@ -134,25 +134,25 @@ async function executeMCPToolCalls(
       .from('mcp_servers')
       .select('*')
       .in('id', bud.mcp_config.servers)
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', workspaceId);
 
     if (!servers || serversError || servers.length === 0) {
-      throw new Error('No MCP servers found')
+      throw new Error('No MCP servers found');
     }
 
     // Connect to MCP server
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
     
-    const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
+    const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
     const mcpClient = new Client({
-      name: "bud-chat-events-client",
-      version: "1.0.0"
+      name: 'bud-chat-events-client',
+      version: '1.0.0'
     }, {
       capabilities: { tools: {} }
-    })
+    });
     
-    await mcpClient.connect(transport)
+    await mcpClient.connect(transport);
     
     // Execute each tool call
     for (const toolCall of toolCalls) {
@@ -160,71 +160,71 @@ async function executeMCPToolCalls(
         const result = await mcpClient.callTool({
           name: toolCall.name,
           arguments: toolCall.args || {}
-        })
+        });
         
         // Process result content
-        let output = result.content
+        let output = result.content;
         if (Array.isArray(output)) {
           output = output.map(block => 
             block.type === 'text' ? block.text : JSON.stringify(block)
-          ).join('\n')
+          ).join('\n');
         }
         
         results.push({
           id: toolCall.id,
           output: { content: output }
-        })
+        });
       } catch (toolError) {
-        console.error('❌ Tool execution failed:', toolError)
+        console.error('❌ Tool execution failed:', toolError);
         results.push({
           id: toolCall.id,
           output: { error: toolError.message },
           error: toolError.message
-        })
+        });
       }
     }
     
-    await mcpClient.close()
+    await mcpClient.close();
     
   } catch (error) {
-    console.error('❌ MCP execution failed:', error)
+    console.error('❌ MCP execution failed:', error);
     // Return error for all tool calls
     return toolCalls.map(call => ({
       id: call.id,
       output: { error: error.message },
       error: error.message
-    }))
+    }));
   }
   
-  return results
+  return results;
 }
 
 export async function POST(request: NextRequest) {
-  console.log('🚀 Event-based chat API called')
+  console.log('🚀 Event-based chat API called');
   
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
     
     // Get the authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json()
+    const body = await request.json();
     const { 
       messages, 
       workspaceId,
       budId,
       model = 'gpt-4o'
-    } = body
+    } = body;
 
     // Validate required fields
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return new Response('Messages are required', { status: 400 })
+      return new Response('Messages are required', { status: 400 });
     }
     if (!workspaceId) {
-      return new Response('Workspace ID is required', { status: 400 })
+      return new Response('Workspace ID is required', { status: 400 });
     }
 
     // Verify user has access to the workspace
@@ -233,26 +233,26 @@ export async function POST(request: NextRequest) {
       .select('workspace_id, role')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (membershipError || !membership) {
-      return new Response('Workspace not found or access denied', { status: 404 })
+      return new Response('Workspace not found or access denied', { status: 404 });
     }
 
     // Convert legacy messages to events
-    const eventLog = new EventLog()
+    const eventLog = new EventLog();
     
     // Add existing messages as events
     for (const message of messages) {
       if (message.role === 'system') {
-        eventLog.addEvent(createTextEvent('system', message.content))
+        eventLog.addEvent(createTextEvent('system', message.content));
       } else if (message.role === 'user') {
-        eventLog.addEvent(createTextEvent('user', message.content))
+        eventLog.addEvent(createTextEvent('user', message.content));
       } else if (message.role === 'assistant') {
         // Handle assistant messages with potential tool calls
-        const segments = []
+        const segments = [];
         if (message.content) {
-          segments.push({ type: 'text', text: message.content })
+          segments.push({ type: 'text', text: message.content });
         }
         if (message.json_meta?.tool_calls) {
           for (const toolCall of message.json_meta.tool_calls) {
@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
               id: toolCall.id,
               name: toolCall.function.name,
               args: JSON.parse(toolCall.function.arguments || '{}')
-            })
+            });
           }
         }
         if (segments.length > 0) {
@@ -270,112 +270,112 @@ export async function POST(request: NextRequest) {
             role: 'assistant',
             segments,
             ts: Date.now()
-          })
+          });
         }
       }
     }
 
     // Determine provider based on model
-    const isClaudeModelDetected = isClaudeModel(model)
-    const provider = isClaudeModelDetected ? 'anthropic' : 'openai'
-    const apiModelName = getApiModelName(model)
+    const isClaudeModelDetected = isClaudeModel(model);
+    const provider = isClaudeModelDetected ? 'anthropic' : 'openai';
+    const apiModelName = getApiModelName(model);
     
-    console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`)
+    console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`);
 
     // Create streaming response
-    const encoder = new TextEncoder()
+    const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const eventBuilder = new EventStreamBuilder('assistant')
-          let conversationId: string | null = null
+          const eventBuilder = new EventStreamBuilder('assistant');
+          let conversationId: string | null = null;
           
           // Main conversation loop - handles tool calls automatically
-          let maxIterations = 5 // Prevent infinite loops
-          let iteration = 0
+          let maxIterations = 5; // Prevent infinite loops
+          let iteration = 0;
           
           while (iteration < maxIterations) {
-            iteration++
-            console.log(`🔄 Conversation iteration ${iteration}`)
+            iteration++;
+            console.log(`🔄 Conversation iteration ${iteration}`);
             
             // Check if there are pending tool calls
-            const pendingToolCalls = eventLog.getUnresolvedToolCalls()
+            const pendingToolCalls = eventLog.getUnresolvedToolCalls();
             if (pendingToolCalls.length > 0) {
-              console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`)
+              console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`);
               
               // Execute all pending tool calls
               const toolResults = await executeMCPToolCalls(
                 pendingToolCalls,
                 workspaceId,
                 budId
-              )
+              );
               
               // Add tool results to event log
               for (const result of toolResults) {
-                eventLog.addEvent(createToolResultEvent(result.id, result.output))
+                eventLog.addEvent(createToolResultEvent(result.id, result.output));
                 
                 // Stream tool completion to user
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                  type: "tool_complete",
+                  type: 'tool_complete',
                   tool_id: result.id,
-                  content: result.error ? "❌ Tool failed" : "✅ Tool completed"
-                })}\n\n`))
+                  content: result.error ? '❌ Tool failed' : '✅ Tool completed'
+                })}\n\n`));
               }
               
               // Continue to next iteration to get follow-up response
-              continue
+              continue;
             }
             
             // No pending tool calls, get next response from LLM
-            const events = eventLog.getEvents()
+            const events = eventLog.getEvents();
             
             if (provider === 'anthropic') {
               // Use Anthropic
-              const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events)
+              const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events);
               
               // Get available tools if budId is provided
-              let tools = []
+              let tools = [];
               if (budId) {
                 try {
-                  const supabase = await createClient()
+                  const supabase = await createClient();
                   const { data: bud } = await supabase
                     .from('buds')
                     .select('*, mcp_config')
                     .eq('id', budId)
-                    .single()
+                    .single();
                   
                   if (bud?.mcp_config?.servers?.length) {
                     const { data: servers } = await supabase
                       .from('mcp_servers')
                       .select('*')
                       .in('id', bud.mcp_config.servers)
-                      .eq('workspace_id', workspaceId)
+                      .eq('workspace_id', workspaceId);
                     
                     if (servers?.length) {
                       // Connect to get tools
-                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
                       
-                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
                       const mcpClient = new Client({
-                        name: "bud-chat-tools-client",
-                        version: "1.0.0"
-                      }, { capabilities: { tools: {} } })
+                        name: 'bud-chat-tools-client',
+                        version: '1.0.0'
+                      }, { capabilities: { tools: {} } });
                       
-                      await mcpClient.connect(transport)
-                      const { tools: mcpTools } = await mcpClient.listTools()
+                      await mcpClient.connect(transport);
+                      const { tools: mcpTools } = await mcpClient.listTools();
                       
                       tools = mcpTools.map(tool => ({
                         name: tool.name,
                         description: tool.description,
                         input_schema: tool.inputSchema
-                      }))
+                      }));
                       
-                      await mcpClient.close()
+                      await mcpClient.close();
                     }
                   }
                 } catch (error) {
-                  console.warn('Failed to get tools:', error)
+                  console.warn('Failed to get tools:', error);
                 }
               }
               
@@ -387,127 +387,127 @@ export async function POST(request: NextRequest) {
                 stream: true,
                 ...(system && { system }),
                 ...(tools.length > 0 && { tools })
-              }
+              };
               
-              const stream = await anthropic.messages.stream(request)
+              const stream = await anthropic.messages.stream(request);
               
               for await (const event of stream) {
-                const { event: currentEvent, isComplete } = anthropicStreamDeltaToEvent(event, eventBuilder.getCurrentEvent())
+                const { event: currentEvent, isComplete } = anthropicStreamDeltaToEvent(event, eventBuilder.getCurrentEvent());
                 
                 if (currentEvent) {
-                  eventBuilder.reset('assistant', currentEvent.id)
+                  eventBuilder.reset('assistant', currentEvent.id);
                   // Update builder with current event state
                   for (const segment of currentEvent.segments) {
                     if (segment.type === 'text') {
-                      eventBuilder.addTextChunk(segment.text)
+                      eventBuilder.addTextChunk(segment.text);
                     } else if (segment.type === 'tool_call') {
-                      eventBuilder.addToolCall(segment.id, segment.name, segment.args)
+                      eventBuilder.addToolCall(segment.id, segment.name, segment.args);
                       
                       // Stream tool call start
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: "tool_start",
+                        type: 'tool_start',
                         tool_id: segment.id,
                         tool_name: segment.name,
                         content: `🔧 *Using tool: ${segment.name}*\n`
-                      })}\n\n`))
+                      })}\n\n`));
                     }
                   }
                   
                   // Stream text content
-                  const textSegments = currentEvent.segments.filter(s => s.type === 'text')
+                  const textSegments = currentEvent.segments.filter(s => s.type === 'text');
                   for (const segment of textSegments) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: "token",
+                      type: 'token',
                       content: segment.text
-                    })}\n\n`))
+                    })}\n\n`));
                   }
                 }
                 
                 if (isComplete) {
-                  const finalEvent = eventBuilder.finalize()
-                  eventLog.addEvent(finalEvent)
+                  const finalEvent = eventBuilder.finalize();
+                  eventLog.addEvent(finalEvent);
                   
                   // If no tool calls, we're done
                   if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                    iteration = maxIterations // Exit loop
+                    iteration = maxIterations; // Exit loop
                   }
-                  break
+                  break;
                 }
               }
               
             } else {
               // Use OpenAI
-              const openaiMessages = eventsToOpenAIMessages(events)
+              const openaiMessages = eventsToOpenAIMessages(events);
               
               const stream = await openai.chat.completions.create({
                 model: apiModelName,
                 messages: openaiMessages,
                 temperature: 0.7,
                 stream: true
-              })
+              });
               
               for await (const chunk of stream) {
-                const activeToolCalls = new Map()
+                const activeToolCalls = new Map();
                 const { event: currentEvent, isComplete } = openaiStreamDeltaToEvent(
                   chunk, 
                   eventBuilder.getCurrentEvent(), 
                   activeToolCalls
-                )
+                );
                 
                 if (currentEvent) {
                   // Stream text content
-                  const textSegments = currentEvent.segments.filter(s => s.type === 'text')
+                  const textSegments = currentEvent.segments.filter(s => s.type === 'text');
                   for (const segment of textSegments) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: "token",
+                      type: 'token',
                       content: segment.text
-                    })}\n\n`))
+                    })}\n\n`));
                   }
                   
                   // Stream tool calls
-                  const toolCalls = currentEvent.segments.filter(s => s.type === 'tool_call')
+                  const toolCalls = currentEvent.segments.filter(s => s.type === 'tool_call');
                   for (const segment of toolCalls) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: "tool_start",
+                      type: 'tool_start',
                       tool_id: segment.id,
                       tool_name: segment.name,
                       content: `🔧 *Using tool: ${segment.name}*\n`
-                    })}\n\n`))
+                    })}\n\n`));
                   }
                 }
                 
                 if (isComplete) {
-                  const finalEvent = eventBuilder.finalize()
-                  eventLog.addEvent(finalEvent)
+                  const finalEvent = eventBuilder.finalize();
+                  eventLog.addEvent(finalEvent);
                   
                   // If no tool calls, we're done
                   if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                    iteration = maxIterations // Exit loop
+                    iteration = maxIterations; // Exit loop
                   }
-                  break
+                  break;
                 }
               }
             }
             
             // Reset builder for next iteration
-            eventBuilder.reset('assistant')
+            eventBuilder.reset('assistant');
           }
           
           // Create conversation in background
-          const allEvents = eventLog.getEvents()
+          const allEvents = eventLog.getEvents();
           const conversationResult = await createConversationInBackground(
             allEvents,
             workspaceId,
             budId
-          )
+          );
           
-          conversationId = conversationResult.conversationId
+          conversationId = conversationResult.conversationId;
           
           // Send conversation created event
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: "conversationCreated",
+            type: 'conversationCreated',
             conversationId
-          })}\n\n`))
+          })}\n\n`));
           
           // Send completion event
           const finalContent = allEvents
@@ -515,25 +515,25 @@ export async function POST(request: NextRequest) {
             .flatMap(e => e.segments)
             .filter(s => s.type === 'text')
             .map(s => s.text)
-            .join('')
+            .join('');
           
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: "complete",
+            type: 'complete',
             content: finalContent
-          })}\n\n`))
+          })}\n\n`));
           
-          controller.close()
+          controller.close();
           
         } catch (error) {
-          console.error('❌ Streaming error:', error)
+          console.error('❌ Streaming error:', error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: "error",
+            type: 'error',
             error: error.message
-          })}\n\n`))
-          controller.close()
+          })}\n\n`));
+          controller.close();
         }
       }
-    })
+    });
 
     return new Response(stream, {
       headers: {
@@ -541,13 +541,13 @@ export async function POST(request: NextRequest) {
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
       },
-    })
+    });
 
   } catch (error) {
-    console.error('❌ Chat API error:', error)
+    console.error('❌ Chat API error:', error);
     return new Response(
       JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+    );
   }
 }

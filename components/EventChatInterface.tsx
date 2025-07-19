@@ -1,11 +1,11 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   Send, 
   Square, 
@@ -13,11 +13,11 @@ import {
   Trash2,
   AlertCircle,
   Loader2
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { useEventChat } from '@/hooks/useEventChat'
-import EventStream from './EventStream'
-import { Event } from '@/lib/types/events'
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useEventChat } from '@/hooks/useEventChat';
+import EventStream from './EventStream';
+import { Event } from '@/lib/types/events';
 
 interface EventChatInterfaceProps {
   workspaceId: string
@@ -34,12 +34,12 @@ export default function EventChatInterface({
   budId,
   model = 'gpt-4o',
   initialEvents = [],
-  placeholder = "Type your message...",
+  placeholder = 'Type your message...',
   onConversationCreated,
   className
 }: EventChatInterfaceProps) {
-  const [input, setInput] = useState('')
-  const [isInputFocused, setIsInputFocused] = useState(false)
+  const [input, setInput] = useState('');
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
   const {
     events,
@@ -57,52 +57,52 @@ export default function EventChatInterface({
     model,
     onConversationCreated,
     onError: (error) => console.error('Chat error:', error)
-  })
+  });
 
   // Add initial events on mount
   useEffect(() => {
     if (initialEvents.length > 0) {
       for (const event of initialEvents) {
         if (event.role === 'system') {
-          const systemContent = event.segments.find(s => s.type === 'text')?.text
+          const systemContent = event.segments.find(s => s.type === 'text')?.text;
           if (systemContent) {
-            addSystemMessage(systemContent)
+            addSystemMessage(systemContent);
           }
         }
       }
     }
-  }, [initialEvents, addSystemMessage])
+  }, [initialEvents, addSystemMessage]);
 
   const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (input.trim() && !isStreaming) {
-      sendMessage(input.trim())
-      setInput('')
+      sendMessage(input.trim());
+      setInput('');
     }
-  }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit(e)
+      e.preventDefault();
+      handleSubmit(e);
     }
-  }
+  };
 
   const handleStop = () => {
-    stopStreaming()
-  }
+    stopStreaming();
+  };
 
   const handleClear = () => {
-    clearEvents()
-    setInput('')
-  }
+    clearEvents();
+    setInput('');
+  };
 
   const handleRetry = () => {
-    retry()
-  }
+    retry();
+  };
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
+    <div className={cn('flex flex-col h-full', className)}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b">
         <div className="flex items-center gap-2">
@@ -185,8 +185,8 @@ export default function EventChatInterface({
               onBlur={() => setIsInputFocused(false)}
               placeholder={placeholder}
               className={cn(
-                "min-h-[60px] pr-12 resize-none",
-                isInputFocused && "ring-2 ring-blue-500"
+                'min-h-[60px] pr-12 resize-none',
+                isInputFocused && 'ring-2 ring-blue-500'
               )}
               disabled={isStreaming}
             />
@@ -240,7 +240,7 @@ export default function EventChatInterface({
         </form>
       </div>
     </div>
-  )
+  );
 }
 
 // Wrapper component for easier integration
@@ -252,7 +252,7 @@ export function EventChatPage({
   className
 }: Omit<EventChatInterfaceProps, 'initialEvents'>) {
   return (
-    <Card className={cn("h-full", className)}>
+    <Card className={cn('h-full', className)}>
       <EventChatInterface
         workspaceId={workspaceId}
         budId={budId}
@@ -261,5 +261,5 @@ export function EventChatPage({
         className="h-full"
       />
     </Card>
-  )
+  );
 }

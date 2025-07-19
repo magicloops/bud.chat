@@ -19,9 +19,9 @@ const HEADER_FONTS: HeaderFontConfig[] = [
   { fontFamily: 'Fleur De Leah', text: 'Bud.Chat', className: 'text-2xl font-semibold' },
   { fontFamily: 'Permanent Marker', text: 'bud.chat', className: 'text-2xl font-semibold' },
   { fontFamily: 'Seaweed Script', text: 'bud.chat', className: 'text-3xl font-semibold' }
-]
+];
 
 export function getRandomHeaderFont(): HeaderFontConfig {
-  const randomIndex = Math.floor(Math.random() * HEADER_FONTS.length)
-  return HEADER_FONTS[randomIndex]
+  const randomIndex = Math.floor(Math.random() * HEADER_FONTS.length);
+  return HEADER_FONTS[randomIndex];
 }

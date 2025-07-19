@@ -1,50 +1,50 @@
 #!/usr/bin/env node
 
 // Create a test bud with Claude model and MCP configuration
-import { createClient } from '@supabase/supabase-js'
-import { config } from 'dotenv'
-import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
+import { createClient } from '@supabase/supabase-js';
+import { config } from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 // Load environment variables
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-config({ path: join(__dirname, '..', '.env.local') })
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+config({ path: join(__dirname, '..', '.env.local') });
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey)
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 const createClaudeMCPBud = async () => {
-  console.log('🔧 Creating Claude MCP test bud...')
+  console.log('🔧 Creating Claude MCP test bud...');
 
   try {
     // Get the workspace ID (assuming we're using the first workspace)
     const { data: workspaces, error: workspaceError } = await supabase
       .from('workspaces')
       .select('id')
-      .limit(1)
+      .limit(1);
 
     if (workspaceError || !workspaces || workspaces.length === 0) {
-      console.error('❌ Could not find a workspace')
-      return
+      console.error('❌ Could not find a workspace');
+      return;
     }
 
-    const workspaceId = workspaces[0].id
+    const workspaceId = workspaces[0].id;
 
     // Get the user ID (assuming we're using the first user)
     const { data: users, error: userError } = await supabase
       .from('users')
       .select('id')
-      .limit(1)
+      .limit(1);
 
     if (userError || !users || users.length === 0) {
-      console.error('❌ Could not find a user')
-      return
+      console.error('❌ Could not find a user');
+      return;
     }
 
-    const userId = users[0].id
+    const userId = users[0].id;
 
     // Get the DeepWiki MCP server ID
     const { data: mcpServers, error: mcpError } = await supabase
@@ -52,14 +52,14 @@ const createClaudeMCPBud = async () => {
       .select('id')
       .eq('name', 'DeepWiki')
       .eq('workspace_id', workspaceId)
-      .single()
+      .single();
 
     if (mcpError || !mcpServers) {
-      console.error('❌ Could not find DeepWiki MCP server')
-      return
+      console.error('❌ Could not find DeepWiki MCP server');
+      return;
     }
 
-    const mcpServerId = mcpServers.id
+    const mcpServerId = mcpServers.id;
 
     // Create the Claude MCP bud
     const claudeBud = {
@@ -89,30 +89,30 @@ const createClaudeMCPBud = async () => {
       mcp_config: {
         servers: [mcpServerId]
       }
-    }
+    };
 
     const { data: bud, error: budError } = await supabase
       .from('buds')
       .insert(claudeBud)
       .select()
-      .single()
+      .single();
 
     if (budError) {
-      console.error('❌ Error creating Claude MCP bud:', budError)
-      return
+      console.error('❌ Error creating Claude MCP bud:', budError);
+      return;
     }
 
-    console.log('✅ Claude MCP bud created successfully!')
-    console.log('📋 Bud details:')
-    console.log(`  - ID: ${bud.id}`)
-    console.log(`  - Name: ${bud.name}`)
-    console.log(`  - Model: ${bud.default_json.model}`)
-    console.log(`  - MCP Servers: ${bud.mcp_config.servers.length}`)
-    console.log(`  - Test URL: http://localhost:3000/new?bud=${bud.id}`)
+    console.log('✅ Claude MCP bud created successfully!');
+    console.log('📋 Bud details:');
+    console.log(`  - ID: ${bud.id}`);
+    console.log(`  - Name: ${bud.name}`);
+    console.log(`  - Model: ${bud.default_json.model}`);
+    console.log(`  - MCP Servers: ${bud.mcp_config.servers.length}`);
+    console.log(`  - Test URL: http://localhost:3000/new?bud=${bud.id}`);
 
   } catch (error) {
-    console.error('❌ Error creating Claude MCP bud:', error)
+    console.error('❌ Error creating Claude MCP bud:', error);
   }
-}
+};
 
-createClaudeMCPBud()
+createClaudeMCPBud();

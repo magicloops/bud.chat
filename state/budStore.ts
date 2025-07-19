@@ -1,10 +1,10 @@
-import { create } from 'zustand'
-import { subscribeWithSelector } from 'zustand/middleware'
-import { persist } from 'zustand/middleware'
-import { immer } from 'zustand/middleware/immer'
-import { useMemo } from 'react'
-import { Bud } from '@/lib/types'
-import { budManager, CreateBudArgs, UpdateBudArgs } from '@/lib/budHelpers'
+import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
+import { useMemo } from 'react';
+import { Bud } from '@/lib/types';
+import { budManager, CreateBudArgs, UpdateBudArgs } from '@/lib/budHelpers';
 
 export interface BudStore {
   // Core data
@@ -70,35 +70,35 @@ export const useBudStore = create<BudStore>()(
         loadWorkspaceBuds: async (workspaceId: string) => {
           // Check if already loaded
           if (get().loadedWorkspaces.includes(workspaceId)) {
-            return
+            return;
           }
           
           set((state) => {
-            state.loading.workspace[workspaceId] = true
-            state.errors.workspace[workspaceId] = null
-          })
+            state.loading.workspace[workspaceId] = true;
+            state.errors.workspace[workspaceId] = null;
+          });
           
           try {
-            const buds = await budManager.getWorkspaceBuds(workspaceId)
+            const buds = await budManager.getWorkspaceBuds(workspaceId);
             
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud
-              })
+                state.buds[bud.id] = bud;
+              });
               
               // Store workspace -> bud ids mapping
-              state.workspaceBuds[workspaceId] = buds.map(b => b.id)
+              state.workspaceBuds[workspaceId] = buds.map(b => b.id);
               if (!state.loadedWorkspaces.includes(workspaceId)) {
-                state.loadedWorkspaces.push(workspaceId)
+                state.loadedWorkspaces.push(workspaceId);
               }
-              state.loading.workspace[workspaceId] = false
-            })
+              state.loading.workspace[workspaceId] = false;
+            });
           } catch (error) {
             set((state) => {
-              state.loading.workspace[workspaceId] = false
-              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds'
-            })
+              state.loading.workspace[workspaceId] = false;
+              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds';
+            });
           }
         },
         
@@ -106,144 +106,144 @@ export const useBudStore = create<BudStore>()(
         forceLoadWorkspaceBuds: async (workspaceId: string) => {
           set((state) => {
             // Remove from loaded workspaces to force reload
-            const index = state.loadedWorkspaces.indexOf(workspaceId)
+            const index = state.loadedWorkspaces.indexOf(workspaceId);
             if (index > -1) {
-              state.loadedWorkspaces.splice(index, 1)
+              state.loadedWorkspaces.splice(index, 1);
             }
-            state.loading.workspace[workspaceId] = true
-            state.errors.workspace[workspaceId] = null
-          })
+            state.loading.workspace[workspaceId] = true;
+            state.errors.workspace[workspaceId] = null;
+          });
           
           try {
-            const buds = await budManager.getWorkspaceBuds(workspaceId)
+            const buds = await budManager.getWorkspaceBuds(workspaceId);
             
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud
-              })
+                state.buds[bud.id] = bud;
+              });
               
               // Store workspace -> bud ids mapping
-              state.workspaceBuds[workspaceId] = buds.map(b => b.id)
+              state.workspaceBuds[workspaceId] = buds.map(b => b.id);
               if (!state.loadedWorkspaces.includes(workspaceId)) {
-                state.loadedWorkspaces.push(workspaceId)
+                state.loadedWorkspaces.push(workspaceId);
               }
-              state.loading.workspace[workspaceId] = false
-            })
+              state.loading.workspace[workspaceId] = false;
+            });
           } catch (error) {
             set((state) => {
-              state.loading.workspace[workspaceId] = false
-              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds'
-            })
+              state.loading.workspace[workspaceId] = false;
+              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds';
+            });
           }
         },
         
         // Create new bud
         createBud: async (args: CreateBudArgs) => {
           set((state) => {
-            state.loading.create = true
-            state.errors.create = null
-          })
+            state.loading.create = true;
+            state.errors.create = null;
+          });
           
           try {
-            const newBud = await budManager.createBud(args)
+            const newBud = await budManager.createBud(args);
             
             set((state) => {
               // Add to buds collection
-              state.buds[newBud.id] = newBud
+              state.buds[newBud.id] = newBud;
               
               // Add to workspace buds list
               if (!state.workspaceBuds[args.workspaceId]) {
-                state.workspaceBuds[args.workspaceId] = []
+                state.workspaceBuds[args.workspaceId] = [];
               }
-              state.workspaceBuds[args.workspaceId].unshift(newBud.id) // Add to beginning
+              state.workspaceBuds[args.workspaceId].unshift(newBud.id); // Add to beginning
               
-              state.loading.create = false
-            })
+              state.loading.create = false;
+            });
             
-            return newBud
+            return newBud;
           } catch (error) {
             set((state) => {
-              state.loading.create = false
-              state.errors.create = error instanceof Error ? error.message : 'Failed to create bud'
-            })
-            throw error
+              state.loading.create = false;
+              state.errors.create = error instanceof Error ? error.message : 'Failed to create bud';
+            });
+            throw error;
           }
         },
         
         // Update bud
         updateBud: async (budId: string, updates: UpdateBudArgs) => {
           set((state) => {
-            state.loading.update[budId] = true
-            state.errors.update[budId] = null
-          })
+            state.loading.update[budId] = true;
+            state.errors.update[budId] = null;
+          });
           
           try {
-            const updatedBud = await budManager.updateBud(budId, updates)
+            const updatedBud = await budManager.updateBud(budId, updates);
             
             set((state) => {
-              state.buds[budId] = updatedBud
-              state.loading.update[budId] = false
-            })
+              state.buds[budId] = updatedBud;
+              state.loading.update[budId] = false;
+            });
             
-            return updatedBud
+            return updatedBud;
           } catch (error) {
             set((state) => {
-              state.loading.update[budId] = false
-              state.errors.update[budId] = error instanceof Error ? error.message : 'Failed to update bud'
-            })
-            throw error
+              state.loading.update[budId] = false;
+              state.errors.update[budId] = error instanceof Error ? error.message : 'Failed to update bud';
+            });
+            throw error;
           }
         },
         
         // Delete bud
         deleteBud: async (budId: string) => {
-          const bud = get().buds[budId]
-          if (!bud) return
+          const bud = get().buds[budId];
+          if (!bud) return;
           
           set((state) => {
-            state.loading.delete[budId] = true
-            state.errors.delete[budId] = null
-          })
+            state.loading.delete[budId] = true;
+            state.errors.delete[budId] = null;
+          });
           
           try {
-            await budManager.deleteBud(budId)
+            await budManager.deleteBud(budId);
             
             set((state) => {
               // Remove from buds collection
-              delete state.buds[budId]
+              delete state.buds[budId];
               
               // Remove from workspace buds lists
               Object.keys(state.workspaceBuds).forEach(workspaceId => {
                 state.workspaceBuds[workspaceId] = state.workspaceBuds[workspaceId]
-                  .filter(id => id !== budId)
-              })
+                  .filter(id => id !== budId);
+              });
               
               // Clean up loading and error states
-              delete state.loading.update[budId]
-              delete state.loading.delete[budId]
-              delete state.errors.update[budId]
-              delete state.errors.delete[budId]
-            })
+              delete state.loading.update[budId];
+              delete state.loading.delete[budId];
+              delete state.errors.update[budId];
+              delete state.errors.delete[budId];
+            });
           } catch (error) {
             set((state) => {
-              state.loading.delete[budId] = false
-              state.errors.delete[budId] = error instanceof Error ? error.message : 'Failed to delete bud'
-            })
-            throw error
+              state.loading.delete[budId] = false;
+              state.errors.delete[budId] = error instanceof Error ? error.message : 'Failed to delete bud';
+            });
+            throw error;
           }
         },
         
         // Get single bud
         getBud: (budId: string) => {
-          return get().buds[budId]
+          return get().buds[budId];
         },
         
         // Get buds for workspace
         getWorkspaceBuds: (workspaceId: string) => {
-          const budIds = get().workspaceBuds[workspaceId] || []
-          const buds = get().buds
-          return budIds.map(id => buds[id]).filter(Boolean)
+          const budIds = get().workspaceBuds[workspaceId] || [];
+          const buds = get().buds;
+          return budIds.map(id => buds[id]).filter(Boolean);
         },
         
         // Clear all errors
@@ -253,17 +253,17 @@ export const useBudStore = create<BudStore>()(
             create: null,
             update: {},
             delete: {}
-          }
+          };
         }),
         
         // Clear workspace-specific error
         clearWorkspaceError: (workspaceId: string) => set((state) => {
-          state.errors.workspace[workspaceId] = null
+          state.errors.workspace[workspaceId] = null;
         }),
         
         // Clear bud-specific error
         clearBudError: (budId: string, type: 'update' | 'delete') => set((state) => {
-          state.errors[type][budId] = null
+          state.errors[type][budId] = null;
         })
       })),
       {
@@ -277,50 +277,50 @@ export const useBudStore = create<BudStore>()(
       }
     )
   )
-)
+);
 
 // Convenience hooks for specific data
 export const useBud = (budId: string) =>
-  useBudStore((state) => state.buds[budId])
+  useBudStore((state) => state.buds[budId]);
 
 export const useWorkspaceBuds = (workspaceId: string) => {
-  const budIds = useBudStore((state) => state.workspaceBuds[workspaceId])
-  const buds = useBudStore((state) => state.buds)
+  const budIds = useBudStore((state) => state.workspaceBuds[workspaceId]);
+  const buds = useBudStore((state) => state.buds);
   
   return useMemo(() => {
-    if (!budIds) return []
-    return budIds.map(id => buds[id]).filter(Boolean)
-  }, [budIds, buds])
-}
+    if (!budIds) return [];
+    return budIds.map(id => buds[id]).filter(Boolean);
+  }, [budIds, buds]);
+};
 
 export const useWorkspaceBudsLoading = (workspaceId: string) =>
-  useBudStore((state) => state.loading.workspace[workspaceId] || false)
+  useBudStore((state) => state.loading.workspace[workspaceId] || false);
 
 export const useWorkspaceBudsError = (workspaceId: string) =>
-  useBudStore((state) => state.errors.workspace[workspaceId])
+  useBudStore((state) => state.errors.workspace[workspaceId]);
 
 export const useBudCreateLoading = () =>
-  useBudStore((state) => state.loading.create)
+  useBudStore((state) => state.loading.create);
 
 export const useBudCreateError = () =>
-  useBudStore((state) => state.errors.create)
+  useBudStore((state) => state.errors.create);
 
 export const useBudUpdateLoading = (budId: string) =>
-  useBudStore((state) => state.loading.update[budId] || false)
+  useBudStore((state) => state.loading.update[budId] || false);
 
 export const useBudUpdateError = (budId: string) =>
-  useBudStore((state) => state.errors.update[budId])
+  useBudStore((state) => state.errors.update[budId]);
 
 export const useBudDeleteLoading = (budId: string) =>
-  useBudStore((state) => state.loading.delete[budId] || false)
+  useBudStore((state) => state.loading.delete[budId] || false);
 
 export const useBudDeleteError = (budId: string) =>
-  useBudStore((state) => state.errors.delete[budId])
+  useBudStore((state) => state.errors.delete[budId]);
 
 // Action hooks
-export const useLoadWorkspaceBuds = () => useBudStore((state) => state.loadWorkspaceBuds)
-export const useForceLoadWorkspaceBuds = () => useBudStore((state) => state.forceLoadWorkspaceBuds)
-export const useCreateBud = () => useBudStore((state) => state.createBud)
-export const useUpdateBud = () => useBudStore((state) => state.updateBud)
-export const useDeleteBud = () => useBudStore((state) => state.deleteBud)
-export const useClearBudErrors = () => useBudStore((state) => state.clearErrors)
+export const useLoadWorkspaceBuds = () => useBudStore((state) => state.loadWorkspaceBuds);
+export const useForceLoadWorkspaceBuds = () => useBudStore((state) => state.forceLoadWorkspaceBuds);
+export const useCreateBud = () => useBudStore((state) => state.createBud);
+export const useUpdateBud = () => useBudStore((state) => state.updateBud);
+export const useDeleteBud = () => useBudStore((state) => state.deleteBud);
+export const useClearBudErrors = () => useBudStore((state) => state.clearErrors);

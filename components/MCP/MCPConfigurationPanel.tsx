@@ -1,14 +1,14 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Separator } from '@/components/ui/separator'
-import { Badge } from '@/components/ui/badge'
-import { MCPServerList } from './MCPServerList'
-import { Wrench, Settings, Info } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
+import { MCPServerList } from './MCPServerList';
+import { Wrench, Settings, Info } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export interface MCPConfiguration {
   servers?: string[]
@@ -30,15 +30,15 @@ export function MCPConfigurationPanel({
   workspaceId,
   config = {},
   onChange,
-  title = "MCP Configuration",
-  description = "Configure Model Context Protocol tools for this resource",
+  title = 'MCP Configuration',
+  description = 'Configure Model Context Protocol tools for this resource',
   className
 }: MCPConfigurationPanelProps) {
-  const [selectedServers, setSelectedServers] = useState<string[]>(config.servers || [])
+  const [selectedServers, setSelectedServers] = useState<string[]>(config.servers || []);
   const [toolChoice, setToolChoice] = useState<string>(
     typeof config.tool_choice === 'string' ? config.tool_choice : 'auto'
-  )
-  const [disabledTools, setDisabledTools] = useState<string[]>(config.disabled_tools || [])
+  );
+  const [disabledTools, setDisabledTools] = useState<string[]>(config.disabled_tools || []);
 
   // Update parent when configuration changes
   useEffect(() => {
@@ -46,42 +46,42 @@ export function MCPConfigurationPanel({
       servers: selectedServers.length > 0 ? selectedServers : undefined,
       tool_choice: toolChoice as any,
       disabled_tools: disabledTools.length > 0 ? disabledTools : undefined
-    }
+    };
     
-    onChange?.(newConfig)
-  }, [selectedServers, toolChoice, disabledTools])
+    onChange?.(newConfig);
+  }, [selectedServers, toolChoice, disabledTools]);
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
     setSelectedServers(prev => {
       if (selected) {
-        return [...prev, serverId]
+        return [...prev, serverId];
       } else {
-        return prev.filter(id => id !== serverId)
+        return prev.filter(id => id !== serverId);
       }
-    })
-  }
+    });
+  };
 
   const handleToolToggle = (serverId: string, toolName: string, enabled: boolean) => {
-    const toolId = `${serverId}.${toolName}`
+    const toolId = `${serverId}.${toolName}`;
     
     setDisabledTools(prev => {
       if (enabled) {
         // Remove from disabled list
-        return prev.filter(id => id !== toolId && id !== toolName)
+        return prev.filter(id => id !== toolId && id !== toolName);
       } else {
         // Add to disabled list
-        return [...prev, toolId]
+        return [...prev, toolId];
       }
-    })
-  }
+    });
+  };
 
   const resetConfiguration = () => {
-    setSelectedServers([])
-    setToolChoice('auto')
-    setDisabledTools([])
-  }
+    setSelectedServers([]);
+    setToolChoice('auto');
+    setDisabledTools([]);
+  };
 
-  const hasConfiguration = selectedServers.length > 0 || disabledTools.length > 0
+  const hasConfiguration = selectedServers.length > 0 || disabledTools.length > 0;
 
   return (
     <div className={className}>
@@ -186,5 +186,5 @@ export function MCPConfigurationPanel({
         </div>
       </div>
     </div>
-  )
+  );
 }

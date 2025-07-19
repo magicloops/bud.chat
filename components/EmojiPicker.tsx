@@ -1,10 +1,10 @@
-'use client'
+'use client';
 
-import { useState, useMemo } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Search, Smile } from 'lucide-react'
+import { useState, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Search, Smile } from 'lucide-react';
 
 // Emoji data with searchable names and keywords
 const EMOJI_DATA = {
@@ -123,22 +123,22 @@ const EMOJI_DATA = {
     { emoji: '🏰', names: ['castle', 'palace', 'medieval'] },
     { emoji: '🗽', names: ['statue-of-liberty', 'new-york', 'freedom'] }
   ]
-}
+};
 
 // Extract all emojis and create search index
-const ALL_EMOJI_DATA = Object.values(EMOJI_DATA).flat()
+const ALL_EMOJI_DATA = Object.values(EMOJI_DATA).flat();
 const EMOJI_CATEGORIES = Object.fromEntries(
   Object.entries(EMOJI_DATA).map(([category, emojis]) => [
     category, 
     emojis.map(item => item.emoji)
   ])
-)
+);
 
 // Common/popular emojis to show first
 const POPULAR_EMOJIS = [
   '🤖', '😀', '😊', '🎉', '❤️', '👍', '🔥', '✨', '💡', '⭐',
   '🚀', '💻', '📚', '🎯', '🏆', '🎨', '🌟', '💎', '🧠', '👨‍💻'
-]
+];
 
 interface EmojiPickerProps {
   value?: string
@@ -146,31 +146,31 @@ interface EmojiPickerProps {
   placeholder?: string
 }
 
-export function EmojiPicker({ value, onSelect, placeholder = "Pick an emoji" }: EmojiPickerProps) {
-  const [open, setOpen] = useState(false)
-  const [search, setSearch] = useState('')
+export function EmojiPicker({ value, onSelect, placeholder = 'Pick an emoji' }: EmojiPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   // Filter emojis based on search
   const filteredEmojis = useMemo(() => {
     if (!search) {
-      return { 'Popular': POPULAR_EMOJIS, ...EMOJI_CATEGORIES }
+      return { 'Popular': POPULAR_EMOJIS, ...EMOJI_CATEGORIES };
     }
     
     // Search by emoji names and keywords
-    const searchLower = search.toLowerCase()
+    const searchLower = search.toLowerCase();
     const filtered = ALL_EMOJI_DATA.filter(item => {
       // Check if search term matches any of the emoji's names
-      return item.names.some(name => name.includes(searchLower))
-    }).map(item => item.emoji)
+      return item.names.some(name => name.includes(searchLower));
+    }).map(item => item.emoji);
     
-    return filtered.length > 0 ? { 'Search Results': filtered } : {}
-  }, [search])
+    return filtered.length > 0 ? { 'Search Results': filtered } : {};
+  }, [search]);
 
   const handleEmojiSelect = (emoji: string) => {
-    onSelect(emoji)
-    setOpen(false)
-    setSearch('')
-  }
+    onSelect(emoji);
+    setOpen(false);
+    setSearch('');
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -217,7 +217,7 @@ export function EmojiPicker({ value, onSelect, placeholder = "Pick an emoji" }: 
             }}
             onWheel={(e) => {
               // Ensure wheel events are handled properly
-              e.stopPropagation()
+              e.stopPropagation();
             }}
           >
             <div className="min-h-[800px]">
@@ -266,5 +266,5 @@ export function EmojiPicker({ value, onSelect, placeholder = "Pick an emoji" }: 
         )}
       </PopoverContent>
     </Popover>
-  )
+  );
 }

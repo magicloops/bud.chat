@@ -60,7 +60,7 @@ export class EventLog {
             name: segment.name,
             args: segment.args,
             argsType: typeof segment.args
-          })
+          });
           toolCalls.set(segment.id, {
             id: segment.id,
             name: segment.name,
@@ -218,7 +218,10 @@ export class EventLog {
       let content = '';
       const tool_calls: any[] = [];
       
-      for (const segment of event.segments) {
+      // Handle empty or undefined segments
+      const segments = event.segments || [];
+      
+      for (const segment of segments) {
         switch (segment.type) {
           case 'text':
             if (segment.text) {
@@ -243,7 +246,7 @@ export class EventLog {
 
       const message: any = {
         role: event.role,
-        content: content || null
+        content: content || ''  // Use empty string instead of null
       };
 
       if (tool_calls.length > 0) {

@@ -1,4 +1,4 @@
-import { Database } from './types/database'
+import { Database } from './types/database';
 
 // Database types
 export type ChatMessage = Database['public']['Tables']['messages']['Row']

@@ -1,13 +1,13 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextRequest } from 'next/server'
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
     // Get workspaces where user is owner OR member
@@ -16,11 +16,11 @@ export async function GET(request: NextRequest) {
     const { data: ownedWorkspaces, error: ownedError } = await supabase
       .from('workspaces')
       .select('id, name, owner_user_id, created_at')
-      .eq('owner_user_id', user.id)
+      .eq('owner_user_id', user.id);
 
     if (ownedError) {
-      console.error('Error fetching owned workspaces:', ownedError)
-      return new Response(`Error fetching owned workspaces: ${ownedError.message}`, { status: 500 })
+      console.error('Error fetching owned workspaces:', ownedError);
+      return new Response(`Error fetching owned workspaces: ${ownedError.message}`, { status: 500 });
     }
 
     // Second: Get workspaces where you're a member
@@ -36,51 +36,51 @@ export async function GET(request: NextRequest) {
           created_at
         )
       `)
-      .eq('user_id', user.id)
+      .eq('user_id', user.id);
 
     if (memberError) {
-      console.error('Error fetching member workspaces:', memberError)
-      return new Response(`Error fetching member workspaces: ${memberError.message}`, { status: 500 })
+      console.error('Error fetching member workspaces:', memberError);
+      return new Response(`Error fetching member workspaces: ${memberError.message}`, { status: 500 });
     }
 
     // Combine and deduplicate
-    const allWorkspaces = new Map()
+    const allWorkspaces = new Map();
     
     // Add owned workspaces
     ownedWorkspaces?.forEach(workspace => {
-      allWorkspaces.set(workspace.id, workspace)
-    })
+      allWorkspaces.set(workspace.id, workspace);
+    });
     
     // Add member workspaces (skip if already owned)
     memberWorkspaces?.forEach(member => {
       if (!allWorkspaces.has(member.workspaces.id)) {
-        allWorkspaces.set(member.workspaces.id, member.workspaces)
+        allWorkspaces.set(member.workspaces.id, member.workspaces);
       }
-    })
+    });
 
-    const formattedWorkspaces = Array.from(allWorkspaces.values())
+    const formattedWorkspaces = Array.from(allWorkspaces.values());
 
-    return Response.json(formattedWorkspaces)
+    return Response.json(formattedWorkspaces);
   } catch (error) {
-    console.error('Error in workspaces GET:', error)
-    return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 })
+    console.error('Error in workspaces GET:', error);
+    return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json()
-    const { name } = body
+    const body = await request.json();
+    const { name } = body;
 
     if (!name) {
-      return new Response('name is required', { status: 400 })
+      return new Response('name is required', { status: 400 });
     }
 
     const { data: workspace, error } = await supabase
@@ -90,11 +90,11 @@ export async function POST(request: NextRequest) {
         owner_user_id: user.id
       })
       .select()
-      .single()
+      .single();
 
     if (error) {
-      console.error('Error creating workspace:', error)
-      return new Response(`Error creating workspace: ${error.message}`, { status: 500 })
+      console.error('Error creating workspace:', error);
+      return new Response(`Error creating workspace: ${error.message}`, { status: 500 });
     }
 
     // Create workspace membership for the owner
@@ -104,16 +104,16 @@ export async function POST(request: NextRequest) {
         workspace_id: workspace.id,
         user_id: user.id,
         role: 'owner'
-      })
+      });
 
     if (membershipError) {
-      console.error('Error creating workspace membership:', membershipError)
+      console.error('Error creating workspace membership:', membershipError);
       // Don't fail workspace creation for this, but log it
     }
 
-    return Response.json(workspace)
+    return Response.json(workspace);
   } catch (error) {
-    console.error('Error in workspaces POST:', error)
-    return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 })
+    console.error('Error in workspaces POST:', error);
+    return new Response(`Internal server error: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 });
   }
 }

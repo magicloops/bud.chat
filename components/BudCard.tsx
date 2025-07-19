@@ -1,12 +1,12 @@
-'use client'
+'use client';
 
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { MoreHorizontal, MessageSquare } from 'lucide-react'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Bud, BudConfig } from '@/lib/types'
-import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers'
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { MoreHorizontal, MessageSquare } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Bud, BudConfig } from '@/lib/types';
+import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers';
 
 interface BudCardProps {
   bud: Bud
@@ -17,28 +17,28 @@ interface BudCardProps {
 }
 
 export function BudCard({ bud, onClick, onEdit, onDelete, showActions = false }: BudCardProps) {
-  const config = getBudConfig(bud)
-  const displayName = getBudDisplayName(bud)
-  const avatar = getBudAvatar(bud)
-  const model = getBudModel(bud)
+  const config = getBudConfig(bud);
+  const displayName = getBudDisplayName(bud);
+  const avatar = getBudAvatar(bud);
+  const model = getBudModel(bud);
 
   const handleCardClick = (e: React.MouseEvent) => {
     // Don't trigger onClick if clicking on actions menu
     if ((e.target as HTMLElement).closest('[data-dropdown-trigger]')) {
-      return
+      return;
     }
-    onClick()
-  }
+    onClick();
+  };
 
   const handleEdit = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onEdit?.()
-  }
+    e.stopPropagation();
+    onEdit?.();
+  };
 
   const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    onDelete?.()
-  }
+    e.stopPropagation();
+    onDelete?.();
+  };
 
   return (
     <Card 
@@ -117,5 +117,5 @@ export function BudCard({ bud, onClick, onEdit, onDelete, showActions = false }:
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }

@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient } from '@tanstack/react-query';
 
 // Create the query client with optimized defaults
 export const queryClient = new QueryClient({
@@ -9,9 +9,9 @@ export const queryClient = new QueryClient({
       retry: (failureCount, error: any) => {
         // Don't retry on 4xx errors
         if (error?.status >= 400 && error?.status < 500) {
-          return false
+          return false;
         }
-        return failureCount < 3
+        return failureCount < 3;
       },
       refetchOnWindowFocus: true,
       refetchOnMount: 'always',
@@ -20,6 +20,6 @@ export const queryClient = new QueryClient({
       retry: false, // Don't retry mutations by default
     },
   },
-})
+});
 
-export default queryClient
+export default queryClient;

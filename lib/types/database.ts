@@ -48,11 +48,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "workspaces_owner_user_id_fkey"
-            columns: ["owner_user_id"]
+            foreignKeyName: 'workspaces_owner_user_id_fkey'
+            columns: ['owner_user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -74,18 +74,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "workspace_members_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'workspace_members_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "workspace_members_user_id_fkey"
-            columns: ["user_id"]
+            foreignKeyName: 'workspace_members_user_id_fkey'
+            columns: ['user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -116,18 +116,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "buds_owner_user_id_fkey"
-            columns: ["owner_user_id"]
+            foreignKeyName: 'buds_owner_user_id_fkey'
+            columns: ['owner_user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "buds_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'buds_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -161,18 +161,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "conversations_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'conversations_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "conversations_bud_id_fkey"
-            columns: ["bud_id"]
+            foreignKeyName: 'conversations_bud_id_fkey'
+            columns: ['bud_id']
             isOneToOne: false
-            referencedRelation: "buds"
-            referencedColumns: ["id"]
+            referencedRelation: 'buds'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -184,7 +184,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      role: "system" | "user" | "assistant"
+      role: 'system' | 'user' | 'assistant'
     }
     CompositeTypes: {
       [_ in never]: never

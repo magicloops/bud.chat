@@ -1,12 +1,12 @@
-'use client'
+'use client';
 
-import { useState, useRef, useCallback } from 'react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Card } from '@/components/ui/card'
-import { Send, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { Conversation } from '@/state/eventChatStore'
+import { useState, useRef, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Card } from '@/components/ui/card';
+import { Send, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Conversation } from '@/state/eventChatStore';
 
 interface EventComposerProps {
   conversation: Conversation
@@ -19,48 +19,48 @@ interface EventComposerProps {
 export function EventComposer({ 
   conversation,
   onSendMessage,
-  placeholder = "Type your message...",
+  placeholder = 'Type your message...',
   disabled = false,
   className 
 }: EventComposerProps) {
-  const [message, setMessage] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = useCallback(async () => {
-    if (!message.trim() || disabled || isLoading) return
+    if (!message.trim() || disabled || isLoading) return;
 
-    const messageToSend = message.trim()
-    setMessage('')
-    setIsLoading(true)
+    const messageToSend = message.trim();
+    setMessage('');
+    setIsLoading(true);
 
     try {
-      await onSendMessage?.(messageToSend)
+      await onSendMessage?.(messageToSend);
     } catch (error) {
-      console.error('Failed to send message:', error)
+      console.error('Failed to send message:', error);
       // Restore message on error
-      setMessage(messageToSend)
+      setMessage(messageToSend);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
 
     // Focus back to textarea
-    textareaRef.current?.focus()
-  }, [message, onSendMessage, disabled, isLoading])
+    textareaRef.current?.focus();
+  }, [message, onSendMessage, disabled, isLoading]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+      e.preventDefault();
+      handleSend();
     }
-  }, [handleSend])
+  }, [handleSend]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setMessage(e.target.value)
-  }, [])
+    setMessage(e.target.value);
+  }, []);
 
   return (
-    <Card className={cn("border-0 border-t rounded-none shadow-none", className)}>
+    <Card className={cn('border-0 border-t rounded-none shadow-none', className)}>
       <div className="p-4">
         <div className="flex gap-2">
           <div className="flex-1">
@@ -94,7 +94,7 @@ export function EventComposer({
         </div>
       </div>
     </Card>
-  )
+  );
 }
 
-export default EventComposer
+export default EventComposer;

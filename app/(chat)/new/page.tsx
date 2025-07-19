@@ -1,8 +1,8 @@
-'use client'
+'use client';
 
-import { useState, useCallback, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { EventStream } from '@/components/EventStream'
+import { useState, useCallback, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { EventStream } from '@/components/EventStream';
 import { 
   Event,
   useSelectedWorkspace, 
@@ -11,39 +11,39 @@ import {
   ConversationMeta,
   Conversation,
   useEventChatStore
-} from '@/state/eventChatStore'
+} from '@/state/eventChatStore';
 import { 
   createGreetingEvent, 
   createUserEvent, 
   createAssistantPlaceholder,
   createSystemEvents,
   updateEventsConversationId
-} from '@/lib/eventMessageHelpers'
+} from '@/lib/eventMessageHelpers';
 import { 
   createBudInitialEvents,
   budManager
-} from '@/lib/budHelpers'
-import { Bud } from '@/lib/types'
-import { useBud } from '@/state/budStore'
+} from '@/lib/budHelpers';
+import { Bud } from '@/lib/types';
+import { useBud } from '@/state/budStore';
 
 export default function NewChatPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const selectedWorkspace = useSelectedWorkspace()
-  const setConversation = useSetConversation()
-  const addConversationToWorkspace = useAddConversationToWorkspace()
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedWorkspace = useSelectedWorkspace();
+  const setConversation = useSetConversation();
+  const addConversationToWorkspace = useAddConversationToWorkspace();
   
-  const budId = searchParams.get('bud')
+  const budId = searchParams.get('bud');
   
   // Get bud from store (reactive to updates) and local state for initial load
-  const storeBud = useBud(budId || '')
-  const [bud, setBud] = useState<Bud | null>(null)
+  const storeBud = useBud(budId || '');
+  const [bud, setBud] = useState<Bud | null>(null);
   
   // State for events and loading
-  const [budLoading, setBudLoading] = useState(!!budId)
-  const [events, setEvents] = useState<Event[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [streamingEventId, setStreamingEventId] = useState<string | null>(null)
+  const [budLoading, setBudLoading] = useState(!!budId);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingEventId, setStreamingEventId] = useState<string | null>(null);
 
   // Load bud if budId is provided
   useEffect(() => {
@@ -53,17 +53,17 @@ export default function NewChatPage() {
         setEvents([
           createGreetingEvent(),
           ...createSystemEvents()
-        ])
+        ]);
         
         // Clear any existing custom theme and reset to default
-        const root = document.documentElement
-        const existingTheme = localStorage.getItem('customTheme')
+        const root = document.documentElement;
+        const existingTheme = localStorage.getItem('customTheme');
         if (existingTheme) {
           try {
-            const theme = JSON.parse(existingTheme)
+            const theme = JSON.parse(existingTheme);
             Object.keys(theme.cssVariables).forEach(key => {
-              root.style.removeProperty(key)
-            })
+              root.style.removeProperty(key);
+            });
           } catch (e) {
             // Ignore parse errors
           }
@@ -76,44 +76,44 @@ export default function NewChatPage() {
           '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
           '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
           '--border', '--input', '--ring'
-        ]
+        ];
         
         commonThemeVars.forEach(varName => {
-          root.style.removeProperty(varName)
-        })
+          root.style.removeProperty(varName);
+        });
         
-        setBudLoading(false)
-        return
+        setBudLoading(false);
+        return;
       }
 
       try {
-        setBudLoading(true)
-        const loadedBud = await budManager.getBud(budId)
-        setBud(loadedBud)
+        setBudLoading(true);
+        const loadedBud = await budManager.getBud(budId);
+        setBud(loadedBud);
         
         // Initialize events with bud configuration
-        const budEvents = createBudInitialEvents(loadedBud)
-        setEvents(budEvents)
+        const budEvents = createBudInitialEvents(loadedBud);
+        setEvents(budEvents);
         
         // Apply bud's theme or reset to default
-        const budConfig = loadedBud.default_json as any
-        const root = document.documentElement
+        const budConfig = loadedBud.default_json as any;
+        const root = document.documentElement;
         
         if (budConfig?.customTheme) {
           // Apply bud's custom theme
           Object.entries(budConfig.customTheme.cssVariables).forEach(([key, value]) => {
-            root.style.setProperty(key, value as string)
-          })
+            root.style.setProperty(key, value as string);
+          });
         } else {
           // Clear any existing custom theme and reset to default
           // First, try to clear any localStorage theme
-          const existingTheme = localStorage.getItem('customTheme')
+          const existingTheme = localStorage.getItem('customTheme');
           if (existingTheme) {
             try {
-              const theme = JSON.parse(existingTheme)
+              const theme = JSON.parse(existingTheme);
               Object.keys(theme.cssVariables).forEach(key => {
-                root.style.removeProperty(key)
-              })
+                root.style.removeProperty(key);
+              });
             } catch (e) {
               // Ignore parse errors
             }
@@ -126,41 +126,41 @@ export default function NewChatPage() {
             '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
             '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
             '--border', '--input', '--ring'
-          ]
+          ];
           
           commonThemeVars.forEach(varName => {
-            root.style.removeProperty(varName)
-          })
+            root.style.removeProperty(varName);
+          });
         }
       } catch (error) {
-        console.error('Failed to load bud:', error)
+        console.error('Failed to load bud:', error);
         // Fallback to default events
         setEvents([
           createGreetingEvent(),
           ...createSystemEvents()
-        ])
+        ]);
       } finally {
-        setBudLoading(false)
+        setBudLoading(false);
       }
-    }
+    };
 
-    loadBud()
-  }, [budId])
+    loadBud();
+  }, [budId]);
 
   // Watch for bud updates from store and regenerate events
   useEffect(() => {
-    if (!budId || !storeBud) return
+    if (!budId || !storeBud) return;
     
     // Update local bud state
-    setBud(storeBud)
+    setBud(storeBud);
     
     // Regenerate events with updated bud configuration
-    const budEvents = createBudInitialEvents(storeBud)
-    setEvents(budEvents)
+    const budEvents = createBudInitialEvents(storeBud);
+    setEvents(budEvents);
     
     // Apply updated theme
-    const budConfig = storeBud.default_json as any
-    const root = document.documentElement
+    const budConfig = storeBud.default_json as any;
+    const root = document.documentElement;
     
     // Clear existing theme first
     const commonThemeVars = [
@@ -169,40 +169,40 @@ export default function NewChatPage() {
       '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
       '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
       '--border', '--input', '--ring'
-    ]
+    ];
     
     commonThemeVars.forEach(varName => {
-      root.style.removeProperty(varName)
-    })
+      root.style.removeProperty(varName);
+    });
     
     if (budConfig?.customTheme) {
       // Apply bud's custom theme
       Object.entries(budConfig.customTheme.cssVariables).forEach(([key, value]) => {
-        root.style.setProperty(key, value as string)
-      })
+        root.style.setProperty(key, value as string);
+      });
     }
-  }, [budId, storeBud]) // This will trigger when storeBud changes (i.e., when bud is updated)
+  }, [budId, storeBud]); // This will trigger when storeBud changes (i.e., when bud is updated)
 
 
   const handleSendMessage = useCallback(async (content: string) => {
     if (!selectedWorkspace) {
-      console.error('No workspace selected')
-      return
+      console.error('No workspace selected');
+      return;
     }
 
     
     // 1. Optimistic UI updates (instant)
-    const userEvent = createUserEvent(content)
-    const assistantPlaceholder = createAssistantPlaceholder()
+    const userEvent = createUserEvent(content);
+    const assistantPlaceholder = createAssistantPlaceholder();
     
-    const newEvents = [...events, userEvent, assistantPlaceholder]
-    setEvents(newEvents)
-    setIsStreaming(true)
-    setStreamingEventId(assistantPlaceholder.id)
+    const newEvents = [...events, userEvent, assistantPlaceholder];
+    setEvents(newEvents);
+    setIsStreaming(true);
+    setStreamingEventId(assistantPlaceholder.id);
 
     try {
       // 2. Start streaming immediately - no database blocking!
-      console.log('📡 Starting streaming request...')
+      console.log('📡 Starting streaming request...');
       const response = await fetch('/api/chat-new', {
         method: 'POST',
         headers: {
@@ -214,41 +214,41 @@ export default function NewChatPage() {
           budId: bud?.id,
           model: bud ? (bud.default_json as any).model || 'gpt-4o' : 'gpt-4o'
         })
-      })
+      });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       // 3. Handle streaming response
-      const reader = response.body?.getReader()
+      const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error('No response body')
+        throw new Error('No response body');
       }
 
-      const decoder = new TextDecoder()
-      let conversationId: string | null = null
+      const decoder = new TextDecoder();
+      let conversationId: string | null = null;
 
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const { done, value } = await reader.read();
+        if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
-              const data = JSON.parse(line.slice(6))
+              const data = JSON.parse(line.slice(6));
               
               switch (data.type) {
                 case 'conversationCreated':
-                  conversationId = data.conversationId
-                  console.log('💾 Conversation created:', conversationId)
+                  conversationId = data.conversationId;
+                  console.log('💾 Conversation created:', conversationId);
                   
                   // Manually add to sidebar as fallback (in case realtime subscription didn't work)
                   if (selectedWorkspace && conversationId) {
-                    console.log('➕ Manually adding conversation to workspace sidebar:', conversationId)
+                    console.log('➕ Manually adding conversation to workspace sidebar:', conversationId);
                     
                     // Create a basic conversation object for the sidebar
                     const conversationMeta: ConversationMeta = {
@@ -261,36 +261,36 @@ export default function NewChatPage() {
                       model_config_overrides: undefined,
                       mcp_config_overrides: undefined,
                       created_at: new Date().toISOString()
-                    }
+                    };
                     
                     const conversation: Conversation = {
                       id: conversationId,
                       events: events, // Use the current events
                       isStreaming: true,
                       meta: conversationMeta
-                    }
+                    };
                     
                     // Store the conversation and add to workspace
-                    setConversation(conversationId, conversation)
-                    addConversationToWorkspace(selectedWorkspace, conversationId)
+                    setConversation(conversationId, conversation);
+                    addConversationToWorkspace(selectedWorkspace, conversationId);
                   }
-                  break
+                  break;
                   
                 case 'token':
                   setEvents(prevEvents => 
                     prevEvents.map(event => 
                       event.id === assistantPlaceholder.id 
                         ? { 
-                            ...event, 
-                            segments: event.segments.map(s => 
-                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
-                            ),
-                            ts: Date.now()
-                          }
+                          ...event, 
+                          segments: event.segments.map(s => 
+                            s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                          ),
+                          ts: Date.now()
+                        }
                         : event
                     )
-                  )
-                  break
+                  );
+                  break;
                   
                 case 'debug':
                   // Emit debug event for debug panel
@@ -301,10 +301,10 @@ export default function NewChatPage() {
                       type: data.debug_type,
                       data: data.data,
                       conversationId: conversationId || 'new-conversation'
-                    }
-                    window.dispatchEvent(new CustomEvent('debug-event', { detail: debugEvent }))
+                    };
+                    window.dispatchEvent(new CustomEvent('debug-event', { detail: debugEvent }));
                   }
-                  break
+                  break;
                   
                 case 'tool_start':
                   // Handle tool start - add the tool call segment
@@ -312,23 +312,23 @@ export default function NewChatPage() {
                     prevEvents.map(event => 
                       event.id === assistantPlaceholder.id 
                         ? { 
-                            ...event, 
-                            segments: [
-                              ...event.segments.filter(s => s.type === 'text').map(s => ({ ...s, text: s.text + data.content })),
-                              ...event.segments.filter(s => s.type !== 'text'),
-                              {
-                                type: 'tool_call',
-                                id: data.tool_id,
-                                name: data.tool_name,
-                                args: data.tool_arguments || {}
-                              }
-                            ],
-                            ts: Date.now()
-                          }
+                          ...event, 
+                          segments: [
+                            ...event.segments.filter(s => s.type === 'text').map(s => ({ ...s, text: s.text + data.content })),
+                            ...event.segments.filter(s => s.type !== 'text'),
+                            {
+                              type: 'tool_call',
+                              id: data.tool_id,
+                              name: data.tool_name,
+                              args: data.tool_arguments || {}
+                            }
+                          ],
+                          ts: Date.now()
+                        }
                         : event
                     )
-                  )
-                  break
+                  );
+                  break;
                   
                 case 'tool_complete':
                 case 'tool_error':
@@ -337,43 +337,43 @@ export default function NewChatPage() {
                     prevEvents.map(event => 
                       event.id === assistantPlaceholder.id 
                         ? { 
-                            ...event, 
-                            segments: event.segments.map(s => 
-                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
-                            ),
-                            ts: Date.now()
-                          }
+                          ...event, 
+                          segments: event.segments.map(s => 
+                            s.type === 'text' ? { ...s, text: s.text + data.content } : s
+                          ),
+                          ts: Date.now()
+                        }
                         : event
                     )
-                  )
-                  break
+                  );
+                  break;
                   
                 case 'complete':
-                  setIsStreaming(false)
-                  setStreamingEventId(null)
+                  setIsStreaming(false);
+                  setStreamingEventId(null);
                   
                   // Update final content while preserving tool call segments
                   const finalEvents = newEvents.map(event => 
                     event.id === assistantPlaceholder.id 
                       ? { 
-                          ...event, 
-                          segments: event.segments.map(s => 
-                            s.type === 'text' ? { ...s, text: data.content } : s
-                          ),
-                          ts: Date.now()
-                        }
+                        ...event, 
+                        segments: event.segments.map(s => 
+                          s.type === 'text' ? { ...s, text: data.content } : s
+                        ),
+                        ts: Date.now()
+                      }
                       : event
-                  )
-                  setEvents(finalEvents)
+                  );
+                  setEvents(finalEvents);
                   
                   // CRITICAL: Seamless transition
                   if (conversationId) {
-                    console.log('🔄 Transitioning to real conversation:', conversationId)
+                    console.log('🔄 Transitioning to real conversation:', conversationId);
                     
                     // 4. Pre-populate Zustand store with local state
-                    const budConfig = bud?.default_json as any
+                    const budConfig = bud?.default_json as any;
                     // Check if conversation already exists in store (from realtime update)
-                    const existingConversation = setConversation ? useEventChatStore.getState().conversations[conversationId] : null
+                    const existingConversation = setConversation ? useEventChatStore.getState().conversations[conversationId] : null;
                     
                     const conversationMeta: ConversationMeta = {
                       id: conversationId,
@@ -385,42 +385,42 @@ export default function NewChatPage() {
                       assistant_avatar: budConfig?.avatar || '🤖',
                       model_config_overrides: undefined,
                       created_at: new Date().toISOString()
-                    }
+                    };
                     
                     const conversation: Conversation = {
                       id: conversationId,
                       events: updateEventsConversationId(finalEvents, conversationId),
                       isStreaming: false,
                       meta: conversationMeta
-                    }
+                    };
                     
-                    setConversation(conversationId, conversation)
+                    setConversation(conversationId, conversation);
                     
                     // 5. Navigate - ChatPage will find data already in store (zero flash!)
-                    router.push(`/chat/${conversationId}`)
+                    router.push(`/chat/${conversationId}`);
                   }
-                  break
+                  break;
                   
                 case 'error':
-                  console.error('Streaming error:', data.error)
-                  setIsStreaming(false)
-                  setStreamingEventId(null)
+                  console.error('Streaming error:', data.error);
+                  setIsStreaming(false);
+                  setStreamingEventId(null);
                   // TODO: Show error to user
-                  break
+                  break;
               }
             } catch (e) {
-              console.error('Error parsing stream data:', e)
+              console.error('Error parsing stream data:', e);
             }
           }
         }
       }
     } catch (error) {
-      console.error('Failed to start streaming:', error)
-      setIsStreaming(false)
-      setStreamingEventId(null)
+      console.error('Failed to start streaming:', error);
+      setIsStreaming(false);
+      setStreamingEventId(null);
       // TODO: Show error to user
     }
-  }, [events, selectedWorkspace, setConversation, router])
+  }, [events, selectedWorkspace, setConversation, router]);
 
   // Show workspace selection prompt (layout handles auth)
   if (!selectedWorkspace) {
@@ -430,7 +430,7 @@ export default function NewChatPage() {
           <p>Please select a workspace to continue</p>
         </div>
       </div>
-    )
+    );
   }
 
   // Show loading while bud is loading
@@ -441,13 +441,13 @@ export default function NewChatPage() {
           <p>Loading bud...</p>
         </div>
       </div>
-    )
+    );
   }
 
   // Render chat interface with local state
   const placeholder = bud 
     ? `Chat with ${(bud.default_json as any).name || 'your bud'}...`
-    : "Start a new conversation..."
+    : 'Start a new conversation...';
 
   return (
     <EventStream
@@ -457,5 +457,5 @@ export default function NewChatPage() {
       placeholder={placeholder}
       budData={bud}
     />
-  )
+  );
 }

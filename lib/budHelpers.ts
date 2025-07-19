@@ -1,9 +1,9 @@
-import { createClient } from '@/lib/supabase/client'
-import { Bud, BudConfig } from '@/lib/types'
-import { Event } from '@/state/eventChatStore'
-import { createTextEvent } from '@/lib/types/events'
-import { generateKeyBetween } from 'fractional-indexing'
-import { getDefaultModel } from './modelMapping'
+import { createClient } from '@/lib/supabase/client';
+import { Bud, BudConfig } from '@/lib/types';
+import { Event } from '@/state/eventChatStore';
+import { createTextEvent } from '@/lib/types/events';
+import { generateKeyBetween } from 'fractional-indexing';
+import { getDefaultModel } from './modelMapping';
 
 export interface CreateBudArgs {
   name: string
@@ -19,28 +19,28 @@ export interface UpdateBudArgs {
 
 // Client-side Bud operations
 export class BudManager {
-  private supabase = createClient()
+  private supabase = createClient();
 
   async getWorkspaceBuds(workspaceId: string): Promise<Bud[]> {
-    const response = await fetch(`/api/buds?workspaceId=${workspaceId}`)
+    const response = await fetch(`/api/buds?workspaceId=${workspaceId}`);
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch buds: ${response.statusText}`)
+      throw new Error(`Failed to fetch buds: ${response.statusText}`);
     }
     
-    const data = await response.json()
-    return data.buds || []
+    const data = await response.json();
+    return data.buds || [];
   }
 
   async getBud(budId: string): Promise<Bud> {
-    const response = await fetch(`/api/buds/${budId}`)
+    const response = await fetch(`/api/buds/${budId}`);
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch bud: ${response.statusText}`)
+      throw new Error(`Failed to fetch bud: ${response.statusText}`);
     }
     
-    const data = await response.json()
-    return data.bud
+    const data = await response.json();
+    return data.bud;
   }
 
   async createBud(args: CreateBudArgs): Promise<Bud> {
@@ -50,15 +50,15 @@ export class BudManager {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(args),
-    })
+    });
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to create bud')
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create bud');
     }
 
-    const data = await response.json()
-    return data.bud
+    const data = await response.json();
+    return data.bud;
   }
 
   async updateBud(budId: string, updates: UpdateBudArgs): Promise<Bud> {
@@ -68,94 +68,94 @@ export class BudManager {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(updates),
-    })
+    });
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to update bud')
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update bud');
     }
 
-    const data = await response.json()
-    return data.bud
+    const data = await response.json();
+    return data.bud;
   }
 
   async deleteBud(budId: string): Promise<void> {
     const response = await fetch(`/api/buds/${budId}`, {
       method: 'DELETE',
-    })
+    });
 
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || 'Failed to delete bud')
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to delete bud');
     }
   }
 }
 
 // Singleton instance
-export const budManager = new BudManager()
+export const budManager = new BudManager();
 
 // Utility functions for working with Buds
 export function getBudConfig(bud: Bud): BudConfig {
-  return bud.default_json as BudConfig
+  return bud.default_json as BudConfig;
 }
 
 export function createBudSystemEvent(bud: Bud, conversationId: string = 'temp'): Event {
-  const config = getBudConfig(bud)
+  const config = getBudConfig(bud);
   
-  return createTextEvent('system', config.systemPrompt)
+  return createTextEvent('system', config.systemPrompt);
 }
 
 export function createBudGreetingEvent(bud: Bud, conversationId: string = 'temp'): Event | null {
-  const config = getBudConfig(bud)
+  const config = getBudConfig(bud);
   
-  if (!config.greeting) return null
+  if (!config.greeting) return null;
   
-  return createTextEvent('assistant', config.greeting)
+  return createTextEvent('assistant', config.greeting);
 }
 
 export function createBudInitialEvents(bud: Bud, conversationId: string = 'temp'): Event[] {
-  const events: Event[] = []
+  const events: Event[] = [];
   
   // Always add system event
-  events.push(createBudSystemEvent(bud, conversationId))
+  events.push(createBudSystemEvent(bud, conversationId));
   
   // Add greeting if present
-  const greeting = createBudGreetingEvent(bud, conversationId)
+  const greeting = createBudGreetingEvent(bud, conversationId);
   if (greeting) {
-    events.push(greeting)
+    events.push(greeting);
   }
   
-  return events
+  return events;
 }
 
 export function validateBudConfig(config: Partial<BudConfig>): string[] {
-  const errors: string[] = []
+  const errors: string[] = [];
   
   if (!config.name?.trim()) {
-    errors.push('Bud name is required')
+    errors.push('Bud name is required');
   }
   
   if (!config.systemPrompt?.trim()) {
-    errors.push('System prompt is required')
+    errors.push('System prompt is required');
   }
   
   if (!config.model?.trim()) {
-    errors.push('AI model is required')
+    errors.push('AI model is required');
   }
   
   if (config.temperature !== undefined) {
     if (config.temperature < 0 || config.temperature > 1) {
-      errors.push('Temperature must be between 0 and 1')
+      errors.push('Temperature must be between 0 and 1');
     }
   }
   
   if (config.maxTokens !== undefined) {
     if (config.maxTokens < 1 || config.maxTokens > 32000) {
-      errors.push('Max tokens must be between 1 and 32000')
+      errors.push('Max tokens must be between 1 and 32000');
     }
   }
   
-  return errors
+  return errors;
 }
 
 export function getDefaultBudConfig(): BudConfig {
@@ -166,33 +166,33 @@ export function getDefaultBudConfig(): BudConfig {
     temperature: 0.7,
     maxTokens: 2048,
     avatar: '🤖'
-  }
+  };
 }
 
 export function getBudDisplayName(bud: Bud): string {
-  const config = getBudConfig(bud)
-  return config.name || bud.name || 'Unnamed Bud'
+  const config = getBudConfig(bud);
+  return config.name || bud.name || 'Unnamed Bud';
 }
 
 export function getBudAvatar(bud: Bud): string {
-  const config = getBudConfig(bud)
-  return config.avatar || '🤖'
+  const config = getBudConfig(bud);
+  return config.avatar || '🤖';
 }
 
 export function getBudModel(bud: Bud): string {
-  const config = getBudConfig(bud)
-  return config.model || 'gpt-4o'
+  const config = getBudConfig(bud);
+  return config.model || 'gpt-4o';
 }
 
 export function getBudTemperature(bud: Bud): number {
-  const config = getBudConfig(bud)
-  return config.temperature ?? 0.7
+  const config = getBudConfig(bud);
+  return config.temperature ?? 0.7;
 }
 
 // New helper functions for override-only conversation approach
 export function getEffectiveConversationConfig(conversation: any, sourceBud?: Bud) {
-  const budConfig = sourceBud ? getBudConfig(sourceBud) : null
-  const overrides = conversation.model_config_overrides || {}
+  const budConfig = sourceBud ? getBudConfig(sourceBud) : null;
+  const overrides = conversation.model_config_overrides || {};
   
   return {
     // Identity
@@ -210,7 +210,7 @@ export function getEffectiveConversationConfig(conversation: any, sourceBud?: Bu
     top_p: overrides.top_p,
     presence_penalty: overrides.presence_penalty,
     anthropic_version: overrides.anthropic_version
-  }
+  };
 }
 
 export function hasConversationOverrides(conversation: any): boolean {
@@ -218,17 +218,17 @@ export function hasConversationOverrides(conversation: any): boolean {
     conversation.assistant_name ||
     conversation.assistant_avatar ||
     conversation.model_config_overrides
-  )
+  );
 }
 
 export function getConversationDisplayName(conversation: any, sourceBud?: Bud): string {
-  const config = getEffectiveConversationConfig(conversation, sourceBud)
-  return config.assistant_name
+  const config = getEffectiveConversationConfig(conversation, sourceBud);
+  return config.assistant_name;
 }
 
 export function getConversationAvatar(conversation: any, sourceBud?: Bud): string {
-  const config = getEffectiveConversationConfig(conversation, sourceBud)
-  return config.assistant_avatar
+  const config = getEffectiveConversationConfig(conversation, sourceBud);
+  return config.assistant_avatar;
 }
 
 // Note: Server-side bud fetching should be done in API routes or server components
@@ -280,4 +280,4 @@ export const BUD_TEMPLATES: Record<string, Partial<BudConfig>> = {
     avatar: '🎓',
     greeting: 'Welcome to your personal learning session! I\'m here to help you understand any topic you\'re curious about. What would you like to learn today?'
   }
-}
+};

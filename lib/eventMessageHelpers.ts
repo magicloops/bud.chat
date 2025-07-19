@@ -1,41 +1,41 @@
 // Event-based message helpers for optimistic UI
 // These maintain compatibility with existing patterns while using events
 
-import { Event, createTextEvent, createMixedEvent } from '@/lib/types/events'
-import { EventConversation, EventConversationMeta } from '@/state/eventChatStore'
+import { Event, createTextEvent, createMixedEvent } from '@/lib/types/events';
+import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
 
 /**
  * Create a greeting event for new conversations
  */
 export function createGreetingEvent(): Event {
-  return createTextEvent('assistant', 'Hello! How can I help you today?')
+  return createTextEvent('assistant', 'Hello! How can I help you today?');
 }
 
 /**
  * Create system events from a list of system messages
  */
 export function createSystemEvents(systemMessages: string[] = []): Event[] {
-  return systemMessages.map(message => createTextEvent('system', message))
+  return systemMessages.map(message => createTextEvent('system', message));
 }
 
 /**
  * Create a user event from content
  */
 export function createUserEvent(content: string): Event {
-  return createTextEvent('user', content)
+  return createTextEvent('user', content);
 }
 
 /**
  * Create an assistant placeholder event for streaming
  */
 export function createAssistantPlaceholderEvent(): Event {
-  return createTextEvent('assistant', '')
+  return createTextEvent('assistant', '');
 }
 
 /**
  * Legacy compatibility - alias for createAssistantPlaceholderEvent
  */
-export const createAssistantPlaceholder = createAssistantPlaceholderEvent
+export const createAssistantPlaceholder = createAssistantPlaceholderEvent;
 
 /**
  * Update event conversation IDs for database persistence
@@ -47,39 +47,39 @@ export function updateEventsConversationId(events: Event[], conversationId: stri
     ...event,
     // Add conversation_id as metadata if needed for debugging
     _conversationId: conversationId
-  }))
+  }));
 }
 
 /**
  * Create initial events for a bud configuration
  */
 export function createBudInitialEvents(bud: any): Event[] {
-  const events: Event[] = []
+  const events: Event[] = [];
   
   try {
-    const budConfig = bud.default_json as any
+    const budConfig = bud.default_json as any;
     
     // Add custom greeting if configured
     if (budConfig.greeting) {
-      events.push(createTextEvent('assistant', budConfig.greeting))
+      events.push(createTextEvent('assistant', budConfig.greeting));
     } else {
-      events.push(createGreetingEvent())
+      events.push(createGreetingEvent());
     }
     
     // Add system messages from bud configuration
     if (budConfig.system_prompt) {
-      events.push(createTextEvent('system', budConfig.system_prompt))
+      events.push(createTextEvent('system', budConfig.system_prompt));
     }
     
     // Add any additional system messages
     if (budConfig.additional_instructions) {
-      events.push(createTextEvent('system', budConfig.additional_instructions))
+      events.push(createTextEvent('system', budConfig.additional_instructions));
     }
     
-    return events
+    return events;
   } catch (error) {
-    console.error('Error creating bud initial events:', error)
-    return [createGreetingEvent()]
+    console.error('Error creating bud initial events:', error);
+    return [createGreetingEvent()];
   }
 }
 
@@ -97,14 +97,14 @@ export function createEventConversation(
     workspace_id: workspaceId,
     source_bud_id: budId,
     created_at: new Date().toISOString()
-  }
+  };
   
   return {
     id: conversationId,
     events: initialEvents,
     isStreaming: false,
     meta
-  }
+  };
 }
 
 /**
@@ -118,7 +118,7 @@ export function createOptimisticEventConversation(
   budId?: string,
   budData?: any
 ): EventConversation {
-  const budConfig = budData?.default_json as any
+  const budConfig = budData?.default_json as any;
   
   const meta: EventConversationMeta = {
     id: conversationId,
@@ -129,14 +129,14 @@ export function createOptimisticEventConversation(
     assistant_avatar: budConfig?.avatar || '🤖',
     model_config_overrides: undefined,
     created_at: new Date().toISOString()
-  }
+  };
   
   return {
     id: conversationId,
     events: updateEventsConversationId(events, conversationId),
     isStreaming: false,
     meta
-  }
+  };
 }
 
 /**
@@ -148,17 +148,17 @@ export function eventsToStreamingFormat(events: Event[]): any[] {
       return {
         role: 'system',
         content: event.segments.find(s => s.type === 'text')?.text || ''
-      }
+      };
     } else if (event.role === 'user') {
       return {
         role: 'user', 
         content: event.segments.find(s => s.type === 'text')?.text || ''
-      }
+      };
     } else if (event.role === 'assistant') {
       const textContent = event.segments
         .filter(s => s.type === 'text')
         .map(s => s.text)
-        .join('')
+        .join('');
       
       const toolCalls = event.segments
         .filter(s => s.type === 'tool_call')
@@ -169,43 +169,43 @@ export function eventsToStreamingFormat(events: Event[]): any[] {
             name: s.name,
             arguments: JSON.stringify(s.args)
           }
-        }))
+        }));
       
       return {
         role: 'assistant',
         content: textContent,
         json_meta: toolCalls.length > 0 ? { tool_calls: toolCalls } : undefined
-      }
+      };
     }
-    return null
-  }).filter(Boolean)
+    return null;
+  }).filter(Boolean);
 }
 
 /**
  * Create a streaming event builder for real-time updates
  */
 export class StreamingEventBuilder {
-  private event: Event
-  private onUpdate?: (event: Event) => void
+  private event: Event;
+  private onUpdate?: (event: Event) => void;
   
   constructor(initialEvent: Event, onUpdate?: (event: Event) => void) {
-    this.event = { ...initialEvent }
-    this.onUpdate = onUpdate
+    this.event = { ...initialEvent };
+    this.onUpdate = onUpdate;
   }
   
   addTextChunk(text: string) {
     // Find or create text segment
-    let textSegment = this.event.segments.find(s => s.type === 'text')
+    let textSegment = this.event.segments.find(s => s.type === 'text');
     if (!textSegment) {
-      textSegment = { type: 'text', text: '' }
-      this.event.segments.push(textSegment)
+      textSegment = { type: 'text', text: '' };
+      this.event.segments.push(textSegment);
     }
     
     if (textSegment.type === 'text') {
-      textSegment.text += text
+      textSegment.text += text;
     }
     
-    this.onUpdate?.(this.event)
+    this.onUpdate?.(this.event);
   }
   
   addToolCall(id: string, name: string, args: object) {
@@ -214,9 +214,9 @@ export class StreamingEventBuilder {
       id,
       name,
       args
-    })
+    });
     
-    this.onUpdate?.(this.event)
+    this.onUpdate?.(this.event);
   }
   
   addToolResult(id: string, output: object) {
@@ -224,17 +224,17 @@ export class StreamingEventBuilder {
       type: 'tool_result',
       id,
       output
-    })
+    });
     
-    this.onUpdate?.(this.event)
+    this.onUpdate?.(this.event);
   }
   
   getCurrentEvent(): Event {
-    return { ...this.event }
+    return { ...this.event };
   }
   
   finalize(): Event {
-    return this.getCurrentEvent()
+    return this.getCurrentEvent();
   }
 }
 
@@ -245,14 +245,14 @@ export function getEventDisplayContent(event: Event): string {
   return event.segments
     .filter(s => s.type === 'text')
     .map(s => s.text)
-    .join('')
+    .join('');
 }
 
 /**
  * Check if an event contains tool calls
  */
 export function hasToolCalls(event: Event): boolean {
-  return event.segments.some(s => s.type === 'tool_call')
+  return event.segments.some(s => s.type === 'tool_call');
 }
 
 /**
@@ -265,7 +265,7 @@ export function getToolCalls(event: Event): Array<{id: string; name: string; arg
       id: s.id,
       name: s.name,
       args: s.args
-    }))
+    }));
 }
 
 /**
@@ -277,7 +277,7 @@ export function getToolResults(event: Event): Array<{id: string; output: object}
     .map(s => ({
       id: s.id,
       output: s.output
-    }))
+    }));
 }
 
 /**
@@ -288,8 +288,8 @@ export function extractTextForTitle(events: Event[]): string {
     .filter(e => e.role !== 'system')
     .slice(0, 4) // Use first few events
     .map(event => {
-      const textContent = getEventDisplayContent(event)
-      return `${event.role}: ${textContent}`
+      const textContent = getEventDisplayContent(event);
+      return `${event.role}: ${textContent}`;
     })
-    .join('\\n')
+    .join('\\n');
 }

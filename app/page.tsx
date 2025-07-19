@@ -1,35 +1,35 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/lib/auth/auth-provider'
-import { AuthModal } from '@/components/auth/auth-modal'
-import { Sidebar } from '@/components/Sidebar'
-import { Button } from '@/components/ui/button'
-import { MessageSquare, PanelLeft } from 'lucide-react'
-import { Loader2 } from 'lucide-react'
-import { useSelectedWorkspace } from '@/state/eventChatStore'
-import { BudSelectionGrid } from '@/components/BudSelectionGrid'
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { AuthModal } from '@/components/auth/auth-modal';
+import { Sidebar } from '@/components/Sidebar';
+import { Button } from '@/components/ui/button';
+import { MessageSquare, PanelLeft } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { useSelectedWorkspace } from '@/state/eventChatStore';
+import { BudSelectionGrid } from '@/components/BudSelectionGrid';
 
 export default function HomePage() {
-  const { user, loading } = useAuth()
-  const router = useRouter()
-  const selectedWorkspace = useSelectedWorkspace()
+  const { user, loading } = useAuth();
+  const router = useRouter();
+  const selectedWorkspace = useSelectedWorkspace();
   
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Load sidebar state from localStorage on mount
   useEffect(() => {
-    const savedSidebarOpen = localStorage.getItem('sidebarOpen')
+    const savedSidebarOpen = localStorage.getItem('sidebarOpen');
     if (savedSidebarOpen !== null) {
-      setSidebarOpen(savedSidebarOpen === 'true')
+      setSidebarOpen(savedSidebarOpen === 'true');
     }
-  }, [])
+  }, []);
 
   const handleSidebarToggle = (open: boolean) => {
-    setSidebarOpen(open)
-    localStorage.setItem('sidebarOpen', String(open))
-  }
+    setSidebarOpen(open);
+    localStorage.setItem('sidebarOpen', String(open));
+  };
 
 
   if (loading) {
@@ -37,11 +37,11 @@ export default function HomePage() {
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
-    )
+    );
   }
 
   if (!user) {
-    return <AuthModal />
+    return <AuthModal />;
   }
 
   return (
@@ -110,5 +110,5 @@ export default function HomePage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

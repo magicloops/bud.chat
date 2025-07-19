@@ -1,11 +1,11 @@
-import { create } from 'zustand'
-import { subscribeWithSelector } from 'zustand/middleware'
-import { persist } from 'zustand/middleware'
-import { immer } from 'zustand/middleware/immer'
-import { shallow } from 'zustand/shallow'
-import { createClient } from '@/lib/supabase/client'
-import { Event, EventLog } from '@/lib/types/events'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
+import { shallow } from 'zustand/shallow';
+import { createClient } from '@/lib/supabase/client';
+import { Event, EventLog } from '@/lib/types/events';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // Event-based conversation types
 export interface EventConversationMeta {
@@ -86,7 +86,14 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
-          state.conversations[id] = conversation
+          console.log('🏦 [STORE] Setting conversation', {
+            timestamp: Date.now(),
+            conversationId: id,
+            eventCount: conversation.events.length,
+            previousEventCount: state.conversations[id]?.events?.length || 0,
+            source: new Error().stack?.split('\n')[2]?.trim() // Capture caller
+          });
+          state.conversations[id] = conversation;
         }),
         
         updateConversation: (id, updates) => set((state) => {
@@ -94,105 +101,105 @@ export const useEventChatStore = create<EventChatStore>()(
             state.conversations[id] = {
               ...state.conversations[id],
               ...updates
-            }
+            };
           }
         }),
         
         // Event actions
         addEvent: (conversationId, event) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation) {
-            conversation.events.push(event)
+            conversation.events.push(event);
           }
         }),
         
         updateEvent: (conversationId, eventId, updates) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation) {
-            const eventIndex = conversation.events.findIndex(e => e.id === eventId)
+            const eventIndex = conversation.events.findIndex(e => e.id === eventId);
             if (eventIndex >= 0) {
-              Object.assign(conversation.events[eventIndex], updates)
+              Object.assign(conversation.events[eventIndex], updates);
             }
           }
         }),
         
         replaceEvent: (conversationId, eventId, event) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation) {
-            const eventIndex = conversation.events.findIndex(e => e.id === eventId)
+            const eventIndex = conversation.events.findIndex(e => e.id === eventId);
             if (eventIndex >= 0) {
-              conversation.events[eventIndex] = event
+              conversation.events[eventIndex] = event;
             }
           }
         }),
         
         // Streaming actions
         startStreaming: (conversationId, eventId) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation) {
-            conversation.isStreaming = true
-            conversation.streamingEventId = eventId
+            conversation.isStreaming = true;
+            conversation.streamingEventId = eventId;
           }
         }),
         
         updateStreamingEvent: (conversationId, event) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation && conversation.streamingEventId) {
-            const eventIndex = conversation.events.findIndex(e => e.id === conversation.streamingEventId)
+            const eventIndex = conversation.events.findIndex(e => e.id === conversation.streamingEventId);
             if (eventIndex >= 0) {
-              conversation.events[eventIndex] = event
+              conversation.events[eventIndex] = event;
             }
           }
         }),
         
         finishStreaming: (conversationId, finalEvent) => set((state) => {
-          const conversation = state.conversations[conversationId]
+          const conversation = state.conversations[conversationId];
           if (conversation && conversation.streamingEventId) {
-            const eventIndex = conversation.events.findIndex(e => e.id === conversation.streamingEventId)
+            const eventIndex = conversation.events.findIndex(e => e.id === conversation.streamingEventId);
             if (eventIndex >= 0) {
-              conversation.events[eventIndex] = finalEvent
+              conversation.events[eventIndex] = finalEvent;
             }
-            conversation.isStreaming = false
-            conversation.streamingEventId = undefined
+            conversation.isStreaming = false;
+            conversation.streamingEventId = undefined;
           }
         }),
         
         // Workspace actions
         addConversationToWorkspace: (workspaceId, conversationId) => set((state) => {
           if (!state.workspaceConversations[workspaceId]) {
-            state.workspaceConversations[workspaceId] = []
+            state.workspaceConversations[workspaceId] = [];
           }
           if (!state.workspaceConversations[workspaceId].includes(conversationId)) {
-            state.workspaceConversations[workspaceId].push(conversationId)
+            state.workspaceConversations[workspaceId].push(conversationId);
           }
         }),
         
         removeConversationFromWorkspace: (workspaceId, conversationId) => set((state) => {
           if (state.workspaceConversations[workspaceId]) {
             state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId]
-              .filter(id => id !== conversationId)
+              .filter(id => id !== conversationId);
           }
         }),
         
         setWorkspaceConversations: (workspaceId, conversationIds) => set((state) => {
-          state.workspaceConversations[workspaceId] = conversationIds
+          state.workspaceConversations[workspaceId] = conversationIds;
         }),
 
         // UI actions
         setSelectedWorkspace: (workspaceId) => set((state) => {
-          state.ui.selectedWorkspace = workspaceId
+          state.ui.selectedWorkspace = workspaceId;
         }),
 
         // Realtime actions
         subscribeToWorkspace: (workspaceId) => {
-          const state = get()
+          const state = get();
           
           // Don't subscribe if already subscribed
           if (state.realtimeChannels[workspaceId]) {
-            return
+            return;
           }
 
-          const supabase = createClient()
+          const supabase = createClient();
           const channel = supabase
             .channel(`workspace-${workspaceId}`)
             .on(
@@ -204,16 +211,21 @@ export const useEventChatStore = create<EventChatStore>()(
                 filter: `workspace_id=eq.${workspaceId}`
               },
               (payload) => {
-                console.log('📡 Conversation update:', payload)
+                console.log('📡 [REALTIME] Conversation update received', {
+                  timestamp: Date.now(),
+                  eventType: payload.eventType,
+                  conversationId: payload.new?.id || payload.old?.id,
+                  currentLocalEvents: get().conversations[payload.new?.id || payload.old?.id]?.events?.length || 0
+                });
                 
                 if (payload.eventType === 'UPDATE') {
-                  const updatedConversation = payload.new as any
-                  console.log('📝 Updating conversation:', updatedConversation.id, 'title:', updatedConversation.title)
+                  const updatedConversation = payload.new as any;
+                  console.log('📝 Updating conversation:', updatedConversation.id, 'title:', updatedConversation.title);
                   
                   set((state) => {
                     if (state.conversations[updatedConversation.id]) {
                       // Update existing conversation
-                      const currentTitle = state.conversations[updatedConversation.id].meta.title
+                      const currentTitle = state.conversations[updatedConversation.id].meta.title;
                       state.conversations[updatedConversation.id].meta = {
                         ...state.conversations[updatedConversation.id].meta,
                         title: updatedConversation.title,
@@ -221,15 +233,15 @@ export const useEventChatStore = create<EventChatStore>()(
                         assistant_avatar: updatedConversation.assistant_avatar,
                         model_config_overrides: updatedConversation.model_config_overrides,
                         mcp_config_overrides: updatedConversation.mcp_config_overrides,
-                      }
-                      console.log('✅ Conversation updated in store:', currentTitle, '→', updatedConversation.title)
+                      };
+                      console.log('✅ Conversation updated in store:', currentTitle, '→', updatedConversation.title);
                     } else {
-                      console.log('⚠️ Conversation not found in store, queuing update:', updatedConversation.id)
+                      console.log('⚠️ Conversation not found in store, queuing update:', updatedConversation.id);
                       
                       // Conversation not in store yet - retry after a delay
                       setTimeout(() => {
-                        console.log('🔄 Retrying conversation update:', updatedConversation.id)
-                        const currentState = get()
+                        console.log('🔄 Retrying conversation update:', updatedConversation.id);
+                        const currentState = get();
                         if (currentState.conversations[updatedConversation.id]) {
                           set((retryState) => {
                             retryState.conversations[updatedConversation.id].meta = {
@@ -239,19 +251,52 @@ export const useEventChatStore = create<EventChatStore>()(
                               assistant_avatar: updatedConversation.assistant_avatar,
                               model_config_overrides: updatedConversation.model_config_overrides,
                               mcp_config_overrides: updatedConversation.mcp_config_overrides,
-                            }
-                            console.log('✅ Delayed update successful:', updatedConversation.title)
-                          })
+                            };
+                            console.log('✅ Delayed update successful:', updatedConversation.title);
+                          });
                         } else {
-                          console.log('❌ Conversation still not found after retry:', updatedConversation.id)
+                          console.log('❌ Conversation still not found after retry:', updatedConversation.id);
                         }
-                      }, 1000)
+                      }, 1000);
                     }
-                  })
+                  });
                 } else if (payload.eventType === 'INSERT') {
-                  const newConversation = payload.new as any
+                  const newConversation = payload.new as any;
                   
                   set((state) => {
+                    // 🔧 RACE CONDITION FIX: Don't overwrite existing conversations that have events
+                    const existingConversation = state.conversations[newConversation.id];
+                    if (existingConversation && existingConversation.events.length > 0) {
+                      console.log('🔒 [REALTIME] Skipping INSERT - conversation already has events:', {
+                        conversationId: newConversation.id,
+                        existingEventCount: existingConversation.events.length
+                      });
+                      
+                      // Just update metadata without touching events
+                      existingConversation.meta = {
+                        ...existingConversation.meta,
+                        title: newConversation.title,
+                        assistant_name: newConversation.assistant_name,
+                        assistant_avatar: newConversation.assistant_avatar,
+                        model_config_overrides: newConversation.model_config_overrides,
+                        mcp_config_overrides: newConversation.mcp_config_overrides,
+                      };
+                      
+                      // Add to workspace conversations if not already there
+                      if (!state.workspaceConversations[workspaceId]) {
+                        state.workspaceConversations[workspaceId] = [];
+                      }
+                      if (!state.workspaceConversations[workspaceId].includes(newConversation.id)) {
+                        state.workspaceConversations[workspaceId].unshift(newConversation.id);
+                      }
+                      return; // Exit early
+                    }
+                    
+                    console.log('📝 [REALTIME] Creating new conversation from INSERT:', {
+                      conversationId: newConversation.id,
+                      hasExistingConversation: !!existingConversation
+                    });
+                    
                     // Create the full conversation object with metadata
                     const conversationMeta: EventConversationMeta = {
                       id: newConversation.id,
@@ -263,71 +308,71 @@ export const useEventChatStore = create<EventChatStore>()(
                       model_config_overrides: newConversation.model_config_overrides,
                       mcp_config_overrides: newConversation.mcp_config_overrides,
                       created_at: newConversation.created_at
-                    }
+                    };
 
                     const conversation: EventConversation = {
                       id: newConversation.id,
                       events: [], // Events will be loaded when conversation is opened
                       isStreaming: false,
                       meta: conversationMeta
-                    }
+                    };
 
                     // Store the full conversation
-                    state.conversations[newConversation.id] = conversation
+                    state.conversations[newConversation.id] = conversation;
 
                     // Add to workspace conversations if not already there
                     if (!state.workspaceConversations[workspaceId]) {
-                      state.workspaceConversations[workspaceId] = []
+                      state.workspaceConversations[workspaceId] = [];
                     }
                     if (!state.workspaceConversations[workspaceId].includes(newConversation.id)) {
-                      state.workspaceConversations[workspaceId].unshift(newConversation.id)
+                      state.workspaceConversations[workspaceId].unshift(newConversation.id);
                     }
-                  })
+                  });
                 } else if (payload.eventType === 'DELETE') {
-                  const deletedConversation = payload.old as any
+                  const deletedConversation = payload.old as any;
                   
                   set((state) => {
                     // Remove from conversations and workspace
-                    delete state.conversations[deletedConversation.id]
+                    delete state.conversations[deletedConversation.id];
                     if (state.workspaceConversations[workspaceId]) {
                       state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId].filter(
                         id => id !== deletedConversation.id
-                      )
+                      );
                     }
-                  })
+                  });
                 }
               }
             )
-            .subscribe()
+            .subscribe();
 
           set((state) => {
-            state.realtimeChannels[workspaceId] = channel
-          })
+            state.realtimeChannels[workspaceId] = channel;
+          });
         },
 
         unsubscribeFromWorkspace: (workspaceId) => {
-          const state = get()
-          const channel = state.realtimeChannels[workspaceId]
+          const state = get();
+          const channel = state.realtimeChannels[workspaceId];
           
           if (channel) {
-            channel.unsubscribe()
+            channel.unsubscribe();
             set((state) => {
-              delete state.realtimeChannels[workspaceId]
-            })
+              delete state.realtimeChannels[workspaceId];
+            });
           }
         },
 
         cleanup: () => {
-          const state = get()
+          const state = get();
           
           // Unsubscribe from all channels
           Object.values(state.realtimeChannels).forEach(channel => {
-            channel.unsubscribe()
-          })
+            channel.unsubscribe();
+          });
           
           set((state) => {
-            state.realtimeChannels = {}
-          })
+            state.realtimeChannels = {};
+          });
         },
 
       })),
@@ -342,7 +387,7 @@ export const useEventChatStore = create<EventChatStore>()(
       }
     )
   )
-)
+);
 
 // Helper function to convert events to legacy message format for compatibility
 export function eventsToLegacyMessages(events: Event[]): any[] {
@@ -350,7 +395,7 @@ export function eventsToLegacyMessages(events: Event[]): any[] {
     const textContent = event.segments
       .filter(s => s.type === 'text')
       .map(s => s.text)
-      .join('')
+      .join('');
     
     const toolCalls = event.segments
       .filter(s => s.type === 'tool_call')
@@ -361,7 +406,7 @@ export function eventsToLegacyMessages(events: Event[]): any[] {
           name: s.name,
           arguments: JSON.stringify(s.args)
         }
-      }))
+      }));
     
     return {
       id: event.id,
@@ -371,8 +416,8 @@ export function eventsToLegacyMessages(events: Event[]): any[] {
       updated_at: new Date(event.ts).toISOString(),
       order_key: event.ts.toString(),
       json_meta: toolCalls.length > 0 ? { tool_calls: toolCalls } : {}
-    }
-  })
+    };
+  });
 }
 
 // Helper function to convert legacy messages to events for migration
@@ -390,68 +435,68 @@ export function legacyMessagesToEvents(messages: any[]): Event[] {
       }))
     ],
     ts: new Date(message.created_at).getTime()
-  }))
+  }));
 }
 
 // Event-based hooks
 export const useEventConversation = (conversationId: string) =>
-  useEventChatStore((state) => state.conversations[conversationId])
+  useEventChatStore((state) => state.conversations[conversationId]);
 
 export const useEventConversations = () =>
-  useEventChatStore((state) => state.conversations, shallow)
+  useEventChatStore((state) => state.conversations, shallow);
 
 export const useEventIsStreaming = (conversationId: string) =>
-  useEventChatStore((state) => state.conversations[conversationId]?.isStreaming || false)
+  useEventChatStore((state) => state.conversations[conversationId]?.isStreaming || false);
 
 export const useEventSelectedWorkspace = () =>
-  useEventChatStore((state) => state.ui.selectedWorkspace)
+  useEventChatStore((state) => state.ui.selectedWorkspace);
 
 // Action hooks
-export const useEventSetConversation = () => useEventChatStore((state) => state.setConversation)
-export const useEventAddEvent = () => useEventChatStore((state) => state.addEvent)
-export const useEventStartStreaming = () => useEventChatStore((state) => state.startStreaming)
-export const useEventUpdateStreamingEvent = () => useEventChatStore((state) => state.updateStreamingEvent)
-export const useEventFinishStreaming = () => useEventChatStore((state) => state.finishStreaming)
-export const useEventSetSelectedWorkspace = () => useEventChatStore((state) => state.setSelectedWorkspace)
+export const useEventSetConversation = () => useEventChatStore((state) => state.setConversation);
+export const useEventAddEvent = () => useEventChatStore((state) => state.addEvent);
+export const useEventStartStreaming = () => useEventChatStore((state) => state.startStreaming);
+export const useEventUpdateStreamingEvent = () => useEventChatStore((state) => state.updateStreamingEvent);
+export const useEventFinishStreaming = () => useEventChatStore((state) => state.finishStreaming);
+export const useEventSetSelectedWorkspace = () => useEventChatStore((state) => state.setSelectedWorkspace);
 
 // Workspace conversation management hooks
 export const useEventWorkspaceConversations = (workspaceId: string) => 
-  useEventChatStore((state) => state.workspaceConversations[workspaceId])
+  useEventChatStore((state) => state.workspaceConversations[workspaceId]);
 
 export const useEventAddConversationToWorkspace = () => 
-  useEventChatStore((state) => state.addConversationToWorkspace)
+  useEventChatStore((state) => state.addConversationToWorkspace);
 
 export const useEventRemoveConversationFromWorkspace = () => 
-  useEventChatStore((state) => state.removeConversationFromWorkspace)
+  useEventChatStore((state) => state.removeConversationFromWorkspace);
 
 export const useEventSetWorkspaceConversations = () => 
-  useEventChatStore((state) => state.setWorkspaceConversations)
+  useEventChatStore((state) => state.setWorkspaceConversations);
 
 // Realtime hooks
 export const useEventSubscribeToWorkspace = () => 
-  useEventChatStore((state) => state.subscribeToWorkspace)
+  useEventChatStore((state) => state.subscribeToWorkspace);
 
 export const useEventUnsubscribeFromWorkspace = () => 
-  useEventChatStore((state) => state.unsubscribeFromWorkspace)
+  useEventChatStore((state) => state.unsubscribeFromWorkspace);
 
 export const useEventCleanup = () => 
-  useEventChatStore((state) => state.cleanup)
+  useEventChatStore((state) => state.cleanup);
 
 
 // Legacy-compatible exports to match the original store naming
-export const useSelectedWorkspace = useEventSelectedWorkspace
-export const useSetSelectedWorkspace = useEventSetSelectedWorkspace
-export const useConversations = useEventConversations
-export const useConversation = useEventConversation
-export const useSetConversation = useEventSetConversation
-export const useWorkspaceConversations = useEventWorkspaceConversations
-export const useAddConversationToWorkspace = useEventAddConversationToWorkspace
-export const useRemoveConversationFromWorkspace = useEventRemoveConversationFromWorkspace
-export const useSetWorkspaceConversations = useEventSetWorkspaceConversations
-export const useSubscribeToWorkspace = useEventSubscribeToWorkspace
-export const useUnsubscribeFromWorkspace = useEventUnsubscribeFromWorkspace
-export const useCleanup = useEventCleanup
+export const useSelectedWorkspace = useEventSelectedWorkspace;
+export const useSetSelectedWorkspace = useEventSetSelectedWorkspace;
+export const useConversations = useEventConversations;
+export const useConversation = useEventConversation;
+export const useSetConversation = useEventSetConversation;
+export const useWorkspaceConversations = useEventWorkspaceConversations;
+export const useAddConversationToWorkspace = useEventAddConversationToWorkspace;
+export const useRemoveConversationFromWorkspace = useEventRemoveConversationFromWorkspace;
+export const useSetWorkspaceConversations = useEventSetWorkspaceConversations;
+export const useSubscribeToWorkspace = useEventSubscribeToWorkspace;
+export const useUnsubscribeFromWorkspace = useEventUnsubscribeFromWorkspace;
+export const useCleanup = useEventCleanup;
 
 // Type exports for compatibility
-export type { EventConversation as Conversation, EventConversationMeta as ConversationMeta }
-export type { Event }
+export type { EventConversation as Conversation, EventConversationMeta as ConversationMeta };
+export type { Event };

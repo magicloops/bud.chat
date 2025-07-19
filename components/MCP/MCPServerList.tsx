@@ -1,10 +1,10 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Switch } from '@/components/ui/switch'
-import { Checkbox } from '@/components/ui/checkbox'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Wrench, 
   Server, 
@@ -14,9 +14,9 @@ import {
   Plus,
   Settings,
   TestTube
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { MCPServerForm } from './MCPServerForm'
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { MCPServerForm } from './MCPServerForm';
 
 export interface MCPServer {
   id: string
@@ -53,92 +53,92 @@ export function MCPServerList({
   showToolSelection = false,
   className
 }: MCPServerListProps) {
-  const [servers, setServers] = useState<MCPServer[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [testingServers, setTestingServers] = useState<Set<string>>(new Set())
-  const [showAddForm, setShowAddForm] = useState(false)
+  const [servers, setServers] = useState<MCPServer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [testingServers, setTestingServers] = useState<Set<string>>(new Set());
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Fetch MCP servers for the workspace
   const fetchServers = async () => {
     try {
-      setLoading(true)
-      const response = await fetch(`/api/mcp/servers?workspaceId=${workspaceId}`)
+      setLoading(true);
+      const response = await fetch(`/api/mcp/servers?workspaceId=${workspaceId}`);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch MCP servers')
+        throw new Error('Failed to fetch MCP servers');
       }
       
-      const { data } = await response.json()
-      setServers(data || [])
+      const { data } = await response.json();
+      setServers(data || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load servers')
+      setError(err instanceof Error ? err.message : 'Failed to load servers');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     if (workspaceId) {
-      fetchServers()
+      fetchServers();
     }
-  }, [workspaceId])
+  }, [workspaceId]);
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
-    onServerToggle?.(serverId, selected)
-  }
+    onServerToggle?.(serverId, selected);
+  };
 
   const handleToolToggle = (serverId: string, toolName: string, enabled: boolean) => {
-    onToolToggle?.(serverId, toolName, enabled)
-  }
+    onToolToggle?.(serverId, toolName, enabled);
+  };
 
   const testServerConnection = async (serverId: string) => {
-    setTestingServers(prev => new Set([...prev, serverId]))
+    setTestingServers(prev => new Set([...prev, serverId]));
     
     try {
       const response = await fetch(`/api/mcp/servers/${serverId}/test`, {
         method: 'POST'
-      })
+      });
       
-      const result = await response.json()
+      const result = await response.json();
       
       if (result.data?.success) {
         // Show success feedback
-        console.log('Server test successful:', result.data)
+        console.log('Server test successful:', result.data);
       } else {
         // Show error feedback
-        console.error('Server test failed:', result.data?.error)
+        console.error('Server test failed:', result.data?.error);
       }
     } catch (error) {
-      console.error('Server test error:', error)
+      console.error('Server test error:', error);
     } finally {
       setTestingServers(prev => {
-        const newSet = new Set(prev)
-        newSet.delete(serverId)
-        return newSet
-      })
+        const newSet = new Set(prev);
+        newSet.delete(serverId);
+        return newSet;
+      });
     }
-  }
+  };
 
   if (loading) {
     return (
-      <div className={cn("flex items-center justify-center p-8", className)}>
+      <div className={cn('flex items-center justify-center p-8', className)}>
         <Loader2 className="h-6 w-6 animate-spin" />
         <span className="ml-2">Loading MCP servers...</span>
       </div>
-    )
+    );
   }
 
   if (error) {
     return (
-      <div className={cn("p-4 bg-destructive/10 border border-destructive/20 rounded-lg", className)}>
+      <div className={cn('p-4 bg-destructive/10 border border-destructive/20 rounded-lg', className)}>
         <p className="text-destructive">Error: {error}</p>
       </div>
-    )
+    );
   }
 
   const renderEmptyState = () => (
-    <div className={cn("text-center p-8", className)}>
+    <div className={cn('text-center p-8', className)}>
       <Server className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
       <h3 className="text-lg font-medium mb-2">No MCP Servers</h3>
       <p className="text-muted-foreground mb-4">
@@ -149,10 +149,10 @@ export function MCPServerList({
         Add MCP Server
       </Button>
     </div>
-  )
+  );
 
   const renderServerList = () => (
-    <div className={cn("space-y-4", className)}>
+    <div className={cn('space-y-4', className)}>
       {/* Add Server Button */}
       <div className="flex justify-between items-center">
         <div className="text-sm text-muted-foreground">
@@ -170,13 +170,13 @@ export function MCPServerList({
       </div>
 
       {servers.map((server) => {
-        const isSelected = selectedServers.includes(server.id)
-        const isTesting = testingServers.has(server.id)
+        const isSelected = selectedServers.includes(server.id);
+        const isTesting = testingServers.has(server.id);
         
         return (
           <div key={server.id} className={cn(
-            "border rounded-lg p-3 transition-colors",
-            isSelected && "ring-2 ring-primary"
+            'border rounded-lg p-3 transition-colors',
+            isSelected && 'ring-2 ring-primary'
           )}>
             <div className="space-y-2">
               <div className="flex items-start gap-2">
@@ -193,8 +193,8 @@ export function MCPServerList({
                     <span className="text-sm font-medium truncate">{server.name}</span>
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    <Badge variant={server.is_active ? "default" : "secondary"} className="text-xs px-1.5 py-0.5">
-                      {server.is_active ? "Active" : "Inactive"}
+                    <Badge variant={server.is_active ? 'default' : 'secondary'} className="text-xs px-1.5 py-0.5">
+                      {server.is_active ? 'Active' : 'Inactive'}
                     </Badge>
                     <Badge variant="outline" className="text-xs px-1.5 py-0.5">
                       {server.transport_type}
@@ -256,10 +256,10 @@ export function MCPServerList({
               </div>
             )}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 
   return (
     <>
@@ -271,9 +271,9 @@ export function MCPServerList({
         open={showAddForm}
         onClose={() => setShowAddForm(false)}
         onSuccess={() => {
-          fetchServers() // Refresh the server list
+          fetchServers(); // Refresh the server list
         }}
       />
     </>
-  )
+  );
 }
