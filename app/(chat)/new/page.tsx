@@ -7,6 +7,7 @@ import {
   Event,
   useSelectedWorkspace, 
   useSetConversation,
+  useAddConversationToWorkspace,
   ConversationMeta,
   Conversation,
   useEventChatStore
@@ -30,6 +31,7 @@ export default function NewChatPage() {
   const searchParams = useSearchParams()
   const selectedWorkspace = useSelectedWorkspace()
   const setConversation = useSetConversation()
+  const addConversationToWorkspace = useAddConversationToWorkspace()
   
   const budId = searchParams.get('bud')
   
@@ -243,6 +245,35 @@ export default function NewChatPage() {
                 case 'conversationCreated':
                   conversationId = data.conversationId
                   console.log('💾 Conversation created:', conversationId)
+                  
+                  // Manually add to sidebar as fallback (in case realtime subscription didn't work)
+                  if (selectedWorkspace && conversationId) {
+                    console.log('➕ Manually adding conversation to workspace sidebar:', conversationId)
+                    
+                    // Create a basic conversation object for the sidebar
+                    const conversationMeta: ConversationMeta = {
+                      id: conversationId,
+                      title: 'New Chat', // Will be updated when title is generated
+                      workspace_id: selectedWorkspace,
+                      source_bud_id: bud?.id,
+                      assistant_name: bud?.default_json?.name,
+                      assistant_avatar: bud?.default_json?.avatar,
+                      model_config_overrides: undefined,
+                      mcp_config_overrides: undefined,
+                      created_at: new Date().toISOString()
+                    }
+                    
+                    const conversation: Conversation = {
+                      id: conversationId,
+                      events: events, // Use the current events
+                      isStreaming: true,
+                      meta: conversationMeta
+                    }
+                    
+                    // Store the conversation and add to workspace
+                    setConversation(conversationId, conversation)
+                    addConversationToWorkspace(selectedWorkspace, conversationId)
+                  }
                   break
                   
                 case 'token':

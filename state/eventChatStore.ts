@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
+import { shallow } from 'zustand/shallow'
 import { createClient } from '@/lib/supabase/client'
 import { Event, EventLog } from '@/lib/types/events'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -68,6 +69,7 @@ interface EventChatStore {
   subscribeToWorkspace: (workspaceId: string) => void
   unsubscribeFromWorkspace: (workspaceId: string) => void
   cleanup: () => void
+  
 }
 
 export const useEventChatStore = create<EventChatStore>()(
@@ -89,7 +91,10 @@ export const useEventChatStore = create<EventChatStore>()(
         
         updateConversation: (id, updates) => set((state) => {
           if (state.conversations[id]) {
-            Object.assign(state.conversations[id], updates)
+            state.conversations[id] = {
+              ...state.conversations[id],
+              ...updates
+            }
           }
         }),
         
@@ -189,7 +194,7 @@ export const useEventChatStore = create<EventChatStore>()(
 
           const supabase = createClient()
           const channel = supabase
-            .channel(`workspace-events-${workspaceId}`)
+            .channel(`workspace-${workspaceId}`)
             .on(
               'postgres_changes',
               {
@@ -247,6 +252,29 @@ export const useEventChatStore = create<EventChatStore>()(
                   const newConversation = payload.new as any
                   
                   set((state) => {
+                    // Create the full conversation object with metadata
+                    const conversationMeta: EventConversationMeta = {
+                      id: newConversation.id,
+                      title: newConversation.title,
+                      workspace_id: newConversation.workspace_id,
+                      source_bud_id: newConversation.source_bud_id,
+                      assistant_name: newConversation.assistant_name,
+                      assistant_avatar: newConversation.assistant_avatar,
+                      model_config_overrides: newConversation.model_config_overrides,
+                      mcp_config_overrides: newConversation.mcp_config_overrides,
+                      created_at: newConversation.created_at
+                    }
+
+                    const conversation: EventConversation = {
+                      id: newConversation.id,
+                      events: [], // Events will be loaded when conversation is opened
+                      isStreaming: false,
+                      meta: conversationMeta
+                    }
+
+                    // Store the full conversation
+                    state.conversations[newConversation.id] = conversation
+
                     // Add to workspace conversations if not already there
                     if (!state.workspaceConversations[workspaceId]) {
                       state.workspaceConversations[workspaceId] = []
@@ -265,55 +293,6 @@ export const useEventChatStore = create<EventChatStore>()(
                       state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId].filter(
                         id => id !== deletedConversation.id
                       )
-                    }
-                  })
-                }
-              }
-            )
-            .on(
-              'postgres_changes',
-              {
-                event: '*',
-                schema: 'public',
-                table: 'events',
-                filter: `conversation_id=in.(${Object.keys(state.conversations).join(',')})`
-              },
-              (payload) => {
-                console.log('📡 Event update:', payload)
-                
-                if (payload.eventType === 'INSERT') {
-                  const newEvent = payload.new as any
-                  const conversationId = newEvent.conversation_id
-                  
-                  set((state) => {
-                    if (state.conversations[conversationId]) {
-                      const event: Event = {
-                        id: newEvent.id,
-                        role: newEvent.role,
-                        segments: newEvent.segments,
-                        ts: newEvent.ts
-                      }
-                      state.conversations[conversationId].events.push(event)
-                      
-                      // Sort events by timestamp
-                      state.conversations[conversationId].events.sort((a, b) => a.ts - b.ts)
-                    }
-                  })
-                } else if (payload.eventType === 'UPDATE') {
-                  const updatedEvent = payload.new as any
-                  const conversationId = updatedEvent.conversation_id
-                  
-                  set((state) => {
-                    if (state.conversations[conversationId]) {
-                      const eventIndex = state.conversations[conversationId].events.findIndex(e => e.id === updatedEvent.id)
-                      if (eventIndex >= 0) {
-                        state.conversations[conversationId].events[eventIndex] = {
-                          id: updatedEvent.id,
-                          role: updatedEvent.role,
-                          segments: updatedEvent.segments,
-                          ts: updatedEvent.ts
-                        }
-                      }
                     }
                   })
                 }
@@ -350,6 +329,7 @@ export const useEventChatStore = create<EventChatStore>()(
             state.realtimeChannels = {}
           })
         },
+
       })),
       {
         name: 'event-chat-store',
@@ -418,7 +398,7 @@ export const useEventConversation = (conversationId: string) =>
   useEventChatStore((state) => state.conversations[conversationId])
 
 export const useEventConversations = () =>
-  useEventChatStore((state) => state.conversations)
+  useEventChatStore((state) => state.conversations, shallow)
 
 export const useEventIsStreaming = (conversationId: string) =>
   useEventChatStore((state) => state.conversations[conversationId]?.isStreaming || false)
@@ -456,6 +436,7 @@ export const useEventUnsubscribeFromWorkspace = () =>
 
 export const useEventCleanup = () => 
   useEventChatStore((state) => state.cleanup)
+
 
 // Legacy-compatible exports to match the original store naming
 export const useSelectedWorkspace = useEventSelectedWorkspace

@@ -43,8 +43,10 @@ interface ConversationListProps {
 export function ConversationList({ workspaceId }: ConversationListProps) {
   const router = useRouter()
   const pathname = usePathname()
+  
   const conversationsRecord = useConversations()
   const workspaceConversationIds = useWorkspaceConversations(workspaceId)
+  
   const setConversation = useSetConversation()
   const addConversationToWorkspace = useAddConversationToWorkspace()
   const removeConversationFromWorkspace = useRemoveConversationFromWorkspace()
@@ -54,7 +56,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const realtimeSetupRef = useRef(false)
   const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   
-  // Get conversations for this workspace (much simpler with new store)
+  // Get conversations for this workspace
   const workspaceConversations = useMemo(() => {
     const conversationIds = workspaceConversationIds || []
     
@@ -64,8 +66,17 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       .map(conversation => conversation.meta) // Extract metadata for list display
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) // Sort by newest first
     
+    // Debug logging to understand memoization
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📝 ConversationList useMemo recalculated:', {
+        workspaceId,
+        conversationCount: result.length,
+        conversationTitles: result.map(c => ({ id: c.id, title: c.title }))
+      })
+    }
+    
     return result
-  }, [workspaceConversationIds, conversationsRecord, workspaceId])
+  }, [workspaceConversationIds, conversationsRecord])
   
   // Extract current conversation ID from URL
   const currentConversationId = pathname.split('/').pop()
@@ -232,12 +243,17 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
-          return conversationMeta.title || 'Untitled'
+          const title = conversationMeta.title || 'Untitled'
+          // Debug logging to understand title updates
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`📝 Rendering conversation ${conversationMeta.id} with title:`, title)
+          }
+          return title
         }
         
         return (
           <Link
-            key={conversationMeta.id}
+            key={`${conversationMeta.id}-${conversationMeta.title || 'untitled'}`}
             href={`/chat/${conversationMeta.id}`}
             prefetch={false}
             onMouseEnter={() => handleConversationHover(conversationMeta.id)}
