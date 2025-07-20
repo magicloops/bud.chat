@@ -246,7 +246,6 @@ export function MCPServerList({
                         <Switch
                           checked={tool.is_enabled}
                           onCheckedChange={(checked) => handleToolToggle(server.id, tool.name, checked)}
-                          size="sm"
                           className="ml-2 flex-shrink-0"
                         />
                       )}

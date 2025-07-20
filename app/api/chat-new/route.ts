@@ -35,8 +35,8 @@ async function generateConversationTitleInBackground(conversationId: string, eve
       .slice(0, 4) // Use first few events
       .map(event => {
         const textContent = event.segments
-          .filter(s => s.type === 'text')
-          .map(s => s.text)
+          .filter((s: any) => s.type === 'text')
+          .map((s: any) => s.text)
           .join('')
         return `${event.role}: ${textContent}`
       })
@@ -236,7 +236,7 @@ async function executeMCPToolCalls(
       try {
         const result = await mcpClient.callTool({
           name: toolCall.name,
-          arguments: toolCall.args || {}
+          arguments: (toolCall.args || {}) as Record<string, unknown>
         })
         
         // Process result content
@@ -260,10 +260,11 @@ async function executeMCPToolCalls(
         })
       } catch (toolError) {
         console.error('❌ Tool execution failed:', toolError)
+        const errorMessage = toolError instanceof Error ? toolError.message : String(toolError)
         results.push({
           id: toolCall.id,
-          output: { error: toolError.message },
-          error: toolError.message
+          output: { error: errorMessage },
+          error: errorMessage
         })
       }
     }
@@ -273,10 +274,11 @@ async function executeMCPToolCalls(
   } catch (error) {
     console.error('❌ MCP execution failed:', error)
     // Return error for all tool calls
+    const errorMessage = error instanceof Error ? error.message : String(error)
     return toolCalls.map(call => ({
       id: call.id,
-      output: { error: error.message },
-      error: error.message
+      output: { error: errorMessage },
+      error: errorMessage
     }))
   }
   
@@ -350,14 +352,14 @@ export async function POST(request: NextRequest) {
           eventLog.addEvent(createTextEvent('user', message.content))
         } else if (message.role === 'assistant') {
           // Handle assistant messages with potential tool calls
-          const segments = []
+          const segments: Array<{type: 'text', text: string} | {type: 'tool_call', id: string, name: string, args: object}> = []
           if (message.content) {
-            segments.push({ type: 'text', text: message.content })
+            segments.push({ type: 'text' as const, text: message.content })
           }
           if (message.json_meta?.tool_calls) {
             for (const toolCall of message.json_meta.tool_calls) {
               segments.push({
-                type: 'tool_call',
+                type: 'tool_call' as const,
                 id: toolCall.id,
                 name: toolCall.function.name,
                 args: JSON.parse(toolCall.function.arguments || '{}')
@@ -451,7 +453,7 @@ export async function POST(request: NextRequest) {
               console.log('🤖 Message count:', anthropicMessages?.length)
               
               // Get available tools if budId is provided
-              let tools = []
+              let tools: any[] = []
               if (budId) {
                 try {
                   const { data: bud } = await supabase
@@ -512,7 +514,7 @@ export async function POST(request: NextRequest) {
               console.log('📡 Anthropic stream created, starting to process...')
               
               for await (const event of stream) {
-                console.log('📨 Received Anthropic event:', event.type, event.delta?.type)
+                console.log('📨 Received Anthropic event:', event.type, 'delta' in event ? (event as any).delta?.type : 'no-delta')
                 
                 switch (event.type) {
                   case 'message_start':
@@ -601,7 +603,7 @@ export async function POST(request: NextRequest) {
               const openaiMessages = eventsToOpenAIMessages(events)
               
               // Get available tools if budId is provided
-              let tools = []
+              let tools: any[] = []
               if (budId) {
                 try {
                   const { data: bud } = await supabase
@@ -659,7 +661,7 @@ export async function POST(request: NextRequest) {
               
               console.log('🔄 Sending request to OpenAI:', JSON.stringify(request, null, 2));
               
-              const stream = await openai.chat.completions.create(request)
+              const stream = await openai.chat.completions.create(request) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
               
               console.log('📡 OpenAI stream created, starting to process...');
               
@@ -846,9 +848,10 @@ export async function POST(request: NextRequest) {
           
         } catch (error) {
           console.error('❌ Streaming error:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error)
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: "error",
-            error: error?.message || error?.toString() || 'Unknown error'
+            error: errorMessage
           })}\n\n`))
           controller.close();
         }

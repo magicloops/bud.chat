@@ -24,7 +24,8 @@ export async function createMCPClientForConversation(
       await clientManager.initialize(config.servers);
       return clientManager;
     } catch (clientError) {
-      console.warn('⚠️ MCP direct client failed, falling back to proxy:', clientError.message);
+      const clientErrorMessage = clientError instanceof Error ? clientError.message : String(clientError);
+      console.warn('⚠️ MCP direct client failed, falling back to proxy:', clientErrorMessage);
       return await createMCPProxy(config.servers);
     }
   } catch (error) {
@@ -54,7 +55,8 @@ export async function createMCPClientForBud(
       await clientManager.initialize(config.servers);
       return clientManager;
     } catch (clientError) {
-      console.warn('⚠️ MCP direct client failed, falling back to proxy:', clientError.message);
+      const clientErrorMessage = clientError instanceof Error ? clientError.message : String(clientError);
+      console.warn('⚠️ MCP direct client failed, falling back to proxy:', clientErrorMessage);
       return await createMCPProxy(config.servers);
     }
   } catch (error) {

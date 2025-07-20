@@ -166,7 +166,9 @@ export function useEventChat({
               switch (data.type) {
                 case 'conversationCreated':
                   conversationId = data.conversationId;
-                  onConversationCreated?.(conversationId);
+                  if (conversationId) {
+                    onConversationCreated?.(conversationId);
+                  }
                   break;
                   
                 case 'token':

@@ -1,7 +1,17 @@
 // Provider mapper exports
 
-export * from './anthropic';
-export * from './openai';
+// Explicit exports to avoid duplicates
+export {
+  eventsToAnthropicMessages,
+  anthropicStreamDeltaToEvent,
+  createToolResultFromMCPResponse,
+  extractPendingToolCalls
+} from './anthropic';
+
+export {
+  eventsToOpenAIMessages,
+  openaiStreamDeltaToEvent
+} from './openai';
 
 import { Event } from '@/lib/types/events';
 import { eventsToAnthropicMessages, anthropicResponseToEvents } from './anthropic';

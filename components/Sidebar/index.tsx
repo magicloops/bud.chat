@@ -8,6 +8,7 @@ import { ConversationList } from './ConversationList';
 import { WorkspaceSelector } from './WorkspaceSelector';
 import { UserMenu } from './UserMenu';
 import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/eventChatStore';
+import { Workspace } from '@/lib/types';
 import { 
   useWorkspaces, 
   useSetWorkspaces, 
@@ -44,7 +45,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
         
         const response = await fetch('/api/workspaces');
         if (response.ok) {
-          const workspacesData = await response.json();
+          const workspacesData: Workspace[] = await response.json();
           
           // If no workspaces exist, create a default one
           if (workspacesData.length === 0) {

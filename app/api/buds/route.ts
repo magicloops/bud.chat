@@ -1,16 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-
-export interface BudConfig {
-  name: string
-  avatar?: string
-  systemPrompt: string
-  model: string
-  temperature?: number
-  maxTokens?: number
-  greeting?: string
-  tools?: string[]
-}
+import { BudConfig } from '@/lib/types';
 
 export interface CreateBudRequest {
   name: string

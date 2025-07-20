@@ -7,6 +7,19 @@ import { createClient } from '@/lib/supabase/client';
 import { Event, EventLog } from '@/lib/types/events';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
+// Properly typed Supabase realtime payload
+interface RealtimePayload {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  new?: {
+    id: string;
+    [key: string]: any;
+  };
+  old?: {
+    id: string;
+    [key: string]: any;
+  };
+}
+
 // Event-based conversation types
 export interface EventConversationMeta {
   id: string
@@ -214,129 +227,143 @@ export const useEventChatStore = create<EventChatStore>()(
                 console.log('📡 [REALTIME] Conversation update received', {
                   timestamp: Date.now(),
                   eventType: payload.eventType,
-                  conversationId: payload.new?.id || payload.old?.id,
-                  currentLocalEvents: get().conversations[payload.new?.id || payload.old?.id]?.events?.length || 0
+                  conversationId: (payload.new && 'id' in payload.new ? payload.new.id : null) || 
+                                 (payload.old && 'id' in payload.old ? payload.old.id : null),
+                  currentLocalEvents: get().conversations[(payload.new && 'id' in payload.new ? payload.new.id : null) || 
+                                                        (payload.old && 'id' in payload.old ? payload.old.id : null)]?.events?.length || 0
                 });
                 
-                if (payload.eventType === 'UPDATE') {
-                  const updatedConversation = payload.new as any;
-                  console.log('📝 Updating conversation:', updatedConversation.id, 'title:', updatedConversation.title);
+                if (payload.eventType === 'UPDATE' && payload.new && 'id' in payload.new) {
+                  const updatedConversation = payload.new;
+                  const conversationId = updatedConversation.id as string;
+                  const title = 'title' in updatedConversation ? String(updatedConversation.title || 'Untitled') : 'Untitled';
+                  console.log('📝 Updating conversation:', conversationId, 'title:', title);
                   
                   set((state) => {
-                    if (state.conversations[updatedConversation.id]) {
+                    if (state.conversations[conversationId]) {
                       // Update existing conversation
-                      const currentTitle = state.conversations[updatedConversation.id].meta.title;
-                      state.conversations[updatedConversation.id].meta = {
-                        ...state.conversations[updatedConversation.id].meta,
-                        title: updatedConversation.title,
-                        assistant_name: updatedConversation.assistant_name,
-                        assistant_avatar: updatedConversation.assistant_avatar,
-                        model_config_overrides: updatedConversation.model_config_overrides,
-                        mcp_config_overrides: updatedConversation.mcp_config_overrides,
+                      const currentTitle = state.conversations[conversationId].meta.title;
+                      state.conversations[conversationId].meta = {
+                        ...state.conversations[conversationId].meta,
+                        title: 'title' in updatedConversation ? updatedConversation.title as string : state.conversations[conversationId].meta.title,
+                        assistant_name: 'assistant_name' in updatedConversation ? updatedConversation.assistant_name as string : state.conversations[conversationId].meta.assistant_name,
+                        assistant_avatar: 'assistant_avatar' in updatedConversation ? updatedConversation.assistant_avatar as string : state.conversations[conversationId].meta.assistant_avatar,
+                        model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, any> : state.conversations[conversationId].meta.model_config_overrides,
+                        mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, any> : state.conversations[conversationId].meta.mcp_config_overrides,
                       };
-                      console.log('✅ Conversation updated in store:', currentTitle, '→', updatedConversation.title);
+                      console.log('✅ Conversation updated in store:', currentTitle, '→', title);
                     } else {
-                      console.log('⚠️ Conversation not found in store, queuing update:', updatedConversation.id);
+                      console.log('⚠️ Conversation not found in store, queuing update:', conversationId);
                       
                       // Conversation not in store yet - retry after a delay
                       setTimeout(() => {
-                        console.log('🔄 Retrying conversation update:', updatedConversation.id);
+                        console.log('🔄 Retrying conversation update:', conversationId);
                         const currentState = get();
-                        if (currentState.conversations[updatedConversation.id]) {
+                        if (currentState.conversations[conversationId]) {
                           set((retryState) => {
-                            retryState.conversations[updatedConversation.id].meta = {
-                              ...retryState.conversations[updatedConversation.id].meta,
-                              title: updatedConversation.title,
-                              assistant_name: updatedConversation.assistant_name,
-                              assistant_avatar: updatedConversation.assistant_avatar,
-                              model_config_overrides: updatedConversation.model_config_overrides,
-                              mcp_config_overrides: updatedConversation.mcp_config_overrides,
+                            retryState.conversations[conversationId].meta = {
+                              ...retryState.conversations[conversationId].meta,
+                              title: 'title' in updatedConversation ? updatedConversation.title as string : retryState.conversations[conversationId].meta.title,
+                              assistant_name: 'assistant_name' in updatedConversation ? updatedConversation.assistant_name as string : retryState.conversations[conversationId].meta.assistant_name,
+                              assistant_avatar: 'assistant_avatar' in updatedConversation ? updatedConversation.assistant_avatar as string : retryState.conversations[conversationId].meta.assistant_avatar,
+                              model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, any> : retryState.conversations[conversationId].meta.model_config_overrides,
+                              mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, any> : retryState.conversations[conversationId].meta.mcp_config_overrides,
                             };
-                            console.log('✅ Delayed update successful:', updatedConversation.title);
+                            console.log('✅ Delayed update successful:', title);
                           });
                         } else {
-                          console.log('❌ Conversation still not found after retry:', updatedConversation.id);
+                          console.log('❌ Conversation still not found after retry:', conversationId);
                         }
                       }, 1000);
                     }
                   });
                 } else if (payload.eventType === 'INSERT') {
-                  const newConversation = payload.new as any;
+                  if (!payload.new || typeof payload.new !== 'object' || !('id' in payload.new)) {
+                    console.warn('INSERT payload missing new object or id');
+                    return;
+                  }
+                  const newConversation = payload.new;
                   
                   set((state) => {
                     // 🔧 RACE CONDITION FIX: Don't overwrite existing conversations that have events
-                    const existingConversation = state.conversations[newConversation.id];
+                    const conversationId = newConversation.id as string;
+                    const existingConversation = state.conversations[conversationId];
                     if (existingConversation && existingConversation.events.length > 0) {
                       console.log('🔒 [REALTIME] Skipping INSERT - conversation already has events:', {
-                        conversationId: newConversation.id,
+                        conversationId,
                         existingEventCount: existingConversation.events.length
                       });
                       
                       // Just update metadata without touching events
                       existingConversation.meta = {
                         ...existingConversation.meta,
-                        title: newConversation.title,
-                        assistant_name: newConversation.assistant_name,
-                        assistant_avatar: newConversation.assistant_avatar,
-                        model_config_overrides: newConversation.model_config_overrides,
-                        mcp_config_overrides: newConversation.mcp_config_overrides,
+                        title: 'title' in newConversation ? newConversation.title : existingConversation.meta.title,
+                        assistant_name: 'assistant_name' in newConversation ? newConversation.assistant_name : existingConversation.meta.assistant_name,
+                        assistant_avatar: 'assistant_avatar' in newConversation ? newConversation.assistant_avatar : existingConversation.meta.assistant_avatar,
+                        model_config_overrides: 'model_config_overrides' in newConversation ? newConversation.model_config_overrides : existingConversation.meta.model_config_overrides,
+                        mcp_config_overrides: 'mcp_config_overrides' in newConversation ? newConversation.mcp_config_overrides : existingConversation.meta.mcp_config_overrides,
                       };
                       
                       // Add to workspace conversations if not already there
                       if (!state.workspaceConversations[workspaceId]) {
                         state.workspaceConversations[workspaceId] = [];
                       }
-                      if (!state.workspaceConversations[workspaceId].includes(newConversation.id)) {
-                        state.workspaceConversations[workspaceId].unshift(newConversation.id);
+                      if (!state.workspaceConversations[workspaceId].includes(conversationId)) {
+                        state.workspaceConversations[workspaceId].unshift(conversationId);
                       }
                       return; // Exit early
                     }
                     
                     console.log('📝 [REALTIME] Creating new conversation from INSERT:', {
-                      conversationId: newConversation.id,
+                      conversationId,
                       hasExistingConversation: !!existingConversation
                     });
                     
                     // Create the full conversation object with metadata
                     const conversationMeta: EventConversationMeta = {
-                      id: newConversation.id,
-                      title: newConversation.title,
-                      workspace_id: newConversation.workspace_id,
-                      source_bud_id: newConversation.source_bud_id,
-                      assistant_name: newConversation.assistant_name,
-                      assistant_avatar: newConversation.assistant_avatar,
-                      model_config_overrides: newConversation.model_config_overrides,
-                      mcp_config_overrides: newConversation.mcp_config_overrides,
-                      created_at: newConversation.created_at
+                      id: conversationId,
+                      title: 'title' in newConversation ? newConversation.title as string : undefined,
+                      workspace_id: 'workspace_id' in newConversation ? newConversation.workspace_id as string : workspaceId,
+                      source_bud_id: 'source_bud_id' in newConversation ? newConversation.source_bud_id as string : undefined,
+                      assistant_name: 'assistant_name' in newConversation ? newConversation.assistant_name as string : undefined,
+                      assistant_avatar: 'assistant_avatar' in newConversation ? newConversation.assistant_avatar as string : undefined,
+                      model_config_overrides: 'model_config_overrides' in newConversation ? newConversation.model_config_overrides as Record<string, any> : undefined,
+                      mcp_config_overrides: 'mcp_config_overrides' in newConversation ? newConversation.mcp_config_overrides as Record<string, any> : undefined,
+                      created_at: 'created_at' in newConversation ? newConversation.created_at as string : new Date().toISOString()
                     };
 
                     const conversation: EventConversation = {
-                      id: newConversation.id,
+                      id: conversationMeta.id,
                       events: [], // Events will be loaded when conversation is opened
                       isStreaming: false,
                       meta: conversationMeta
                     };
 
                     // Store the full conversation
-                    state.conversations[newConversation.id] = conversation;
+                    state.conversations[conversationMeta.id] = conversation;
 
                     // Add to workspace conversations if not already there
                     if (!state.workspaceConversations[workspaceId]) {
                       state.workspaceConversations[workspaceId] = [];
                     }
-                    if (!state.workspaceConversations[workspaceId].includes(newConversation.id)) {
-                      state.workspaceConversations[workspaceId].unshift(newConversation.id);
+                    if (!state.workspaceConversations[workspaceId].includes(conversationMeta.id)) {
+                      state.workspaceConversations[workspaceId].unshift(conversationMeta.id);
                     }
                   });
                 } else if (payload.eventType === 'DELETE') {
-                  const deletedConversation = payload.old as any;
+                  if (!payload.old || typeof payload.old !== 'object' || !('id' in payload.old)) {
+                    console.warn('DELETE payload missing old object or id');
+                    return;
+                  }
+                  const deletedConversation = payload.old;
                   
                   set((state) => {
                     // Remove from conversations and workspace
-                    delete state.conversations[deletedConversation.id];
+                    const deletedId = deletedConversation.id as string;
+                    delete state.conversations[deletedId];
                     if (state.workspaceConversations[workspaceId]) {
                       state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId].filter(
-                        id => id !== deletedConversation.id
+                        id => id !== deletedId
                       );
                     }
                   });
@@ -345,9 +372,13 @@ export const useEventChatStore = create<EventChatStore>()(
             )
             .subscribe();
 
-          set((state) => {
-            state.realtimeChannels[workspaceId] = channel;
-          });
+          set((state) => ({
+            ...state,
+            realtimeChannels: {
+              ...state.realtimeChannels,
+              [workspaceId]: channel
+            }
+          }));
         },
 
         unsubscribeFromWorkspace: (workspaceId) => {
@@ -356,9 +387,12 @@ export const useEventChatStore = create<EventChatStore>()(
           
           if (channel) {
             channel.unsubscribe();
-            set((state) => {
-              delete state.realtimeChannels[workspaceId];
-            });
+            set((state) => ({
+              ...state,
+              realtimeChannels: Object.fromEntries(
+                Object.entries(state.realtimeChannels).filter(([key]) => key !== workspaceId)
+              )
+            }));
           }
         },
 
@@ -370,9 +404,10 @@ export const useEventChatStore = create<EventChatStore>()(
             channel.unsubscribe();
           });
           
-          set((state) => {
-            state.realtimeChannels = {};
-          });
+          set((state) => ({
+            ...state,
+            realtimeChannels: {}
+          }));
         },
 
       })),
@@ -442,8 +477,8 @@ export function legacyMessagesToEvents(messages: any[]): Event[] {
 export const useEventConversation = (conversationId: string) =>
   useEventChatStore((state) => state.conversations[conversationId]);
 
-export const useEventConversations = () =>
-  useEventChatStore((state) => state.conversations, shallow);
+export const useEventConversations = (): Record<string, EventConversation> =>
+  useEventChatStore((state) => state.conversations);
 
 export const useEventIsStreaming = (conversationId: string) =>
   useEventChatStore((state) => state.conversations[conversationId]?.isStreaming || false);

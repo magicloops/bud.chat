@@ -178,7 +178,17 @@ export async function POST(
     if (relevantEvents.length > 0) {
       try {
         for (const event of relevantEvents) {
-          const savedEvent = await saveEvent(newConversation.id, event, event.order_key);
+          // Convert DatabaseEvent back to Event (remove database-specific fields)
+          const eventToSave = {
+            id: event.id,
+            role: event.role,
+            segments: event.segments,
+            ts: event.ts
+          };
+          const savedEvent = await saveEvent(eventToSave, {
+            conversationId: newConversation.id,
+            orderKey: event.order_key
+          });
           insertedEvents.push(savedEvent);
         }
         console.log('🌿 Events copied successfully, order preserved by order_key');

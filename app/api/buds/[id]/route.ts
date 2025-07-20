@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { BudConfig } from '../route';
+import { BudConfig } from '@/lib/types';
 
 export interface UpdateBudRequest {
   name?: string
@@ -132,7 +132,8 @@ export async function PUT(
     
     if (body.config) {
       // Extract MCP config from the update
-      const { mcpConfig, ...budConfig } = body.config;
+      const fullConfig = body.config as BudConfig;
+      const { mcpConfig, ...budConfig } = fullConfig;
       
       // Merge with existing config (excluding MCP config)
       const currentConfig = existingBud.default_json as BudConfig;

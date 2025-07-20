@@ -50,8 +50,9 @@ export async function GET(
       return new Response('Conversation not found', { status: 404 });
     }
 
-    // Check if user is a member of the workspace
-    const isMember = conversation.workspace?.workspace_members?.some(
+    // Check if user is a member of the workspace  
+    const workspace = (conversation as any).workspace;
+    const isMember = workspace?.workspace_members?.some(
       (member: any) => member.user_id === user.id
     );
     if (!isMember) {
@@ -63,8 +64,9 @@ export async function GET(
     let effectiveAssistantAvatar = conversation.assistant_avatar;
 
     // If no custom name/avatar and there's a source bud, use bud defaults
-    if ((!effectiveAssistantName || !effectiveAssistantAvatar) && conversation.buds) {
-      const budConfig = conversation.buds.default_json;
+    const buds = (conversation as any).buds;
+    if ((!effectiveAssistantName || !effectiveAssistantAvatar) && buds) {
+      const budConfig = buds.default_json;
       if (!effectiveAssistantName && budConfig.name) {
         effectiveAssistantName = budConfig.name;
       }
@@ -74,16 +76,15 @@ export async function GET(
     }
 
     // Add effective identity to response
+    // Destructure to exclude buds from response
+    const { buds: _, ...conversationWithoutBuds } = conversation as any;
     const responseData = {
-      ...conversation,
+      ...conversationWithoutBuds,
       effective_assistant_name: effectiveAssistantName || 'Assistant',
       effective_assistant_avatar: effectiveAssistantAvatar || '🤖',
       // Include bud data for theme and other config access
-      bud_config: conversation.buds?.default_json || null
+      bud_config: buds?.default_json || null
     };
-
-    // Remove the nested bud data from response (we've extracted what we need)
-    delete responseData.buds;
 
     // If events are requested, fetch them too
     if (includeEvents) {
@@ -143,7 +144,9 @@ export async function PATCH(
       return new Response('Conversation not found', { status: 404 });
     }
 
-    const isMember = conversation.workspace?.workspace_members?.some(
+    // Check if user is a member of the workspace  
+    const workspace = (conversation as any).workspace;
+    const isMember = workspace?.workspace_members?.some(
       (member: any) => member.user_id === user.id
     );
     if (!isMember) {
@@ -211,7 +214,9 @@ export async function DELETE(
       return new Response('Conversation not found', { status: 404 });
     }
 
-    const isMember = conversation.workspace?.workspace_members?.some(
+    // Check if user is a member of the workspace  
+    const workspace = (conversation as any).workspace;
+    const isMember = workspace?.workspace_members?.some(
       (member: any) => member.user_id === user.id
     );
     if (!isMember) {

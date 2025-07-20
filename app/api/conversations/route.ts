@@ -64,8 +64,9 @@ export async function GET(request: NextRequest) {
       let effectiveAssistantAvatar = conversation.assistant_avatar;
 
       // If no custom name/avatar and there's a source bud, use bud defaults
-      if ((!effectiveAssistantName || !effectiveAssistantAvatar) && conversation.buds) {
-        const budConfig = conversation.buds.default_json;
+      const budData = (conversation as any).buds;
+      if ((!effectiveAssistantName || !effectiveAssistantAvatar) && budData) {
+        const budConfig = budData.default_json;
         if (!effectiveAssistantName && budConfig.name) {
           effectiveAssistantName = budConfig.name;
         }

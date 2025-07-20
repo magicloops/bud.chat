@@ -1,21 +1,11 @@
 // Anthropic provider mapper for event-based messages
 
 import { Event, Segment, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import type Anthropic from '@anthropic-ai/sdk';
 
-export interface AnthropicMessage {
-  role: 'user' | 'assistant';
-  content: AnthropicContent[];
-}
-
-export interface AnthropicContent {
-  type: 'text' | 'tool_use' | 'tool_result';
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: any;
-  tool_use_id?: string;
-  content?: string;
-}
+// Use the actual SDK types instead of custom interfaces
+type AnthropicMessage = Anthropic.Messages.MessageParam;
+type AnthropicContent = Anthropic.Messages.ContentBlock;
 
 export interface AnthropicResponse {
   id: string;
@@ -31,33 +21,27 @@ export interface AnthropicResponse {
   };
 }
 
-export interface AnthropicStreamDelta {
-  type: 'content_block_delta' | 'content_block_start' | 'content_block_stop' | 'message_delta' | 'message_start' | 'message_stop';
-  index?: number;
-  delta?: {
-    type?: 'text_delta' | 'input_json_delta';
-    text?: string;
-    partial_json?: string;
-  };
-  content_block?: {
-    type: 'text' | 'tool_use';
-    id?: string;
-    name?: string;
-    input?: any;
-    text?: string;
-  };
-}
+// Use the actual SDK stream event type
+type AnthropicStreamDelta = Anthropic.Messages.RawMessageStreamEvent;
 
 /**
  * Convert events to Anthropic message format
  */
 export function eventsToAnthropicMessages(events: Event[]): { 
-  messages: AnthropicMessage[], 
+  messages: Anthropic.Messages.MessageParam[], 
   system: string 
 } {
   const eventLog = new EventLog(events);
-  const messages = eventLog.toProviderMessages('anthropic') as AnthropicMessage[];
+  const providerMessages = eventLog.toProviderMessages('anthropic');
   const system = eventLog.getSystemParameter();
+  
+  // Convert to proper SDK format
+  const messages: Anthropic.Messages.MessageParam[] = providerMessages.map((msg: any) => {
+    return {
+      role: msg.role,
+      content: msg.content
+    };
+  });
   
   return { messages, system };
 }

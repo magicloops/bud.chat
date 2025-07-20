@@ -256,8 +256,8 @@ export default function NewChatPage() {
                       title: 'New Chat', // Will be updated when title is generated
                       workspace_id: selectedWorkspace,
                       source_bud_id: bud?.id,
-                      assistant_name: bud?.default_json?.name,
-                      assistant_avatar: bud?.default_json?.avatar,
+                      assistant_name: (bud?.default_json as any)?.name,
+                      assistant_avatar: (bud?.default_json as any)?.avatar,
                       model_config_overrides: undefined,
                       mcp_config_overrides: undefined,
                       created_at: new Date().toISOString()
@@ -373,7 +373,7 @@ export default function NewChatPage() {
                     // 4. Pre-populate Zustand store with local state
                     const budConfig = bud?.default_json as any;
                     // Check if conversation already exists in store (from realtime update)
-                    const existingConversation = setConversation ? useEventChatStore.getState().conversations[conversationId] : null;
+                    const existingConversation = useEventChatStore.getState().conversations[conversationId];
                     
                     const conversationMeta: ConversationMeta = {
                       id: conversationId,

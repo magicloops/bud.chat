@@ -47,7 +47,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
 
   // Filter buds based on search and model
   const filteredBuds = buds.filter(bud => {
-    const config = bud.default_json as BudConfig;
+    const config = bud.default_json;
     const matchesSearch = !searchQuery || 
       config.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase());
@@ -58,7 +58,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
   });
 
   // Get unique models for filter
-  const availableModels = [...new Set(buds.map(bud => (bud.default_json as BudConfig).model))];
+  const availableModels = [...new Set(buds.map(bud => bud.default_json.model))];
 
   const handleBudSelect = (budId: string) => {
     router.push(`/new?bud=${budId}`);

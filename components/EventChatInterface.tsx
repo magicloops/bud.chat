@@ -167,7 +167,6 @@ export default function EventChatInterface({
           <EventStream
             events={events}
             isStreaming={isStreaming}
-            streamingEventId={streamingEventId}
             className="h-full"
           />
         )}

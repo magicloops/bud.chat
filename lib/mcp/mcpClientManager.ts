@@ -233,35 +233,17 @@ export class MCPClientManager {
       if (config.transport_type === 'stdio') {
         console.log('🔄 Sending initialize request for stdio transport...');
         
-        // Add a small delay to ensure transport is fully ready
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Connect using the modern MCP SDK pattern
+        await client.connect(transport);
+        console.log('✅ MCP client connected successfully');
         
-        // Send initialize request using the correct MCP SDK pattern
-        const initResult = await client.request({
-          method: 'initialize', 
-          params: { 
-            protocolVersion: '2024-11-05',
-            capabilities: { tools: {} },
-            clientInfo: { name: 'bud.chat', version: '1.0.0' }
-          }
-        });
-        
-        console.log('✅ Initialize response received:', initResult);
-        
-        // Send initialized notification
-        console.log('🔄 Sending initialized notification...');
-        await client.notification({ method: 'initialized', params: {} });
-        
-        console.log('✅ MCP client fully initialized:', {
-          serverName: initResult.serverInfo?.name || 'Unknown',
-          version: initResult.serverInfo?.version || 'Unknown',
-          capabilities: Object.keys(initResult.capabilities || {})
-        });
+        console.log('✅ MCP client fully initialized and ready for tool calls');
       } else {
         console.log('✅ HTTP transport connected and initialized automatically');
       }
     } catch (error) {
-      console.error('❌ MCP initialization failed:', error.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('❌ MCP initialization failed:', errorMessage);
       console.error('❌ Error details:', error);
       throw error;
     }

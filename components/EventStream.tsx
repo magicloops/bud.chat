@@ -278,7 +278,7 @@ export function EventStream({
                     finalStore.setConversation(conversationId, {
                       ...finalConv,
                       isStreaming: false,
-                      streamingEventId: null
+                      streamingEventId: undefined
                     });
                   }
                   break;
@@ -293,7 +293,7 @@ export function EventStream({
                       ...errorConv,
                       events: errorConv.events.slice(0, -2), // Remove user + assistant events
                       isStreaming: false,
-                      streamingEventId: null
+                      streamingEventId: undefined
                     });
                   }
                   break;
@@ -314,7 +314,7 @@ export function EventStream({
           ...errorConv,
           events: errorConv.events.slice(0, -2), // Remove user + assistant events
           isStreaming: false,
-          streamingEventId: null
+          streamingEventId: undefined
         });
       }
       throw error;

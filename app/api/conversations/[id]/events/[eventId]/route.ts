@@ -62,7 +62,7 @@ export async function PATCH(
     // Update the event's segments with new content
     const updatedSegments = [
       {
-        type: 'text',
+        type: 'text' as const,
         text: content
       }
     ];

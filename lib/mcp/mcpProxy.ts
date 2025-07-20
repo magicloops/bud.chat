@@ -4,7 +4,8 @@ import type {
   MCPServerConfig,
   MCPToolCall,
   MCPToolResult,
-  OpenAITool
+  OpenAITool,
+  OpenAIToolCall
 } from './types';
 
 export class MCPProxy {
@@ -28,9 +29,9 @@ export class MCPProxy {
   async executeTool(toolCall: OpenAIToolCall): Promise<MCPToolResult> {
     console.log('🔧 MCP Proxy: Tool execution not implemented:', toolCall.function.name);
     return {
-      success: false,
-      error: 'MCP Proxy not implemented yet',
-      result: null
+      tool_name: toolCall.function.name,
+      result: null,
+      error: 'MCP Proxy not implemented yet'
     };
   }
 

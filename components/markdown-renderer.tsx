@@ -24,7 +24,8 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
         rehypePlugins={[rehypeHighlight]}
         components={{
         // Custom styling for different elements
-          code: ({ node, inline, className, children, ...props }) => {
+          code: ({ node, className, children, ...props }: any) => {
+            const inline = (props as any)?.inline;
             const match = /language-(\w+)/.exec(className || '');
             return !inline && match ? (
               <pre className="bg-muted rounded-md p-1 overflow-x-auto my-2 w-0 min-w-full">

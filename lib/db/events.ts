@@ -58,7 +58,7 @@ export async function saveEvent(
 /**
  * Get all events for a conversation
  */
-export async function getConversationEvents(conversationId: string): Promise<Event[]> {
+export async function getConversationEvents(conversationId: string): Promise<DatabaseEvent[]> {
   const supabase = await createClient();
   
   const { data, error } = await supabase
@@ -71,14 +71,8 @@ export async function getConversationEvents(conversationId: string): Promise<Eve
     throw new Error(`Failed to get conversation events: ${error.message}`);
   }
   
-  
-  // Convert database events to events
-  return data.map(dbEvent => ({
-    id: dbEvent.id,
-    role: dbEvent.role,
-    segments: dbEvent.segments,
-    ts: dbEvent.ts
-  }));
+  // Return full database events (includes order_key, conversation_id, created_at)
+  return data as DatabaseEvent[];
 }
 
 /**

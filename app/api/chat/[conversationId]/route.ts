@@ -88,7 +88,7 @@ async function executeMCPToolCalls(
         
         const result = await mcpClient.callTool({
           name: toolCall.name,
-          arguments: toolCall.args || {}
+          arguments: (toolCall.args || {}) as Record<string, unknown>
         });
         
         // Process result content
@@ -112,10 +112,11 @@ async function executeMCPToolCalls(
         });
       } catch (toolError) {
         console.error('❌ Tool execution failed:', toolError);
+        const errorMessage = toolError instanceof Error ? toolError.message : String(toolError);
         results.push({
           id: toolCall.id,
-          output: { error: toolError.message },
-          error: toolError.message
+          output: { error: errorMessage },
+          error: errorMessage
         });
       }
     }
@@ -124,10 +125,11 @@ async function executeMCPToolCalls(
     
   } catch (error) {
     console.error('❌ MCP execution failed:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return toolCalls.map(call => ({
       id: call.id,
-      output: { error: error.message },
-      error: error.message
+      output: { error: errorMessage },
+      error: errorMessage
     }));
   }
   
@@ -305,7 +307,7 @@ export async function POST(
               const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events);
               
               // Get available tools if budId is provided
-              let tools = [];
+              let tools: any[] = [];
               if (conversation.source_bud_id) {
                 try {
                   const { data: bud } = await supabase
@@ -500,9 +502,10 @@ export async function POST(
           
         } catch (error) {
           console.error('❌ Streaming error:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'error',
-            error: error?.message || error?.toString() || 'Unknown error'
+            error: errorMessage
           })}\n\n`));
           controller.close();
         }

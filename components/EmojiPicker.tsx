@@ -233,7 +233,7 @@ export function EmojiPicker({ value, onSelect, placeholder = 'Pick an emoji' }: 
                       {category}
                     </h3>
                     <div className="grid grid-cols-8 gap-1">
-                      {emojis.map((emoji, index) => (
+                      {emojis.map((emoji: string, index: number) => (
                         <Button
                           key={`${emoji}-${index}`}
                           variant="ghost"

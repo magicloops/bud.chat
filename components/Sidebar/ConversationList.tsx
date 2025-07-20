@@ -13,7 +13,8 @@ import {
   useSelectedWorkspace,
   useConversation,
   Conversation,
-  ConversationMeta
+  ConversationMeta,
+  EventConversation
 } from '@/state/eventChatStore';
 import { usePathname } from 'next/navigation';
 import { WorkspaceId, ConversationId } from '@/lib/types';
@@ -109,7 +110,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
               id: conv.id,
               title: conv.title, // Don't set default title
               workspace_id: conv.workspace_id,
-              bud_id: conv.bud_id,
+              source_bud_id: conv.bud_id, // Map database bud_id to source_bud_id
               created_at: conv.created_at
             };
             

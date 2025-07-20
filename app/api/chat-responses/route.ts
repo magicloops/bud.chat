@@ -132,14 +132,16 @@ export async function POST(request: NextRequest) {
     const response = await openai.responses.create(responseRequest);
 
     console.log('✅ Responses API call completed');
-    console.log('📋 Response outputs:', response.outputs?.length || 0);
+    const hasOutputs = 'outputs' in response;
+    const outputs = hasOutputs ? (response as any).outputs : [];
+    console.log('📋 Response outputs:', outputs?.length || 0);
 
     // Process the response outputs
     let responseText = '';
     const toolCalls: any[] = [];
     const toolResults: any[] = [];
 
-    for (const output of response.outputs || []) {
+    for (const output of outputs || []) {
       console.log('📄 Processing output type:', output.type);
       
       switch (output.type) {
@@ -181,14 +183,14 @@ export async function POST(request: NextRequest) {
       text: responseText,
       tool_calls: toolCalls,
       tool_results: toolResults,
-      outputs: response.outputs,
+      outputs: outputs,
       usage: response.usage
     };
 
     console.log('📤 Sending response:', {
       textLength: responseText.length,
       toolCallCount: toolCalls.length,
-      outputCount: response.outputs?.length || 0
+      outputCount: outputs?.length || 0
     });
 
     return Response.json(result);

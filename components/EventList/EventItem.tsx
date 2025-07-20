@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useCallback, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import MarkdownRenderer from '@/components/markdown-renderer';
@@ -68,7 +68,13 @@ export const EventItem = memo(function EventItem({
   const [editingContent, setEditingContent] = useState('');
   const [localTextContent, setLocalTextContent] = useState(textContent);
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
-  const error = null; // TODO: Implement error handling in new architecture
+  // Error handling - check if any segments have errors
+  const error = useMemo(() => {
+    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: string; output: object; error: string } => 
+      segment.type === 'tool_result' && 'error' in segment && !!segment.error
+    );
+    return errorSegments.length > 0 ? { error: errorSegments[0].error } : null;
+  }, [event.segments]);
   
   // Update local content when the event changes
   useEffect(() => {

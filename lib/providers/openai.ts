@@ -1,22 +1,11 @@
 // OpenAI provider mapper for event-based messages
 
 import { Event, Segment, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import type OpenAI from 'openai';
 
-export interface OpenAIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
-  tool_calls?: OpenAIToolCall[];
-  tool_call_id?: string;
-}
-
-export interface OpenAIToolCall {
-  id: string;
-  type: 'function';
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
+// Use the actual SDK types instead of custom interfaces
+type OpenAIMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
+type OpenAIToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
 
 export interface OpenAIResponse {
   id: string;
@@ -35,36 +24,27 @@ export interface OpenAIResponse {
   };
 }
 
-export interface OpenAIStreamDelta {
-  id: string;
-  object: 'chat.completion.chunk';
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    delta: {
-      role?: 'assistant';
-      content?: string;
-      tool_calls?: Array<{
-        index: number;
-        id?: string;
-        type?: 'function';
-        function?: {
-          name?: string;
-          arguments?: string;
-        };
-      }>;
-    };
-    finish_reason?: string | null;
-  }>;
-}
+// Use the actual SDK stream event type
+type OpenAIStreamDelta = OpenAI.Chat.Completions.ChatCompletionChunk;
 
 /**
  * Convert events to OpenAI message format
  */
-export function eventsToOpenAIMessages(events: Event[]): OpenAIMessage[] {
+export function eventsToOpenAIMessages(events: Event[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
   const eventLog = new EventLog(events);
-  return eventLog.toProviderMessages('openai') as OpenAIMessage[];
+  const providerMessages = eventLog.toProviderMessages('openai');
+  
+  // Convert to proper SDK format
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = providerMessages.map((msg: any) => {
+    return {
+      role: msg.role,
+      content: msg.content,
+      ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
+      ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id })
+    };
+  });
+  
+  return messages;
 }
 
 /**
@@ -79,11 +59,17 @@ export function openaiResponseToEvents(response: OpenAIResponse): Event[] {
     
     // Add text content
     if (message.content) {
-      segments.push({ type: 'text', text: message.content });
+      const textContent = typeof message.content === 'string' ? message.content : 
+                         Array.isArray(message.content) ? message.content.map(part => 
+                           typeof part === 'string' ? part : 'text' in part ? part.text : ''
+                         ).join('') : '';
+      if (textContent) {
+        segments.push({ type: 'text', text: textContent });
+      }
     }
     
-    // Add tool calls
-    if (message.tool_calls) {
+    // Add tool calls (only assistant messages have tool_calls)
+    if ('tool_calls' in message && message.tool_calls) {
       for (const toolCall of message.tool_calls) {
         segments.push({
           type: 'tool_call',
@@ -185,29 +171,9 @@ export function openaiStreamDeltaToEvent(
   return { event: currentEvent, isComplete: false, toolCalls: activeToolCalls };
 }
 
-/**
- * Create tool result event from MCP response
- */
-export function createToolResultFromMCPResponse(
-  toolCallId: string,
-  mcpResponse: any,
-  error?: string
-): Event {
-  const output = error ? { error } : mcpResponse;
-  return createToolResultEvent(toolCallId, output);
-}
+// Removed duplicate createToolResultFromMCPResponse - use the one from anthropic.ts
 
-/**
- * Extract tool calls from events that need MCP execution
- */
-export function extractPendingToolCalls(events: Event[]): Array<{
-  id: string;
-  name: string;
-  args: object;
-}> {
-  const eventLog = new EventLog(events);
-  return eventLog.getUnresolvedToolCalls();
-}
+// Removed duplicate extractPendingToolCalls - use the one from anthropic.ts
 
 /**
  * Convert legacy message format to events (for migration)
