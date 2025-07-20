@@ -60,6 +60,7 @@ interface EventChatStore {
   // Conversation actions
   setConversation: (id: string, conversation: EventConversation) => void
   updateConversation: (id: string, updates: Partial<EventConversation>) => void
+  removeConversation: (id: string) => void
   
   // Event actions
   addEvent: (conversationId: string, event: Event) => void
@@ -117,6 +118,10 @@ export const useEventChatStore = create<EventChatStore>()(
               ...updates
             };
           }
+        }),
+        
+        removeConversation: (id) => set((state) => {
+          delete state.conversations[id];
         }),
         
         // Event actions

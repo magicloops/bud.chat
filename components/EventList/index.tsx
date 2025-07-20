@@ -293,14 +293,6 @@ export function EventList({
             spacingClass = 'mt-6'; // Normal spacing between different contexts
           }
           
-          // Debug logging
-          console.log('Spacing decision:', {
-            eventIndex: index,
-            currentRole: event.role,
-            previousRole: previousEvent?.role,
-            isPartOfAssistantFlow,
-            spacingClass
-          });
           
           return (
             <div key={event.id} className={spacingClass}>

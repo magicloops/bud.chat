@@ -4,10 +4,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
 import { EventStreamBuilder } from '@/lib/streaming/eventBuilder'
+import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler'
+import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor'
 import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events'
 import { saveEvent, getConversationEvents } from '@/lib/db/events'
-import { eventsToAnthropicMessages, anthropicStreamDeltaToEvent, extractPendingToolCalls } from '@/lib/providers/anthropic'
-import { eventsToOpenAIMessages, openaiStreamDeltaToEvent } from '@/lib/providers/openai'
+import { eventsToAnthropicMessages, extractPendingToolCalls } from '@/lib/providers/anthropic'
+import { eventsToOpenAIMessages } from '@/lib/providers/openai'
 import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
 import { generateKeyBetween } from 'fractional-indexing'
 import OpenAI from 'openai'
@@ -175,114 +177,14 @@ async function createConversationInBackground(
   }
 }
 
-// Helper function to execute MCP tool calls
+// Helper function to execute MCP tool calls (now uses unified MCPToolExecutor)
 async function executeMCPToolCalls(
   toolCalls: Array<{ id: string; name: string; args: object }>,
   workspaceId: string,
   budId?: string
 ): Promise<Array<{ id: string; output: object; error?: string }>> {
-  const results = []
-  
-  if (!budId) {
-    // No MCP configuration available
-    return toolCalls.map(call => ({
-      id: call.id,
-      output: { error: 'No MCP configuration available' },
-      error: 'No MCP configuration available'
-    }))
-  }
-
-  try {
-    const supabase = await createClient()
-    
-    // Get bud and MCP configuration
-    const { data: bud, error: budError } = await supabase
-      .from('buds')
-      .select('*, mcp_config')
-      .eq('id', budId)
-      .single()
-
-    if (!bud || budError || !bud.mcp_config?.servers?.length) {
-      throw new Error('No MCP servers configured')
-    }
-
-    // Get MCP servers
-    const { data: servers, error: serversError } = await supabase
-      .from('mcp_servers')
-      .select('*')
-      .in('id', bud.mcp_config.servers)
-      .eq('workspace_id', workspaceId)
-
-    if (!servers || serversError || servers.length === 0) {
-      throw new Error('No MCP servers found')
-    }
-
-    // Connect to MCP server
-    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
-    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
-    
-    const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
-    const mcpClient = new Client({
-      name: "bud-chat-client",
-      version: "1.0.0"
-    }, {
-      capabilities: { tools: {} }
-    })
-    
-    await mcpClient.connect(transport)
-    
-    // Execute each tool call
-    for (const toolCall of toolCalls) {
-      try {
-        const result = await mcpClient.callTool({
-          name: toolCall.name,
-          arguments: (toolCall.args || {}) as Record<string, unknown>
-        })
-        
-        // Process result content
-        let output = result.content
-        if (Array.isArray(output)) {
-          output = output.map(block => 
-            block.type === 'text' ? block.text : JSON.stringify(block)
-          ).join('\n')
-        }
-        
-        // Truncate very large tool results to avoid overwhelming the LLM
-        const MAX_TOOL_RESULT_LENGTH = 50000; // 50KB max
-        if (typeof output === 'string' && output.length > MAX_TOOL_RESULT_LENGTH) {
-          console.log('⚠️ Tool result too large, truncating from', output.length, 'to', MAX_TOOL_RESULT_LENGTH)
-          output = output.substring(0, MAX_TOOL_RESULT_LENGTH) + '\n\n[Content truncated due to length...]'
-        }
-        
-        results.push({
-          id: toolCall.id,
-          output: { content: output }
-        })
-      } catch (toolError) {
-        console.error('❌ Tool execution failed:', toolError)
-        const errorMessage = toolError instanceof Error ? toolError.message : String(toolError)
-        results.push({
-          id: toolCall.id,
-          output: { error: errorMessage },
-          error: errorMessage
-        })
-      }
-    }
-    
-    await mcpClient.close()
-    
-  } catch (error) {
-    console.error('❌ MCP execution failed:', error)
-    // Return error for all tool calls
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    return toolCalls.map(call => ({
-      id: call.id,
-      output: { error: errorMessage },
-      error: errorMessage
-    }))
-  }
-  
-  return results
+  const toolExecutor = new MCPToolExecutor({ debug: true });
+  return await toolExecutor.executeToolCalls(toolCalls, workspaceId, budId);
 }
 
 export async function POST(request: NextRequest) {
@@ -513,89 +415,23 @@ export async function POST(request: NextRequest) {
               
               console.log('📡 Anthropic stream created, starting to process...')
               
-              for await (const event of stream) {
-                console.log('📨 Received Anthropic event:', event.type, 'delta' in event ? (event as any).delta?.type : 'no-delta')
-                
-                switch (event.type) {
-                  case 'message_start':
-                    // Reset builder for new message
-                    eventBuilder.reset('assistant')
-                    break
-                    
-                  case 'content_block_start':
-                    if (event.content_block?.type === 'text') {
-                      // Text block started - builder is ready
-                    } else if (event.content_block?.type === 'tool_use') {
-                      // Tool use block started
-                      if (event.content_block.id && event.content_block.name) {
-                        // Start streaming tool call (don't finalize yet)
-                        eventBuilder.startToolCall(event.content_block.id, event.content_block.name)
-                        
-                        // Stream tool call start
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                          type: "tool_start",
-                          tool_id: event.content_block.id,
-                          tool_name: event.content_block.name,
-                          content: `🔧 *Using tool: ${event.content_block.name}*\n`
-                        })}\n\n`))
-                      }
-                    }
-                    break
-                    
-                  case 'content_block_delta':
-                    if (event.delta?.type === 'text_delta' && event.delta.text) {
-                      // Add text chunk
-                      eventBuilder.addTextChunk(event.delta.text)
-                      
-                      // Stream text content
-                      console.log('📤 Streaming token:', event.delta.text)
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: "token",
-                        content: event.delta.text
-                      })}\n\n`))
-                    } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
-                      // Handle tool call argument accumulation
-                      const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index)
-                      if (toolCallId && event.delta.partial_json) {
-                        eventBuilder.addToolCallArguments(toolCallId, event.delta.partial_json)
-                      }
-                    }
-                    break
-                    
-                  case 'content_block_stop':
-                    // Complete any streaming tool calls
-                    if (event.index !== undefined) {
-                      const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index)
-                      if (toolCallId) {
-                        eventBuilder.completeToolCall(toolCallId)
-                      }
-                    }
-                    break
-                    
-                  case 'message_stop':
-                    // Finalize the event
-                    const finalEvent = eventBuilder.finalize()
-                    eventLog.addEvent(finalEvent)
-                    
-                    console.log('✅ Message completed, final event:', finalEvent.segments.length, 'segments')
-                    
-                    // Stream finalized tool calls with complete arguments
-                    const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call')
-                    for (const toolCall of toolCallSegments) {
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: "tool_finalized",
-                        tool_id: toolCall.id,
-                        tool_name: toolCall.name,
-                        args: toolCall.args
-                      })}\n\n`))
-                    }
-                    
-                    // If no tool calls, we're done
-                    if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                      shouldContinue = false // Exit loop
-                    }
-                    break
-                }
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true }
+              );
+              
+              await streamHandler.handleAnthropicStream(stream);
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
               }
               
             } else {
@@ -665,147 +501,23 @@ export async function POST(request: NextRequest) {
               
               console.log('📡 OpenAI stream created, starting to process...');
               
-              // Track active tool calls during streaming
-              const activeToolCalls = new Map<number, { id?: string; name?: string; args?: string }>()
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true }
+              );
               
-              try {
-                for await (const chunk of stream) {
-                  console.log('📨 Received OpenAI chunk:', chunk.choices?.[0]?.finish_reason || 'streaming');
-                  
-                  if (!chunk.choices || chunk.choices.length === 0) {
-                    console.warn('⚠️ OpenAI chunk has no choices:', chunk);
-                    continue;
-                  }
-                  
-                  for (const choice of chunk.choices) {
-                  if (choice.finish_reason) {
-                    console.log('🏁 OpenAI stream finished:', choice.finish_reason);
-                    
-                    // Finalize any pending tool calls
-                    for (const [index, toolCall] of activeToolCalls.entries()) {
-                      if (toolCall.id && toolCall.name && toolCall.args) {
-                        try {
-                          const args = JSON.parse(toolCall.args);
-                          eventBuilder.addToolCall(toolCall.id, toolCall.name, args);
-                          
-                          // Stream finalized tool call
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: "tool_finalized",
-                            tool_id: toolCall.id,
-                            tool_name: toolCall.name,
-                            args: args
-                          })}\n\n`))
-                        } catch (e) {
-                          console.error('Failed to parse OpenAI tool call arguments:', e);
-                          eventBuilder.addToolCall(toolCall.id, toolCall.name, {});
-                        }
-                      }
-                    }
-                    
-                    // Finalize the event
-                    const finalEvent = eventBuilder.finalize();
-                    eventLog.addEvent(finalEvent);
-                    
-                    console.log('✅ OpenAI message completed, final event:', finalEvent.segments.length, 'segments');
-                    
-                    // If no tool calls, we're done
-                    if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                      shouldContinue = false; // Exit loop
-                    }
-                    break;
-                  }
-                  
-                  const delta = choice.delta;
-                  
-                  if (delta.role === 'assistant' && !eventBuilder.hasContent()) {
-                    // Message started - builder is already reset for this iteration
-                    console.log('🤖 OpenAI assistant message started');
-                  }
-                  
-                  // Handle text content
-                  if (delta.content) {
-                    eventBuilder.addTextChunk(delta.content);
-                    
-                    // Stream text content immediately
-                    console.log('📤 Streaming OpenAI token:', delta.content);
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: "token",
-                      content: delta.content
-                    })}\n\n`))
-                  }
-                  
-                  // Handle tool calls
-                  if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
-                    for (const toolCallDelta of delta.tool_calls) {
-                      try {
-                        if (typeof toolCallDelta.index !== 'number') {
-                          console.warn('⚠️ Invalid tool call index:', toolCallDelta);
-                          continue;
-                        }
-                        
-                        const index = toolCallDelta.index;
-                        let toolCall = activeToolCalls.get(index);
-                        
-                        if (!toolCall) {
-                          toolCall = {};
-                          activeToolCalls.set(index, toolCall);
-                        }
-                        
-                        if (toolCallDelta.id) {
-                          toolCall.id = toolCallDelta.id;
-                          console.log('🔧 OpenAI tool call started:', toolCallDelta.id);
-                          
-                          // Start streaming tool call
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: "tool_start",
-                            tool_id: toolCallDelta.id,
-                            content: `🔧 *Using tool...*\n`
-                          })}\n\n`))
-                        }
-                        
-                        if (toolCallDelta.function?.name) {
-                          toolCall.name = toolCallDelta.function.name;
-                          console.log('🔧 OpenAI tool call name:', toolCallDelta.function.name);
-                          
-                          // Update tool call with name
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                            type: "tool_start",
-                            tool_id: toolCall.id,
-                            tool_name: toolCallDelta.function.name,
-                            content: `🔧 *Using tool: ${toolCallDelta.function.name}*\n`
-                          })}\n\n`))
-                        }
-                        
-                        if (toolCallDelta.function?.arguments) {
-                          toolCall.args = (toolCall.args || '') + toolCallDelta.function.arguments;
-                          console.log('🔧 OpenAI tool call args chunk:', toolCallDelta.function.arguments.length, 'chars');
-                        }
-                      } catch (toolError) {
-                        console.error('❌ Error processing OpenAI tool call delta:', toolError, toolCallDelta);
-                        // Don't let tool call errors break the entire stream
-                        continue;
-                      }
-                    }
-                  }
-                }
-              }
-              } catch (openaiError) {
-                console.error('❌ OpenAI streaming error:', openaiError);
-                
-                // If we have partial content, try to finalize it
-                if (eventBuilder.hasContent()) {
-                  console.log('🔄 Attempting to finalize partial OpenAI content...');
-                  try {
-                    const partialEvent = eventBuilder.finalize();
-                    eventLog.addEvent(partialEvent);
-                    console.log('✅ Saved partial OpenAI content:', partialEvent.segments.length, 'segments');
-                  } catch (finalizeError) {
-                    console.error('❌ Failed to finalize partial content:', finalizeError);
-                  }
-                }
-                
-                // Re-throw to be caught by outer error handler
-                throw openaiError;
+              await streamHandler.handleOpenAIStream(stream);
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
               }
             }
             

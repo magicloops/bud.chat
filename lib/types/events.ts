@@ -47,6 +47,10 @@ export class EventLog {
     return [...this.events];
   }
 
+  getLastEvent(): Event | undefined {
+    return this.events[this.events.length - 1];
+  }
+
   getUnresolvedToolCalls(): ToolCall[] {
     const toolCalls = new Map<string, ToolCall>();
     const resolvedIds = new Set<string>();
