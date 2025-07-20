@@ -145,7 +145,7 @@ export function EventStream({
                     const hasToolCalls = placeholderEvent?.segments.some(s => s.type === 'tool_call');
                     
                     // Check if we need to create a new assistant event after tool calls
-                    if (hasToolCalls && currentConv.streamingEventId === assistantPlaceholder.id) {
+                    if (currentConv.shouldCreateNewEvent && data.content.trim()) {
                       // Create a new assistant event for the final response after tool calls
                       const newAssistantEvent = {
                         id: crypto.randomUUID(),
@@ -158,7 +158,8 @@ export function EventStream({
                       currentStore.setConversation(conversationId, {
                         ...currentConv,
                         events: [...currentConv.events, newAssistantEvent],
-                        streamingEventId: newAssistantEvent.id
+                        streamingEventId: newAssistantEvent.id,
+                        shouldCreateNewEvent: false
                       });
                     } else {
                       // Update the current streaming event (either original placeholder or new assistant event)
@@ -176,7 +177,8 @@ export function EventStream({
                       );
                       currentStore.setConversation(conversationId, {
                         ...currentConv,
-                        events: updatedEvents
+                        events: updatedEvents,
+                        shouldCreateNewEvent: false
                       });
                     }
                     
@@ -191,8 +193,9 @@ export function EventStream({
                   const toolStartStore = useEventChatStore.getState();
                   const toolStartConv = toolStartStore.conversations[conversationId];
                   if (toolStartConv) {
+                    const streamingId = toolStartConv.streamingEventId || assistantPlaceholder.id;
                     const updatedEventsToolStart = toolStartConv.events.map(event => 
-                      event.id === assistantPlaceholder.id 
+                      event.id === streamingId 
                         ? { 
                           ...event, 
                           segments: [
@@ -221,8 +224,9 @@ export function EventStream({
                   const toolFinalizedStore = useEventChatStore.getState();
                   const toolFinalizedConv = toolFinalizedStore.conversations[conversationId];
                   if (toolFinalizedConv) {
+                    const streamingId = toolFinalizedConv.streamingEventId || assistantPlaceholder.id;
                     const updatedEventsFinalized = toolFinalizedConv.events.map(event => 
-                      event.id === assistantPlaceholder.id 
+                      event.id === streamingId 
                         ? { 
                           ...event, 
                           segments: event.segments.map(segment => 
@@ -266,8 +270,19 @@ export function EventStream({
                   break;
                   
                 case 'tool_complete':
-                  // Tool execution completed - update UI to show completion
+                  // Tool execution completed - mark that tools are complete
+                  // The next token event should create a new assistant message
                   console.log('✅ Tool completed:', data.tool_id);
+                  
+                  const toolCompleteStore = useEventChatStore.getState();
+                  const toolCompleteConv = toolCompleteStore.conversations[conversationId];
+                  if (toolCompleteConv) {
+                    // Mark that we should create a new event on the next token
+                    toolCompleteStore.setConversation(conversationId, {
+                      ...toolCompleteConv,
+                      shouldCreateNewEvent: true
+                    });
+                  }
                   break;
                   
                 case 'complete':

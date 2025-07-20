@@ -38,6 +38,7 @@ export interface EventConversation {
   events: Event[]
   isStreaming: boolean
   streamingEventId?: string
+  shouldCreateNewEvent?: boolean
   meta: EventConversationMeta
 }
 

@@ -5,8 +5,8 @@ import { NextRequest } from 'next/server';
 import { EventStreamBuilder } from '@/lib/streaming/eventBuilder';
 import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events';
 import { saveEvent, getConversationEvents } from '@/lib/db/events';
-import { eventsToAnthropicMessages, anthropicStreamDeltaToEvent, extractPendingToolCalls } from '@/lib/providers/anthropic';
-import { eventsToOpenAIMessages, openaiStreamDeltaToEvent } from '@/lib/providers/openai';
+import { eventsToAnthropicMessages, extractPendingToolCalls } from '@/lib/providers/anthropic';
+import { eventsToOpenAIMessages } from '@/lib/providers/openai';
 import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
 import { generateKeyBetween } from 'fractional-indexing';
 import OpenAI from 'openai';
@@ -394,46 +394,82 @@ export async function POST(request: NextRequest) {
               const stream = await anthropic.messages.stream(request);
               
               for await (const event of stream) {
-                const { event: currentEvent, isComplete } = anthropicStreamDeltaToEvent(event, eventBuilder.getCurrentEvent());
-                
-                if (currentEvent) {
-                  eventBuilder.reset('assistant', currentEvent.id);
-                  // Update builder with current event state
-                  for (const segment of currentEvent.segments) {
-                    if (segment.type === 'text') {
-                      eventBuilder.addTextChunk(segment.text);
-                    } else if (segment.type === 'tool_call') {
-                      eventBuilder.addToolCall(segment.id, segment.name, segment.args);
+                switch (event.type) {
+                  case 'message_start':
+                    // Reset builder for new message (generates new unique ID)
+                    eventBuilder.reset('assistant');
+                    break;
+                    
+                  case 'content_block_start':
+                    if (event.content_block?.type === 'text') {
+                      // Text block started - builder is ready
+                    } else if (event.content_block?.type === 'tool_use') {
+                      // Tool use block started
+                      if (event.content_block.id && event.content_block.name) {
+                        // Start streaming tool call (don't finalize yet)
+                        eventBuilder.startToolCall(event.content_block.id, event.content_block.name);
+                        
+                        // Stream tool call start
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_start',
+                          tool_id: event.content_block.id,
+                          tool_name: event.content_block.name,
+                          content: `🔧 *Using tool: ${event.content_block.name}*\n`
+                        })}\n\n`));
+                      }
+                    }
+                    break;
+                    
+                  case 'content_block_delta':
+                    if (event.delta?.type === 'text_delta' && event.delta.text) {
+                      // Add text chunk
+                      eventBuilder.addTextChunk(event.delta.text);
                       
-                      // Stream tool call start
+                      // Stream text content
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: 'tool_start',
-                        tool_id: segment.id,
-                        tool_name: segment.name,
-                        content: `🔧 *Using tool: ${segment.name}*\n`
+                        type: 'token',
+                        content: event.delta.text
+                      })}\n\n`));
+                    } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
+                      // Handle tool call argument accumulation
+                      const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+                      if (toolCallId && event.delta.partial_json) {
+                        eventBuilder.addToolCallArguments(toolCallId, event.delta.partial_json);
+                      }
+                    }
+                    break;
+                    
+                  case 'content_block_stop':
+                    // Complete any streaming tool calls
+                    if (event.index !== undefined) {
+                      const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+                      if (toolCallId) {
+                        eventBuilder.completeToolCall(toolCallId);
+                      }
+                    }
+                    break;
+                    
+                  case 'message_stop':
+                    // Finalize the event
+                    const finalEvent = eventBuilder.finalize();
+                    eventLog.addEvent(finalEvent);
+                    
+                    // Stream finalized tool calls with complete arguments
+                    const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call');
+                    for (const toolCall of toolCallSegments) {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'tool_finalized',
+                        tool_id: toolCall.id,
+                        tool_name: toolCall.name,
+                        args: toolCall.args
                       })}\n\n`));
                     }
-                  }
-                  
-                  // Stream text content
-                  const textSegments = currentEvent.segments.filter(s => s.type === 'text');
-                  for (const segment of textSegments) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: 'token',
-                      content: segment.text
-                    })}\n\n`));
-                  }
-                }
-                
-                if (isComplete) {
-                  const finalEvent = eventBuilder.finalize();
-                  eventLog.addEvent(finalEvent);
-                  
-                  // If no tool calls, we're done
-                  if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                    iteration = maxIterations; // Exit loop
-                  }
-                  break;
+                    
+                    // If no tool calls, we're done
+                    if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
+                      iteration = maxIterations; // Exit loop
+                    }
+                    break;
                 }
               }
               
@@ -448,46 +484,128 @@ export async function POST(request: NextRequest) {
                 stream: true
               });
               
-              for await (const chunk of stream) {
-                const activeToolCalls = new Map();
-                const { event: currentEvent, isComplete } = openaiStreamDeltaToEvent(
-                  chunk, 
-                  eventBuilder.getCurrentEvent(), 
-                  activeToolCalls
-                );
-                
-                if (currentEvent) {
-                  // Stream text content
-                  const textSegments = currentEvent.segments.filter(s => s.type === 'text');
-                  for (const segment of textSegments) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: 'token',
-                      content: segment.text
-                    })}\n\n`));
+              // Track active tool calls during streaming (moved outside loop)
+              const activeToolCalls = new Map<number, { id?: string; name?: string; args?: string }>();
+              
+              try {
+                for await (const chunk of stream) {
+                  if (!chunk.choices || chunk.choices.length === 0) {
+                    continue;
                   }
                   
-                  // Stream tool calls
-                  const toolCalls = currentEvent.segments.filter(s => s.type === 'tool_call');
-                  for (const segment of toolCalls) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                      type: 'tool_start',
-                      tool_id: segment.id,
-                      tool_name: segment.name,
-                      content: `🔧 *Using tool: ${segment.name}*\n`
-                    })}\n\n`));
+                  for (const choice of chunk.choices) {
+                    if (choice.finish_reason) {
+                      // Finalize any pending tool calls
+                      for (const [index, toolCall] of activeToolCalls.entries()) {
+                        if (toolCall.id && toolCall.name && toolCall.args) {
+                          try {
+                            const args = JSON.parse(toolCall.args);
+                            eventBuilder.addToolCall(toolCall.id, toolCall.name, args);
+                            
+                            // Stream finalized tool call
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                              type: 'tool_finalized',
+                              tool_id: toolCall.id,
+                              tool_name: toolCall.name,
+                              args: args
+                            })}\n\n`));
+                          } catch (e) {
+                            eventBuilder.addToolCall(toolCall.id, toolCall.name, {});
+                          }
+                        }
+                      }
+                      
+                      // Finalize the event
+                      const finalEvent = eventBuilder.finalize();
+                      eventLog.addEvent(finalEvent);
+                      
+                      // If no tool calls, we're done
+                      if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
+                        iteration = maxIterations; // Exit loop
+                      }
+                      break;
+                    }
+                    
+                    const delta = choice.delta;
+                    
+                    if (delta.role === 'assistant' && !eventBuilder.hasContent()) {
+                      // Message started - builder is already reset for this iteration
+                    }
+                    
+                    // Handle text content
+                    if (delta.content) {
+                      eventBuilder.addTextChunk(delta.content);
+                      
+                      // Stream text content immediately
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        type: 'token',
+                        content: delta.content
+                      })}\n\n`));
+                    }
+                    
+                    // Handle tool calls
+                    if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+                      for (const toolCallDelta of delta.tool_calls) {
+                        try {
+                          if (typeof toolCallDelta.index !== 'number') {
+                            continue;
+                          }
+                          
+                          const index = toolCallDelta.index;
+                          let toolCall = activeToolCalls.get(index);
+                          
+                          if (!toolCall) {
+                            toolCall = {};
+                            activeToolCalls.set(index, toolCall);
+                          }
+                          
+                          if (toolCallDelta.id) {
+                            toolCall.id = toolCallDelta.id;
+                            
+                            // Start streaming tool call
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                              type: 'tool_start',
+                              tool_id: toolCallDelta.id,
+                              content: `🔧 *Using tool...*\n`
+                            })}\n\n`));
+                          }
+                          
+                          if (toolCallDelta.function?.name) {
+                            toolCall.name = toolCallDelta.function.name;
+                            
+                            // Update tool call with name
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                              type: 'tool_start',
+                              tool_id: toolCall.id,
+                              tool_name: toolCallDelta.function.name,
+                              content: `🔧 *Using tool: ${toolCallDelta.function.name}*\n`
+                            })}\n\n`));
+                          }
+                          
+                          if (toolCallDelta.function?.arguments) {
+                            toolCall.args = (toolCall.args || '') + toolCallDelta.function.arguments;
+                          }
+                        } catch (toolError) {
+                          // Don't let tool call errors break the entire stream
+                          continue;
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (openaiError) {
+                // If we have partial content, try to finalize it
+                if (eventBuilder.hasContent()) {
+                  try {
+                    const partialEvent = eventBuilder.finalize();
+                    eventLog.addEvent(partialEvent);
+                  } catch (finalizeError) {
+                    // Ignore finalization errors for partial content
                   }
                 }
                 
-                if (isComplete) {
-                  const finalEvent = eventBuilder.finalize();
-                  eventLog.addEvent(finalEvent);
-                  
-                  // If no tool calls, we're done
-                  if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                    iteration = maxIterations; // Exit loop
-                  }
-                  break;
-                }
+                // Re-throw to be caught by outer error handler
+                throw openaiError;
               }
             }
             

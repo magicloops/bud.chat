@@ -67,14 +67,6 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       .map(conversation => conversation.meta) // Extract metadata for list display
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Sort by newest first
     
-    // Debug logging to understand memoization
-    if (process.env.NODE_ENV === 'development') {
-      console.log('📝 ConversationList useMemo recalculated:', {
-        workspaceId,
-        conversationCount: result.length,
-        conversationTitles: result.map(c => ({ id: c.id, title: c.title }))
-      });
-    }
     
     return result;
   }, [workspaceConversationIds, conversationsRecord]);
@@ -244,12 +236,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
-          const title = conversationMeta.title || 'Untitled';
-          // Debug logging to understand title updates
-          if (process.env.NODE_ENV === 'development') {
-            console.log(`📝 Rendering conversation ${conversationMeta.id} with title:`, title);
-          }
-          return title;
+          return conversationMeta.title || 'Untitled';
         };
         
         return (
