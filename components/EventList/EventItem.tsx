@@ -217,8 +217,7 @@ export const EventItem = memo(function EventItem({
   // Render continuation view for assistant messages following other assistant/tool messages
   if (shouldShowAsContinuation) {
     const containerClasses = cn(
-      'mb-6 group @[768px]:pr-[42px]', 
-      index === 0 && 'pt-4'
+      'group @[768px]:pr-[42px]'
     );
     
     return (
@@ -231,7 +230,7 @@ export const EventItem = memo(function EventItem({
           
           <div className="flex-1 min-w-0">
             {/* Invisible header for spacing */}
-            <div className="flex items-center gap-2 mb-1 opacity-0">
+            <div className="flex items-center gap-2 mb-1 hidden">
               <span className="text-sm font-medium">
                 {assistantName}
               </span>
@@ -251,7 +250,7 @@ export const EventItem = memo(function EventItem({
             
               {/* Tool Call Display (moved to end) */}
               {isToolCall && toolCalls.length > 0 && (
-                <div className="mt-4 space-y-2">
+                <div className="mt-2 space-y-2">
                   {toolCalls.map((toolCall, index) => {
                     const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
                     const toolResult = allEvents?.find(event => 
@@ -288,10 +287,10 @@ export const EventItem = memo(function EventItem({
                           Tool Call: {toolCall.name}
                           </span>
                           {!hasResult && (
-                            <div className="flex space-x-1">
-                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce"></div>
+                            <div className="flex space-x-1 items-end">
+                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.3s]"></div>
+                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.15s]"></div>
+                              <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce"></div>
                             </div>
                           )}
                           {hasResult && (
@@ -427,8 +426,7 @@ export const EventItem = memo(function EventItem({
   }
 
   const regularContainerClasses = cn(
-    'mb-6 group @[768px]:pr-[42px]',
-    index === 0 && 'pt-4'
+    'group @[768px]:pr-[42px]'
   );
 
   return (
@@ -471,7 +469,7 @@ export const EventItem = memo(function EventItem({
             
             {/* Tool Call Display (moved to end) */}
             {isToolCall && toolCalls.length > 0 && (
-              <div className="mt-4 space-y-2">
+              <div className="mt-2 space-y-2">
                 {toolCalls.map((toolCall, index) => {
                   const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
                   const toolResult = allEvents?.find(event => 
@@ -508,10 +506,10 @@ export const EventItem = memo(function EventItem({
                           Tool Call: {toolCall.name}
                         </span>
                         {!hasResult && (
-                          <div className="flex space-x-1">
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-bounce"></div>
+                          <div className="flex space-x-1 items-end">
+                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.3s]"></div>
+                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.15s]"></div>
+                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce"></div>
                           </div>
                         )}
                         {hasResult && (

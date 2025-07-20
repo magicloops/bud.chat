@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useEffect } from 'react';
+import React, { memo, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -64,11 +64,20 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           ul: ({ children }) => (
             <ul className="list-disc list-outside ml-6 my-2 space-y-1">{children}</ul>
           ),
-          ol: ({ children }) => (
-            <ol className="list-decimal list-outside ml-6 my-2 space-y-1">{children}</ol>
+          ol: ({ ordered, className, children, ...rest }) => (
+            // ordered is a boolean that React doesn't understand, so we drop it, 
+            // but keep everything else - especially "start"
+            <ol
+              {...rest}
+              className={`list-decimal list-outside ml-6 my-2 space-y-1 ${className || ''}`}
+            >
+              {children}
+            </ol>
           ),
-          li: ({ children }) => (
-            <li className="pl-1 break-words">{children}</li>
+          li: ({ className, children, ...rest }) => (
+            <li {...rest} className={`break-words ${className || ''}`}>
+              {children}
+            </li>
           ),
           p: ({ children }) => (
             <p className="mb-2 last:mb-0 break-words">{children}</p>

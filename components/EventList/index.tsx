@@ -267,22 +267,58 @@ export function EventList({
       )}
       onScroll={handleScroll}
     >
-      <div className="space-y-4 p-4 pb-6">
-        {displayEvents.map((event, index) => (
-          <EventItem
-            key={event.id} // Use stable event ID as key
-            event={event}
-            conversation={conversation}
-            index={index}
-            isLast={index === displayEvents.length - 1}
-            isStreaming={actualIsStreaming && conversation?.streamingEventId === event.id}
-            onEdit={handleEventEdit}
-            onDelete={handleEventDelete}
-            onBranch={handleEventBranch}
-            allEvents={displayEvents}
-            previousEvent={index > 0 ? displayEvents[index - 1] : undefined}
-          />
-        ))}
+      <div className="p-4 pb-6">
+        {displayEvents.map((event, index) => {
+          const previousEvent = index > 0 ? displayEvents[index - 1] : undefined;
+          const isFirstEvent = index === 0;
+          
+          // Check if this should have tight spacing (part of assistant flow)
+          const isPartOfAssistantFlow = 
+            (event.role === 'assistant' && previousEvent?.role === 'assistant') ||
+            (event.role === 'assistant' && previousEvent?.role === 'tool') ||
+            (event.role === 'tool' && previousEvent?.role === 'assistant') ||
+            (event.role === 'tool' && previousEvent?.role === 'tool');
+          
+          // Check if current event has text content
+          const hasTextContent = event.segments.some(s => s.type === 'text' && s.text.trim());
+          
+          // Dynamic spacing based on event flow
+          let spacingClass = '';
+          if (isFirstEvent) {
+            spacingClass = ''; // No top spacing for first event
+          } else if (isPartOfAssistantFlow) {
+            // For chained assistant messages: add mt-4 only if it has text content
+            spacingClass = (event.role === 'assistant' && hasTextContent) ? 'mt-4' : '';
+          } else {
+            spacingClass = 'mt-6'; // Normal spacing between different contexts
+          }
+          
+          // Debug logging
+          console.log('Spacing decision:', {
+            eventIndex: index,
+            currentRole: event.role,
+            previousRole: previousEvent?.role,
+            isPartOfAssistantFlow,
+            spacingClass
+          });
+          
+          return (
+            <div key={event.id} className={spacingClass}>
+              <EventItem
+                event={event}
+                conversation={conversation}
+                index={index}
+                isLast={index === displayEvents.length - 1}
+                isStreaming={actualIsStreaming && conversation?.streamingEventId === event.id}
+                onEdit={handleEventEdit}
+                onDelete={handleEventDelete}
+                onBranch={handleEventBranch}
+                allEvents={displayEvents}
+                previousEvent={previousEvent}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
