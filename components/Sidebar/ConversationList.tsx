@@ -14,7 +14,6 @@ import {
   ConversationMeta
 } from '@/state/eventChatStore';
 import type { Conversation as DBConversation } from '@/lib/types';
-import { usePathname } from 'next/navigation';
 import { WorkspaceId, ConversationId } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { 
@@ -31,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -68,37 +68,12 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     return result;
   }, [workspaceConversationIds, conversationsRecord]);
   
-  // Extract current conversation ID from URL
-  // Listen for custom URL change events from replaceState calls
-  const [currentUrl, setCurrentUrl] = useState('');
-  
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const updateUrl = () => {
-        const newUrl = window.location.pathname;
-        setCurrentUrl(newUrl);
-      };
-      
-      // Set initial URL
-      updateUrl();
-      
-      // Listen for custom URL change events
-      const handleUrlChange = (event: CustomEvent) => {
-        setCurrentUrl(event.detail.pathname);
-      };
-      
-      window.addEventListener('urlchange', handleUrlChange as EventListener);
-      
-      return () => {
-        window.removeEventListener('urlchange', handleUrlChange as EventListener);
-      };
-    }
-  }, []);
-  
+  // Extract current conversation ID from pathname
   const currentConversationId = useMemo(() => {
-    const urlToUse = currentUrl || pathname;
-    return urlToUse.split('/').pop();
-  }, [currentUrl, pathname]);
+    const match = pathname.match(/\/chat\/([^\/]+)/);
+    const conversationId = match ? match[1] : '';
+    return conversationId;
+  }, [pathname]);
 
   // Load conversations for the workspace and add them to ChatStore
   useEffect(() => {

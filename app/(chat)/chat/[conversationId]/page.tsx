@@ -1,7 +1,7 @@
 'use client';
 
 import { use, useEffect, useState, useCallback, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { EventStream } from '@/components/EventStream';
 import { Loader2 } from 'lucide-react';
@@ -37,6 +37,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const resolvedParams = use(params);
   const initialConversationId = resolvedParams.conversationId;
   const searchParams = useSearchParams();
+  const router = useRouter();
   
   // Track the current conversation ID (may change from 'new' to real ID during streaming)
   const [currentConversationId, setCurrentConversationId] = useState(initialConversationId);
@@ -335,17 +336,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                     store.removeConversation(tempConversationId);
                     store.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
                     
-                    // Update URL without page navigation - shallow update only
-                    window.history.replaceState(
-                      { ...window.history.state },
-                      '',
-                      `/chat/${realConversationId}`
-                    );
-                    
-                    // Notify other components that the URL changed
-                    window.dispatchEvent(new CustomEvent('urlchange', { 
-                      detail: { pathname: `/chat/${realConversationId}` }
-                    }));
+                    // Update URL using Next.js router - this will trigger pathname updates
+                    router.replace(`/chat/${realConversationId}`);
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
@@ -373,7 +365,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       setIsLocalStreaming(false);
       setStreamingEvents(null);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, router]);
 
   // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {
