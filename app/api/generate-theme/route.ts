@@ -1,26 +1,26 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextRequest } from 'next/server'
-import OpenAI from 'openai'
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest } from 'next/server';
+import OpenAI from 'openai';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-})
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
     
     // Get the authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json()
-    const { prompt } = body
+    const body = await request.json();
+    const { prompt } = body;
 
     if (!prompt) {
-      return new Response('Prompt is required', { status: 400 })
+      return new Response('Prompt is required', { status: 400 });
     }
 
     // Generate theme using o3
@@ -66,25 +66,25 @@ The theme should be cohesive and match the user's description.`
           content: prompt
         }
       ],
-      response_format: { type: "json_object" },
+      response_format: { type: 'json_object' },
       max_completion_tokens: 8000
-    })
+    });
 
-    const themeJson = response.choices[0]?.message?.content
+    const themeJson = response.choices[0]?.message?.content;
     if (!themeJson) {
-      throw new Error('No theme generated')
+      throw new Error('No theme generated');
     }
 
-    const theme = JSON.parse(themeJson)
+    const theme = JSON.parse(themeJson);
     
     // Validate the theme structure
     if (!theme.name || !theme.cssVariables) {
-      throw new Error('Invalid theme structure')
+      throw new Error('Invalid theme structure');
     }
 
-    return Response.json(theme)
+    return Response.json(theme);
   } catch (error) {
-    console.error('Theme generation error:', error)
-    return new Response('Failed to generate theme', { status: 500 })
+    console.error('Theme generation error:', error);
+    return new Response('Failed to generate theme', { status: 500 });
   }
 }

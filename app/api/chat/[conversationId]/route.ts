@@ -1,61 +1,84 @@
-import { createClient } from '@/lib/supabase/server'
-import { Database } from '@/lib/types/database'
-import OpenAI from 'openai'
-import { NextRequest } from 'next/server'
-import { generateKeyBetween } from 'fractional-indexing'
+// Event-based existing conversation chat API - unified with chat-new
+// Uses the same event-based system, streaming, and provider logic
+
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest } from 'next/server';
+import { EventStreamBuilder } from '@/lib/streaming/eventBuilder';
+import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler';
+import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor';
+import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events';
+import { saveEvent, getConversationEvents } from '@/lib/db/events';
+import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
+import { eventsToOpenAIMessages } from '@/lib/providers/openai';
+import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
+;
+import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
-})
+});
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+});
+
+// Helper function to execute MCP tool calls (now uses unified MCPToolExecutor)
+async function executeMCPToolCalls(
+  toolCalls: Array<{ id: string; name: string; args: object }>,
+  workspaceId: string,
+  budId?: string
+): Promise<Array<{ id: string; output: object; error?: string }>> {
+  const toolExecutor = new MCPToolExecutor({ debug: true });
+  return await toolExecutor.executeToolCalls(toolCalls, workspaceId, budId);
+}
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ conversationId: string }> }
 ) {
-  console.log('💬 Existing conversation chat API called')
+  console.log('💬 Event-based existing conversation chat API called');
   
   try {
-    const supabase = await createClient()
-    const resolvedParams = await params
-    const conversationId = resolvedParams.conversationId
+    const supabase = await createClient();
+    const resolvedParams = await params;
+    const conversationId = resolvedParams.conversationId;
     
     // Get the authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json()
+    const body = await request.json();
     const { 
       message, 
-      workspaceId,
-      model = 'gpt-4o'
-    } = body
+      workspaceId
+    } = body;
 
     console.log('📥 Request data:', { 
       conversationId, 
       message: message?.substring(0, 50) + '...', 
-      workspaceId, 
-      model 
-    })
+      workspaceId
+    });
 
     // Validate required fields
     if (!message || typeof message !== 'string') {
-      return new Response('Message is required', { status: 400 })
+      return new Response('Message is required', { status: 400 });
     }
     if (!workspaceId) {
-      return new Response('Workspace ID is required', { status: 400 })
+      return new Response('Workspace ID is required', { status: 400 });
     }
 
     // Verify conversation exists and user has access
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
-      .select('id, workspace_id')
+      .select('id, workspace_id, source_bud_id, model_config_overrides')
       .eq('id', conversationId)
-      .single()
+      .single();
 
     if (convError || !conversation) {
-      return new Response('Conversation not found', { status: 404 })
+      return new Response('Conversation not found', { status: 404 });
     }
 
     // Verify user has access to the workspace
@@ -64,256 +87,288 @@ export async function POST(
       .select('workspace_id, role')
       .eq('workspace_id', conversation.workspace_id)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (membershipError || !membership) {
-      return new Response('Workspace not found or access denied', { status: 404 })
+      return new Response('Workspace not found or access denied', { status: 404 });
     }
 
-    console.log('✅ User has access to conversation:', conversationId)
+    console.log('✅ User has access to conversation:', conversationId);
 
-    // Preload messages immediately after auth check (before streaming starts)
-    const preloadStartTime = Date.now()
-    console.log('📚 PERF: Preloading conversation messages...')
+    // Determine model from conversation -> bud -> default
+    let model = 'gpt-4o'; // Default fallback
     
-    const { data: existingMessages, error: messagesError } = await supabase
-      .from('messages')
-      .select('role, content, order_key')
-      .eq('conversation_id', conversationId)
-      .order('order_key', { ascending: true })
-    
-    const preloadTime = Date.now() - preloadStartTime
-    
-    if (messagesError) {
-      console.error('❌ Error fetching messages:', messagesError)
-      return new Response('Failed to fetch conversation context', { status: 500 })
-    }
-    
-    console.log('📚 PERF: Messages preloaded in:', preloadTime, 'ms - Message count:', existingMessages?.length)
-    
-    // Generate order keys immediately from preloaded messages
-    const keyGenStart = Date.now()
-    const lastMessage = existingMessages?.[existingMessages.length - 1]
-    const lastOrderKey = lastMessage?.order_key || null
-    
-    const userOrderKey = generateKeyBetween(lastOrderKey, null)
-    const assistantOrderKey = generateKeyBetween(userOrderKey, null)
-    
-    console.log('🔑 PERF: Order keys generated in:', Date.now() - keyGenStart, 'ms')
-    
-    // Build OpenAI messages array immediately
-    const buildStart = Date.now()
-    const openaiMessages = [
-      ...(existingMessages || []).map(msg => ({
-        role: msg.role as 'system' | 'user' | 'assistant',
-        content: msg.content
-      })),
-      {
-        role: 'user' as const,
-        content: message
+    // 1. Check if conversation has model override
+    if (conversation.model_config_overrides?.model) {
+      model = conversation.model_config_overrides.model;
+      console.log('🎯 Using conversation model override:', model);
+    } else if (conversation.source_bud_id) {
+      // 2. Check bud's default model
+      const { data: bud } = await supabase
+        .from('buds')
+        .select('default_json')
+        .eq('id', conversation.source_bud_id)
+        .single();
+        
+      if (bud?.default_json?.model) {
+        model = bud.default_json.model;
+        console.log('🎯 Using bud model:', model);
+      } else {
+        console.log('🎯 Using default model:', model);
       }
-    ]
-    const buildTime = Date.now() - buildStart
-    console.log('📚 PERF: OpenAI messages built in:', buildTime, 'ms')
+    } else {
+      console.log('🎯 Using default model (no bud):', model);
+    }
 
-    console.log('🤖 Starting LLM streaming for existing conversation...')
+    // Load existing events from database
+    const existingEvents = await getConversationEvents(conversationId);
+    console.log('📚 Loaded existing events:', existingEvents.length);
 
-    // Create the streaming response with aggressive anti-buffering
-    const encoder = new TextEncoder()
+    // Create event log with existing events + new user message
+    const eventLog = new EventLog(existingEvents);
+    const userEvent = createTextEvent('user', message);
+    eventLog.addEvent(userEvent);
+
+    // Save user event to database
+    await saveEvent(userEvent, { conversationId });
+    console.log('💾 User event saved to database');
+
+    // Determine provider based on model
+    const isClaudeModelDetected = isClaudeModel(model);
+    const provider = isClaudeModelDetected ? 'anthropic' : 'openai';
+    const apiModelName = getApiModelName(model);
     
+    console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`);
+
+    // Create streaming response - same structure as chat-new
+    const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const streamStartTime = Date.now()
-          console.log('🚀 PERF: Starting LLM request for existing conversation...')
+          const eventBuilder = new EventStreamBuilder('assistant');
           
-          // 1. Start LLM streaming immediately (messages already preloaded)
-          const llmStartTime = Date.now()
-          const openaiStream = await openai.chat.completions.create({
-            model,
-            messages: openaiMessages,
-            stream: true,
-          })
-          const llmSetupTime = Date.now() - llmStartTime
-          console.log('⚡ PERF: LLM setup completed in:', llmSetupTime, 'ms')
-
-          // 2. Save user message in background (using pre-generated order key)
-          const saveUserMessageInBackground = async () => {
-            try {
-              const userSaveStartTime = Date.now()
-              console.log('💾 PERF: Saving user message in background...')
-              
-              const insertStartTime = Date.now()
-              const { error: userMsgError } = await supabase
-                .from('messages')
-                .insert({
-                  conversation_id: conversationId,
-                  order_key: userOrderKey,
-                  role: 'user',
-                  content: message,
-                  json_meta: {},
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-              const insertTime = Date.now() - insertStartTime
-
-              const totalUserSaveTime = Date.now() - userSaveStartTime
-
-              if (userMsgError) {
-                console.error('❌ Error saving user message:', userMsgError)
-                throw new Error('Failed to save user message')
-              }
-
-              console.log('✅ PERF: User message saved in:', totalUserSaveTime, 'ms (insert:', insertTime, 'ms)')
-              return userOrderKey
-            } catch (error) {
-              console.error('❌ Error saving user message:', error)
-              throw error
-            }
-          }
-
-          // Start user message save in parallel
-          const userMessagePromise = saveUserMessageInBackground()
-          let userMessageSaved = false
-
-          // 3. Stream LLM response while database operations happen in parallel
-          let fullContent = ''
-          let tokenCount = 0
-          let firstTokenTime: number | null = null
-          let lastTokenTime = Date.now()
-
-          for await (const chunk of openaiStream) {
-            const chunkStartTime = Date.now()
-            const content = chunk.choices[0]?.delta?.content || ''
+          // Main conversation loop - handles tool calls automatically
+          const maxIterations = 10;
+          let iteration = 0;
+          let shouldContinue = true;
+          
+          while (iteration < maxIterations && shouldContinue) {
+            iteration++;
+            console.log(`🔄 Conversation iteration ${iteration}`);
             
-            if (content) {
-              tokenCount++
-              fullContent += content
+            // Check if there are pending tool calls
+            const pendingToolCalls = eventLog.getUnresolvedToolCalls();
+            if (pendingToolCalls.length > 0) {
+              console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`);
               
-              // Track first token timing
-              if (firstTokenTime === null) {
-                firstTokenTime = Date.now()
-                const timeToFirstToken = firstTokenTime - streamStartTime
-                console.log('⚡ PERF: Time to first token from LLM:', timeToFirstToken, 'ms')
+              // Execute all pending tool calls
+              const toolResults = await executeMCPToolCalls(
+                pendingToolCalls,
+                workspaceId,
+                conversation.source_bud_id
+              );
+              
+              // Add tool results to event log
+              for (const result of toolResults) {
+                const toolResultEvent = createToolResultEvent(result.id, result.output);
+                eventLog.addEvent(toolResultEvent);
+                
+                // Save tool result to database
+                await saveEvent(toolResultEvent, { conversationId });
+                
+                // Stream tool result to user
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_result',
+                  tool_id: result.id,
+                  output: result.output,
+                  error: result.error || null
+                })}\n\n`));
+                
+                // Stream tool completion to user
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_complete',
+                  tool_id: result.id,
+                  content: result.error ? '❌ Tool failed' : '✅ Tool completed'
+                })}\n\n`));
               }
               
-              // Track inter-token timing
-              const timeSinceLastToken = chunkStartTime - lastTokenTime
-              if (tokenCount % 20 === 0) {
-                console.log(`⚡ PERF: Token ${tokenCount} - LLM inter-token delay:`, timeSinceLastToken, 'ms')
+              // Continue to next iteration to get follow-up response
+              continue;
+            }
+            
+            // No pending tool calls, get next response from LLM
+            const events = eventLog.getEvents();
+            
+            if (provider === 'anthropic') {
+              // Use Anthropic
+              const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events);
+              
+              // Get available tools if budId is provided
+              let tools: Anthropic.Tool[] = [];
+              if (conversation.source_bud_id) {
+                try {
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', conversation.source_bud_id)
+                    .single();
+                  
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId);
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
+                      const mcpClient = new Client({
+                        name: 'bud-chat-tools-client',
+                        version: '1.0.0'
+                      }, { capabilities: { tools: {} } });
+                      
+                      await mcpClient.connect(transport);
+                      const { tools: mcpTools } = await mcpClient.listTools();
+                      
+                      tools = mcpTools.map(tool => ({
+                        name: tool.name,
+                        description: tool.description,
+                        input_schema: tool.inputSchema
+                      }));
+                      
+                      await mcpClient.close();
+                    }
+                  }
+                } catch (error) {
+                  console.warn('Failed to get tools:', error);
+                }
               }
-              lastTokenTime = chunkStartTime
               
-              // Send token to client immediately with aggressive anti-buffering
-              const encodeStart = Date.now()
+              const request = {
+                model: apiModelName,
+                max_tokens: 4000,
+                temperature: 0.7,
+                messages: anthropicMessages,
+                stream: true,
+                ...(system && { system }),
+                ...(tools.length > 0 && { tools })
+              };
               
-              // Use minimal JSON and add padding to force immediate transmission
-              const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
-              const chunk = encoder.encode(data)
-              controller.enqueue(chunk)
+              const stream = await anthropic.messages.stream(request);
               
-              // Send a keep-alive chunk to force flush (browsers batch small chunks)
-              if (tokenCount % 5 === 0) {
-                controller.enqueue(encoder.encode(': keep-alive\n\n'))
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true, conversationId }
+              );
+              
+              await streamHandler.handleAnthropicStream(stream);
+              
+              // Save the finalized event to database
+              const finalEvent = eventLog.getLastEvent();
+              if (finalEvent) {
+                await saveEvent(finalEvent, { conversationId });
               }
               
-              const encodeTime = Date.now() - encodeStart
+              // Check if we have tool calls to execute
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
               
-              if (encodeTime > 5) {
-                console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
+              }
+              
+            } else {
+              // Use OpenAI (same logic as chat-new)
+              const openaiMessages = eventsToOpenAIMessages(events);
+              
+              const stream = await openai.chat.completions.create({
+                model: apiModelName,
+                messages: openaiMessages,
+                temperature: 0.7,
+                stream: true
+              });
+              
+              for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                const content = delta?.content;
+                
+                if (content) {
+                  eventBuilder.addTextChunk(content);
+                  
+                  // Stream text content
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    type: 'token',
+                    content: content
+                  })}\n\n`));
+                }
+                
+                if (chunk.choices[0]?.finish_reason) {
+                  const finalEvent = eventBuilder.finalize();
+                  eventLog.addEvent(finalEvent);
+                  
+                  // Save assistant event to database
+                  await saveEvent(finalEvent, { conversationId });
+                  
+                  // If no tool calls, we're done
+                  if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
+                    shouldContinue = false;
+                  }
+                  break;
+                }
               }
             }
-
-            // Check if user message save is complete (non-blocking)
-            if (!userMessageSaved) {
-              try {
-                await Promise.race([
-                  userMessagePromise,
-                  new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 0))
-                ])
-                userMessageSaved = true
-                console.log('💾 User message save completed during streaming')
-              } catch (error) {
-                // User message save still in progress, continue streaming
-              }
-            }
+            
+            // Reset builder for next iteration
+            eventBuilder.reset('assistant');
           }
-
-          // 4. Wait for user message save if still pending
-          if (!userMessageSaved) {
-            try {
-              await userMessagePromise
-              userMessageSaved = true
-              console.log('💾 User message save completed after streaming')
-            } catch (error) {
-              console.error('❌ User message save failed:', error)
-            }
-          }
-
-          // 5. Save assistant message to database (if user message was saved)
-          if (userMessageSaved && fullContent) {
-            try {
-              const assistantSaveStartTime = Date.now()
-              console.log('💾 PERF: Saving assistant message to DB...')
-              
-              const insertStartTime = Date.now()
-              const { error: assistantMsgError } = await supabase
-                .from('messages')
-                .insert({
-                  conversation_id: conversationId,
-                  order_key: assistantOrderKey,
-                  role: 'assistant',
-                  content: fullContent,
-                  json_meta: { model, token_count: tokenCount },
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-              const insertTime = Date.now() - insertStartTime
-
-              const totalAssistantSaveTime = Date.now() - assistantSaveStartTime
-
-              if (assistantMsgError) {
-                console.error('❌ Error saving assistant message:', assistantMsgError)
-              } else {
-                console.log('✅ PERF: Assistant message saved in:', totalAssistantSaveTime, 'ms (insert:', insertTime, 'ms)')
-              }
-            } catch (error) {
-              console.error('❌ Error saving assistant message:', error)
-            }
-          }
-
-          // 5. Send completion signal
+          
+          // Send completion event
+          const finalContent = eventLog.getEvents()
+            .filter(e => e.role === 'assistant')
+            .flatMap(e => e.segments)
+            .filter(s => s.type === 'text')
+            .map(s => s.text)
+            .join('');
+          
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'complete',
-            content: fullContent
-          })}\n\n`))
-
-          console.log('🏁 Existing conversation streaming completed successfully')
-          controller.close()
+            content: finalContent
+          })}\n\n`));
+          
+          controller.close();
           
         } catch (error) {
-          console.error('❌ Existing conversation streaming error:', error)
+          console.error('❌ Streaming error:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
             type: 'error',
-            error: 'Failed to generate response'
-          })}\n\n`))
-          controller.close()
+            error: errorMessage
+          })}\n\n`));
+          controller.close();
         }
       }
-    })
+    });
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no', // Disable nginx buffering
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control',
       },
-    })
+    });
+
   } catch (error) {
-    console.error('❌ Existing conversation chat API error:', error)
-    return new Response('Internal server error', { status: 500 })
+    console.error('❌ Chat API error:', error);
+    return new Response(
+      JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 }

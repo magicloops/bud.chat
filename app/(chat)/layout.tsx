@@ -1,100 +1,100 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { useAuth } from '@/lib/auth/auth-provider'
-import { AuthModal } from '@/components/auth/auth-modal'
-import { Sidebar } from '@/components/Sidebar'
-import SettingsPanel from '@/components/settings-panel'
-import { Button } from '@/components/ui/button'
-import { PanelLeft, PanelRight } from 'lucide-react'
-import { Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { AuthModal } from '@/components/auth/auth-modal';
+import { Sidebar } from '@/components/Sidebar';
+import SettingsPanel from '@/components/settings-panel';
+import { Button } from '@/components/ui/button';
+import { PanelLeft, PanelRight } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { 
   useSelectedWorkspace, 
   useSubscribeToWorkspace, 
   useUnsubscribeFromWorkspace,
   useCleanup 
-} from '@/state/simpleChatStore'
+} from '@/state/eventChatStore';
 
 export default function ChatLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const { user, loading } = useAuth()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false)
+  const { user, loading } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   
   // Realtime subscriptions
-  const selectedWorkspace = useSelectedWorkspace()
-  const subscribeToWorkspace = useSubscribeToWorkspace()
-  const unsubscribeFromWorkspace = useUnsubscribeFromWorkspace()
-  const cleanup = useCleanup()
+  const selectedWorkspace = useSelectedWorkspace();
+  const subscribeToWorkspace = useSubscribeToWorkspace();
+  const unsubscribeFromWorkspace = useUnsubscribeFromWorkspace();
+  const cleanup = useCleanup();
 
   // Load sidebar state from localStorage on mount
   useEffect(() => {
-    const savedSidebarOpen = localStorage.getItem('sidebarOpen')
+    const savedSidebarOpen = localStorage.getItem('sidebarOpen');
     if (savedSidebarOpen !== null) {
-      setSidebarOpen(savedSidebarOpen === 'true')
+      setSidebarOpen(savedSidebarOpen === 'true');
     }
-    const savedSettingsPanelOpen = localStorage.getItem('settingsPanelOpen')
+    const savedSettingsPanelOpen = localStorage.getItem('settingsPanelOpen');
     if (savedSettingsPanelOpen !== null) {
-      setSettingsPanelOpen(savedSettingsPanelOpen === 'true')
+      setSettingsPanelOpen(savedSettingsPanelOpen === 'true');
     }
 
     // Listen for settings panel toggle events
     const handleToggleSettingsPanel = (event: CustomEvent) => {
-      setSettingsPanelOpen(event.detail.open)
-    }
+      setSettingsPanelOpen(event.detail.open);
+    };
     
-    window.addEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener)
+    window.addEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener);
     
     return () => {
-      window.removeEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener)
-    }
-  }, [])
+      window.removeEventListener('toggleSettingsPanel', handleToggleSettingsPanel as EventListener);
+    };
+  }, []);
 
   // Manage realtime subscriptions based on selected workspace
   useEffect(() => {
     if (!user || !selectedWorkspace) {
-      return
+      return;
     }
 
-    console.log('📡 Subscribing to workspace:', selectedWorkspace)
-    subscribeToWorkspace(selectedWorkspace)
+    console.log('📡 Subscribing to workspace:', selectedWorkspace);
+    subscribeToWorkspace(selectedWorkspace);
 
     return () => {
-      console.log('📡 Unsubscribing from workspace:', selectedWorkspace)
-      unsubscribeFromWorkspace(selectedWorkspace)
-    }
-  }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace])
+      console.log('📡 Unsubscribing from workspace:', selectedWorkspace);
+      unsubscribeFromWorkspace(selectedWorkspace);
+    };
+  }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace]);
 
   // Cleanup all subscriptions on unmount
   useEffect(() => {
     return () => {
-      cleanup()
-    }
-  }, [cleanup])
+      cleanup();
+    };
+  }, [cleanup]);
 
   const handleSidebarToggle = (open: boolean) => {
-    setSidebarOpen(open)
-    localStorage.setItem('sidebarOpen', String(open))
-  }
+    setSidebarOpen(open);
+    localStorage.setItem('sidebarOpen', String(open));
+  };
 
   const handleSettingsPanelToggle = (open: boolean) => {
-    setSettingsPanelOpen(open)
-    localStorage.setItem('settingsPanelOpen', String(open))
-  }
+    setSettingsPanelOpen(open);
+    localStorage.setItem('settingsPanelOpen', String(open));
+  };
 
   if (loading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
-    )
+    );
   }
 
   if (!user) {
-    return <AuthModal />
+    return <AuthModal />;
   }
 
   return (
@@ -161,5 +161,5 @@ export default function ChatLayout({
         </div>
       </div>
     </div>
-  )
+  );
 }

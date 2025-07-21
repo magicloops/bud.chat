@@ -4,6 +4,48 @@ This file contains important patterns, gotchas, and conventions for working with
 
 ---
 
+## ⚠️ Critical Development Guidelines
+
+### Package Manager
+- **ALWAYS use `pnpm`** - This project uses pnpm, not npm or yarn
+- Examples: `pnpm install`, `pnpm run dev`, `pnpm build`
+
+### Database Management
+- **NEVER run `pnpm supabase db reset`** - This will wipe out all existing data
+- Use `pnpm supabase db push` to apply new migrations
+- Use `pnpm supabase migration new <name>` to create new migrations
+- Test migrations on local database first before applying to production
+
+### Model Mapping & Centralization
+- **Use friendly model names** in UI/configs (e.g., `claude-3-5-sonnet`, `gpt-4o`)
+- **Automatic API mapping** - system maps to actual API models (e.g., `claude-3-5-sonnet-20241022`)
+- **Provider detection** - automatically detects OpenAI vs Anthropic models for MCP routing
+- **Centralized model lists** - all UI components use same model definitions
+- **Location**: `/lib/modelMapping.ts` - update here when new model versions are released
+
+```typescript
+// ✅ GOOD - Use centralized functions
+import { getModelsForUI, getDefaultModel } from '@/lib/modelMapping'
+
+// In UI components
+{getModelsForUI().map(model => <SelectItem value={model.value}>{model.label}</SelectItem>)}
+
+// For defaults
+const defaultConfig = { model: getDefaultModel() }
+
+// ❌ BAD - Don't hardcode models in components
+<SelectItem value="gpt-4o">GPT-4o</SelectItem>
+<SelectItem value="claude-3-5-sonnet">Claude 3.5 Sonnet</SelectItem>
+```
+
+**Centralized Components:**
+- ✅ `BudForm.tsx` - Uses `getModelsForUI()`
+- ✅ `settings-panel.tsx` - Uses `getModelsForUI()` 
+- ✅ `model-context.tsx` - Uses `getDefaultModel()`
+- ✅ `budHelpers.ts` - Uses `getDefaultModel()` in templates
+
+---
+
 ## State Management (Zustand)
 
 ### ⚠️ Derived State Pattern - Prevent Infinite Loops

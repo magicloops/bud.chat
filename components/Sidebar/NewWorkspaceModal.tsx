@@ -1,9 +1,9 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
+} from '@/components/ui/dialog';
 
 interface NewWorkspaceModalProps {
   open: boolean
@@ -24,29 +24,29 @@ export function NewWorkspaceModal({
   onOpenChange,
   onCreateWorkspace,
 }: NewWorkspaceModalProps) {
-  const [name, setName] = useState('')
-  const [isCreating, setIsCreating] = useState(false)
+  const [name, setName] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
+    e.preventDefault();
+    if (!name.trim()) return;
 
-    setIsCreating(true)
+    setIsCreating(true);
     try {
-      await onCreateWorkspace(name.trim())
-      setName('')
-      onOpenChange(false)
+      await onCreateWorkspace(name.trim());
+      setName('');
+      onOpenChange(false);
     } catch (error) {
-      console.error('Failed to create workspace:', error)
+      console.error('Failed to create workspace:', error);
     } finally {
-      setIsCreating(false)
+      setIsCreating(false);
     }
-  }
+  };
 
   const handleCancel = () => {
-    setName('')
-    onOpenChange(false)
-  }
+    setName('');
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -93,5 +93,5 @@ export function NewWorkspaceModal({
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

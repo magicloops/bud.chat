@@ -1,18 +1,20 @@
-'use client'
+'use client';
 
-import { useState, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
-import { Loader2, Sparkles } from 'lucide-react'
-import { EmojiPicker } from '@/components/EmojiPicker'
-import { Bud, BudConfig } from '@/lib/types'
-import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers'
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, Sparkles } from 'lucide-react';
+import { EmojiPicker } from '@/components/EmojiPicker';
+import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP';
+import { Bud, BudConfig } from '@/lib/types';
+import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers';
+import { getModelsForUI } from '@/lib/modelMapping';
 
 interface BudFormProps {
   bud?: Bud
@@ -26,48 +28,60 @@ interface BudFormProps {
 export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = false }: BudFormProps) {
   const [config, setConfig] = useState<BudConfig>(() => 
     bud ? getBudConfig(bud) : getDefaultBudConfig()
-  )
-  const [errors, setErrors] = useState<string[]>([])
+  );
+  const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(
+    config.mcpConfig || {}
+  );
+  const [errors, setErrors] = useState<string[]>([]);
 
   // Reset form when bud changes
   useEffect(() => {
     if (bud) {
-      setConfig(getBudConfig(bud))
+      const budConfig = getBudConfig(bud);
+      setConfig(budConfig);
+      setMcpConfig(budConfig.mcpConfig || {});
     } else {
-      setConfig(getDefaultBudConfig())
+      const defaultConfig = getDefaultBudConfig();
+      setConfig(defaultConfig);
+      setMcpConfig({});
     }
-    setErrors([])
-  }, [bud])
+    setErrors([]);
+  }, [bud]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     
     // Validate
-    const validationErrors = validateBudConfig(config)
+    const validationErrors = validateBudConfig(config);
     if (validationErrors.length > 0) {
-      setErrors(validationErrors)
-      return
+      setErrors(validationErrors);
+      return;
     }
     
-    setErrors([])
+    setErrors([]);
     
     try {
-      await onSave(config, config.name)
-      onClose()
+      // Include MCP configuration in the config
+      const finalConfig = {
+        ...config,
+        mcpConfig: Object.keys(mcpConfig).length > 0 ? mcpConfig : undefined
+      };
+      await onSave(finalConfig, config.name);
+      onClose();
     } catch (error) {
-      console.error('Failed to save bud:', error)
-      setErrors([error instanceof Error ? error.message : 'Failed to save bud'])
+      console.error('Failed to save bud:', error);
+      setErrors([error instanceof Error ? error.message : 'Failed to save bud']);
     }
-  }
+  };
 
   const handleTemplateSelect = (templateKey: string) => {
-    const template = BUD_TEMPLATES[templateKey]
+    const template = BUD_TEMPLATES[templateKey];
     if (template) {
-      setConfig({ ...getDefaultBudConfig(), ...template })
+      setConfig({ ...getDefaultBudConfig(), ...template });
     }
-  }
+  };
 
-  const isEditing = !!bud
+  const isEditing = !!bud;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -153,7 +167,7 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               required
             />
             <p className="text-xs text-muted-foreground mt-1">
-              This defines your bud's personality and instructions.
+              This defines your bud&apos;s personality and instructions.
             </p>
           </div>
           
@@ -174,30 +188,16 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="gpt-4o">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-4o
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="gpt-4o-mini">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-4o Mini
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="gpt-3.5-turbo">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">OpenAI</Badge>
-                          GPT-3.5 Turbo
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="claude-3.5-sonnet">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline">Anthropic</Badge>
-                          Claude 3.5 Sonnet
-                        </div>
-                      </SelectItem>
+                      {getModelsForUI().map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={model.provider === 'anthropic' ? 'outline' : 'secondary'}>
+                              {model.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                            </Badge>
+                            {model.label}
+                          </div>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -236,6 +236,15 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
             </CardContent>
           </Card>
           
+          {/* MCP Configuration */}
+          <MCPConfigurationPanel
+            workspaceId={workspaceId}
+            config={mcpConfig}
+            onChange={setMcpConfig}
+            title="Tool Integration"
+            description="Enable external tools and capabilities for this Bud"
+          />
+          
           {/* Optional Greeting */}
           <div>
             <label className="block text-sm font-medium mb-2">Greeting Message (Optional)</label>
@@ -263,5 +272,5 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

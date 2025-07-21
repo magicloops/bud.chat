@@ -1,0 +1,262 @@
+// Anthropic provider mapper for event-based messages
+
+import { Event, Segment, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import type Anthropic from '@anthropic-ai/sdk';
+
+// Use the actual SDK types instead of custom interfaces
+type AnthropicMessage = Anthropic.Messages.MessageParam;
+type AnthropicContent = Anthropic.Messages.ContentBlock;
+
+export interface AnthropicResponse {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  content: AnthropicContent[];
+  model: string;
+  stop_reason: string | null;
+  stop_sequence: string | null;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+  };
+}
+
+// Use the actual SDK stream event type
+type AnthropicStreamDelta = Anthropic.Messages.RawMessageStreamEvent;
+
+/**
+ * Convert events to Anthropic message format
+ */
+export function eventsToAnthropicMessages(events: Event[]): { 
+  messages: Anthropic.Messages.MessageParam[], 
+  system: string 
+} {
+  const eventLog = new EventLog(events);
+  const providerMessages = eventLog.toProviderMessages('anthropic');
+  const system = eventLog.getSystemParameter();
+  
+  // Convert to proper SDK format
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: Anthropic.Messages.MessageParam[] = providerMessages.map((msg: any) => { // Provider messages from different chat APIs
+    return {
+      role: msg.role,
+      content: msg.content
+    };
+  });
+  
+  return { messages, system };
+}
+
+/**
+ * Convert Anthropic response to events
+ */
+export function anthropicResponseToEvents(response: AnthropicResponse): Event[] {
+  const events: Event[] = [];
+  const segments: Segment[] = [];
+  
+  for (const block of response.content) {
+    switch (block.type) {
+      case 'text':
+        if (block.text) {
+          segments.push({ type: 'text', text: block.text });
+        }
+        break;
+      case 'tool_use':
+        if (block.id && block.name) {
+          segments.push({ 
+            type: 'tool_call', 
+            id: block.id, 
+            name: block.name, 
+            args: block.input || {} 
+          });
+        }
+        break;
+    }
+  }
+  
+  if (segments.length > 0) {
+    events.push(createMixedEvent('assistant', segments));
+  }
+  
+  return events;
+}
+
+/**
+ * Convert Anthropic streaming delta to event updates
+ */
+export function anthropicStreamDeltaToEvent(
+  delta: AnthropicStreamDelta,
+  currentEvent: Event | null
+): { event: Event | null; isComplete: boolean } {
+  switch (delta.type) {
+    case 'message_start':
+      // Start new assistant message
+      return {
+        event: createMixedEvent('assistant', []),
+        isComplete: false
+      };
+      
+    case 'content_block_start':
+      if (!currentEvent) {
+        currentEvent = createMixedEvent('assistant', []);
+      }
+      
+      if (delta.content_block?.type === 'text') {
+        // Start text block
+        currentEvent.segments.push({ type: 'text', text: '' });
+      } else if (delta.content_block?.type === 'tool_use') {
+        // Start tool use block
+        if (delta.content_block.id && delta.content_block.name) {
+          currentEvent.segments.push({
+            type: 'tool_call',
+            id: delta.content_block.id,
+            name: delta.content_block.name,
+            args: {}
+          });
+        }
+      }
+      
+      return { event: currentEvent, isComplete: false };
+      
+    case 'content_block_delta':
+      if (!currentEvent || delta.index === undefined) {
+        return { event: currentEvent, isComplete: false };
+      }
+      
+      const segment = currentEvent.segments[delta.index];
+      if (!segment) {
+        return { event: currentEvent, isComplete: false };
+      }
+      
+      if (delta.delta?.type === 'text_delta' && segment.type === 'text') {
+        // Update text segment
+        segment.text += delta.delta.text || '';
+      } else if (delta.delta?.type === 'input_json_delta' && segment.type === 'tool_call') {
+        // Update tool call args - we need to accumulate the JSON
+        try {
+          const partialJson = delta.delta.partial_json || '';
+          console.log('🔧 Accumulating tool call JSON:', { 
+            toolId: segment.id, 
+            toolName: segment.name, 
+            partialJson: partialJson.substring(0, 100) + (partialJson.length > 100 ? '...' : '')
+          });
+          // For now, we'll store the partial JSON and parse it on completion
+          if (!segment.args) {
+            segment.args = {};
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (segment.args as any)._partial_json = ((segment.args as any)._partial_json || '') + partialJson; // Anthropic streaming accumulates partial JSON
+        } catch (e) {
+          console.error('Failed to parse tool call JSON delta:', e);
+        }
+      }
+      
+      return { event: currentEvent, isComplete: false };
+      
+    case 'content_block_stop':
+      if (!currentEvent || delta.index === undefined) {
+        return { event: currentEvent, isComplete: false };
+      }
+      
+      const completedSegment = currentEvent.segments[delta.index];
+      if (completedSegment?.type === 'tool_call') {
+        // Parse the accumulated JSON
+        try {
+          const partialJson = (completedSegment.args as Record<string, unknown>)._partial_json;
+          console.log('🔧 Finalizing tool call JSON:', { 
+            toolId: completedSegment.id, 
+            toolName: completedSegment.name, 
+            partialJson: typeof partialJson === 'string' ? (partialJson.substring(0, 200) + (partialJson.length > 200 ? '...' : '')) : partialJson,
+            hasPartialJson: !!partialJson
+          });
+          if (typeof partialJson === 'string' && partialJson) {
+            completedSegment.args = JSON.parse(partialJson);
+            console.log('✅ Parsed tool call args:', completedSegment.args);
+          } else {
+            console.log('⚠️ No partial JSON found for tool call');
+          }
+        } catch (e) {
+          console.error('Failed to parse final tool call JSON:', e);
+          completedSegment.args = {};
+        }
+      }
+      
+      return { event: currentEvent, isComplete: false };
+      
+    case 'message_stop':
+      return { event: currentEvent, isComplete: true };
+      
+    default:
+      return { event: currentEvent, isComplete: false };
+  }
+}
+
+/**
+ * Create tool result event from MCP response
+ */
+export function createToolResultFromMCPResponse(
+  toolCallId: string,
+  mcpResponse: unknown,
+  error?: string
+): Event {
+  const output = error ? { error } : mcpResponse;
+  return createToolResultEvent(toolCallId, output as object);
+}
+
+/**
+ * Extract tool calls from events that need MCP execution
+ */
+export function extractPendingToolCalls(events: Event[]): Array<{
+  id: string;
+  name: string;
+  args: object;
+}> {
+  const eventLog = new EventLog(events);
+  return eventLog.getUnresolvedToolCalls();
+}
+
+/**
+ * Convert legacy message format to events (for migration)
+ */
+export function legacyMessageToEvents(message: Record<string, unknown>): Event[] {
+  const events: Event[] = [];
+  
+  if (message.role === 'system' && typeof message.content === 'string') {
+    events.push(createTextEvent('system', message.content));
+  } else if (message.role === 'user' && typeof message.content === 'string') {
+    events.push(createTextEvent('user', message.content));
+  } else if (message.role === 'assistant') {
+    const segments: Segment[] = [];
+    
+    // Add text content
+    if (message.content && typeof message.content === 'string') {
+      segments.push({ type: 'text', text: message.content });
+    }
+    
+    // Add tool calls from json_meta
+    const jsonMeta = message.json_meta as { tool_calls?: Array<{ id: string; function: { name: string; arguments?: string } }> } | null | undefined;
+    if (jsonMeta?.tool_calls) {
+      for (const toolCall of jsonMeta.tool_calls) {
+        segments.push({
+          type: 'tool_call',
+          id: toolCall.id,
+          name: toolCall.function.name,
+          args: JSON.parse(toolCall.function.arguments || '{}')
+        });
+      }
+    }
+    
+    if (segments.length > 0) {
+      events.push(createMixedEvent('assistant', segments));
+    }
+  } else if (message.role === 'tool') {
+    // Tool result message
+    const toolJsonMeta = message.json_meta as { tool_call_id?: string; is_tool_result?: boolean } | null | undefined;
+    const toolCallId = toolJsonMeta?.tool_call_id;
+    if (toolCallId && typeof toolCallId === 'string') {
+      events.push(createToolResultEvent(toolCallId, { content: message.content } as object));
+    }
+  }
+  
+  return events;
+}

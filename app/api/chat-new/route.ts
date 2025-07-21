@@ -1,26 +1,47 @@
+// Event-based chat API - vendor-agnostic implementation
+// Migrated from legacy message-based system to event-based system
+
 import { createClient } from '@/lib/supabase/server'
-import { Database } from '@/lib/types/database'
-import OpenAI from 'openai'
 import { NextRequest } from 'next/server'
+import { EventStreamBuilder } from '@/lib/streaming/eventBuilder'
+import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler'
+import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor'
+import { EventLog, createTextEvent, createToolResultEvent, Event } from '@/lib/types/events'
+import { eventsToAnthropicMessages } from '@/lib/providers/anthropic'
+import { eventsToOpenAIMessages } from '@/lib/providers/openai'
+import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
+import { Database } from '@/lib/types/database'
 import { generateKeyBetween } from 'fractional-indexing'
+import OpenAI from 'openai'
+import Anthropic from '@anthropic-ai/sdk'
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 })
 
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+})
+
 // Helper function to generate a conversation title (async, non-blocking)
-async function generateConversationTitleInBackground(conversationId: string, messages: any[], supabase: any) {
+async function generateConversationTitleInBackground(conversationId: string, events: Event[], supabase: Awaited<ReturnType<typeof createClient>>) {
   try {
     console.log('🏷️ Generating title for conversation:', conversationId)
     
-    // Only generate title if we have enough messages (user + assistant)
-    if (messages.length < 2) return
+    // Only generate title if we have enough events (user + assistant)
+    if (events.length < 2) return
     
-    // Create a prompt for title generation using the conversation context
-    const conversationContext = messages
-      .filter(msg => msg.role !== 'system')
-      .slice(0, 4) // Use first few messages
-      .map(msg => `${msg.role}: ${msg.content}`)
+    // Create a prompt for title generation using the event context
+    const conversationContext = events
+      .filter(event => event.role !== 'system')
+      .slice(0, 4) // Use first few events
+      .map(event => {
+        const textContent = event.segments
+          .filter(s => s.type === 'text')
+          .map(s => s.type === 'text' ? s.text : '')
+          .join('')
+        return `${event.role}: ${textContent}`
+      })
       .join('\\n')
 
     const titlePrompt = `Based on this conversation, generate a concise title (3-6 words maximum) that captures the main topic or question:
@@ -58,94 +79,96 @@ Title:`
   }
 }
 
-// Create conversation and messages in background (non-blocking)
+// Helper function to create conversation in background
 async function createConversationInBackground(
-  messages: any[],
+  events: Event[],
   workspaceId: string,
   budId?: string
-): Promise<{ conversationId: string, bud?: any }> {
+): Promise<{ conversationId: string; bud?: Database['public']['Tables']['buds']['Row'] }> {
   const supabase = await createClient()
   
   try {
-    const dbStartTime = Date.now()
-    console.log('💾 PERF: Creating conversation in background...', { messageCount: messages.length, workspaceId })
+    console.log('💾 Creating conversation in background...')
     
-    // Fetch bud if budId is provided (parallel with conversation creation)
-    let budPromise: Promise<any> | null = null
+    // Fetch bud if budId is provided
+    let bud = null
     if (budId) {
-      budPromise = supabase
+      const { data, error } = await supabase
         .from('buds')
         .select('*')
         .eq('id', budId)
         .single()
-        .then(({ data, error }) => {
-          if (error) {
-            console.warn('Failed to fetch bud:', error)
-            return null
-          }
-          return data
-        })
+      
+      if (data && !error) {
+        bud = data
+      }
     }
     
-    // Create conversation
-    const convStartTime = Date.now()
+    // Create conversation with bud configuration as overrides
+    // This preserves the bud's settings at conversation creation time
+    const budConfig = bud?.default_json;
+    const modelConfigOverrides = budConfig ? {
+      model: budConfig.model,
+      systemPrompt: budConfig.systemPrompt,
+      temperature: budConfig.temperature,
+      maxTokens: budConfig.maxTokens,
+      assistantName: budConfig.name,
+      avatar: budConfig.avatar
+    } : undefined;
+    
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .insert({
         workspace_id: workspaceId,
-        source_bud_id: budId, // Changed from bud_id to source_bud_id
+        source_bud_id: budId,
+        assistant_name: bud?.assistant_name || budConfig?.name || 'Assistant',
+        assistant_avatar: bud?.assistant_avatar || budConfig?.avatar || '🤖',
+        model_config_overrides: modelConfigOverrides,
+        mcp_config_overrides: budConfig?.mcpConfig,
         created_at: new Date().toISOString()
       })
       .select()
       .single()
-    const convCreationTime = Date.now() - convStartTime
 
     if (convError || !conversation) {
-      console.error('❌ Error creating conversation:', convError)
       throw new Error('Failed to create conversation')
     }
 
-    // Wait for bud fetch if it was initiated
-    const bud = budPromise ? await budPromise : null
-
-    console.log('✅ PERF: Conversation created in:', convCreationTime, 'ms -', conversation.id)
-
-    // Create messages with proper ordering
+    // Save all events to database
+    const eventInserts = []
     let previousOrderKey: string | null = null
-    const messageInserts = messages.map((msg, index) => {
+    
+    for (const event of events) {
       const orderKey = generateKeyBetween(previousOrderKey, null)
       previousOrderKey = orderKey
       
-      return {
+      eventInserts.push({
+        id: event.id,
         conversation_id: conversation.id,
+        role: event.role,
+        segments: event.segments,
+        ts: event.ts,
         order_key: orderKey,
-        role: msg.role,
-        content: msg.content,
-        json_meta: msg.json_meta || {},
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }
-    })
-
-    const messagesStartTime = Date.now()
-    const { error: messagesError } = await supabase
-      .from('messages')
-      .insert(messageInserts)
-    const messagesCreationTime = Date.now() - messagesStartTime
-
-    if (messagesError) {
-      console.error('❌ Error creating messages:', messagesError)
-      throw new Error('Failed to create messages')
+        created_at: new Date().toISOString()
+      })
     }
 
-    console.log('✅ PERF: Messages created in:', messagesCreationTime, 'ms for conversation:', conversation.id)
+    if (eventInserts.length > 0) {
+      const { error: eventsError } = await supabase
+        .from('events')
+        .insert(eventInserts)
 
+      if (eventsError) {
+        console.error('❌ Error saving events:', eventsError)
+        throw new Error('Failed to save events')
+      }
+    }
+
+    console.log('✅ Conversation and events created:', conversation.id)
+    
     // Generate title in background (fire and forget)
-    generateConversationTitleInBackground(conversation.id, messages, supabase)
-      .catch(error => console.error('Background title generation failed:', error))
-
-    const totalDbTime = Date.now() - dbStartTime
-    console.log('💾 PERF: Total background DB operations completed in:', totalDbTime, 'ms')
+    generateConversationTitleInBackground(conversation.id, events, supabase)
+      .catch(error => console.error('❌ Title generation failed:', error))
 
     return { conversationId: conversation.id, bud }
   } catch (error) {
@@ -154,8 +177,18 @@ async function createConversationInBackground(
   }
 }
 
+// Helper function to execute MCP tool calls (now uses unified MCPToolExecutor)
+async function executeMCPToolCalls(
+  toolCalls: Array<{ id: string; name: string; args: object }>,
+  workspaceId: string,
+  budId?: string
+): Promise<Array<{ id: string; output: object; error?: string }>> {
+  const toolExecutor = new MCPToolExecutor({ debug: true });
+  return await toolExecutor.executeToolCalls(toolCalls, workspaceId, budId);
+}
+
 export async function POST(request: NextRequest) {
-  console.log('🚀 New streaming-first chat API called')
+  console.log('🚀 Event-based chat API called')
   
   try {
     const supabase = await createClient()
@@ -171,18 +204,17 @@ export async function POST(request: NextRequest) {
       messages, 
       workspaceId,
       budId,
-      model = 'gpt-4o'
+      model = 'gpt-4o',
+      conversationId // Optional: for existing conversations
     } = body
 
-    console.log('📥 Request data:', { 
-      messageCount: messages?.length, 
-      workspaceId, 
-      budId, 
-      model 
-    })
+    console.log('📥 Received messages:', messages)
+    console.log('📥 Messages count:', messages?.length)
+    console.log('📥 Messages details:', JSON.stringify(messages, null, 2))
 
     // Validate required fields
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      console.log('❌ Messages validation failed:', { messages, isArray: Array.isArray(messages), length: messages?.length })
       return new Response('Messages are required', { status: 400 })
     }
     if (!workspaceId) {
@@ -201,252 +233,356 @@ export async function POST(request: NextRequest) {
       return new Response('Workspace not found or access denied', { status: 404 })
     }
 
-    console.log('✅ User has access to workspace:', workspaceId)
-
-    // Convert messages to OpenAI format
-    const openaiMessages = messages.map(msg => ({
-      role: msg.role as 'system' | 'user' | 'assistant',
-      content: msg.content
-    }))
-
-    console.log('🤖 Starting LLM streaming...')
-
-    // Create the streaming response
-    const encoder = new TextEncoder()
+    // Convert legacy messages to events
+    const eventLog = new EventLog()
     
+    console.log('🔄 Converting messages to events...')
+    
+    // Add existing messages as events
+    for (const message of messages) {
+      console.log('📝 Processing message:', { role: message.role, content: message.content?.substring(0, 100) })
+      
+      // Handle both legacy message format (content) and event format (segments)
+      if (message.segments) {
+        // Event format - add directly to event log
+        eventLog.addEvent(message)
+      } else {
+        // Legacy message format - convert to events
+        if (message.role === 'system') {
+          eventLog.addEvent(createTextEvent('system', message.content))
+        } else if (message.role === 'user') {
+          eventLog.addEvent(createTextEvent('user', message.content))
+        } else if (message.role === 'assistant') {
+          // Handle assistant messages with potential tool calls
+          const segments: Array<{type: 'text', text: string} | {type: 'tool_call', id: string, name: string, args: object}> = []
+          if (message.content) {
+            segments.push({ type: 'text' as const, text: message.content })
+          }
+          if (message.json_meta?.tool_calls) {
+            for (const toolCall of message.json_meta.tool_calls) {
+              segments.push({
+                type: 'tool_call' as const,
+                id: toolCall.id,
+                name: toolCall.function.name,
+                args: JSON.parse(toolCall.function.arguments || '{}')
+              })
+            }
+          }
+          if (segments.length > 0) {
+            eventLog.addEvent({
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              segments,
+              ts: Date.now()
+            })
+          }
+        }
+      }
+    }
+
+    // Determine provider based on model
+    const isClaudeModelDetected = isClaudeModel(model)
+    const provider = isClaudeModelDetected ? 'anthropic' : 'openai'
+    const apiModelName = getApiModelName(model)
+    
+    console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`)
+
+    // Create streaming response
+    const encoder = new TextEncoder()
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const streamStartTime = Date.now()
-          console.log('🚀 PERF: Starting LLM request...')
+          const eventBuilder = new EventStreamBuilder('assistant')
+          let createdConversationId: string | null = null
           
-          // 1. Get effective model configuration (will get bud from conversation creation)
-          let effectiveConfig = { model, temperature: 0.7 }
-          let budData: any = null
-
-          // 2. Start LLM streaming with effective configuration
-          const llmStartTime = Date.now()
-          const openaiStream = await openai.chat.completions.create({
-            model: effectiveConfig.model,
-            messages: openaiMessages,
-            stream: true,
-            temperature: effectiveConfig.temperature,
-            max_tokens: effectiveConfig.max_tokens,
-          })
-          const llmSetupTime = Date.now() - llmStartTime
-
-          console.log('⚡ PERF: LLM setup completed in:', llmSetupTime, 'ms')
-
-          // 2. Create conversation in background (don't await - parallel processing)
-          let conversationCreationPromise = createConversationInBackground(messages, workspaceId, budId)
-          let conversationId: string | null = null
-          let conversationCreated = false
-
-          // 3. Stream LLM response while database operations happen in parallel
-          let fullContent = ''
-          let tokenCount = 0
-          let firstTokenTime: number | null = null
-          let lastTokenTime = Date.now()
-
-          for await (const chunk of openaiStream) {
-            const chunkStartTime = Date.now()
-            const content = chunk.choices[0]?.delta?.content || ''
+          // Main conversation loop - handles tool calls automatically
+          const maxIterations = 10 // Prevent infinite loops
+          let iteration = 0
+          let shouldContinue = true
+          
+          while (iteration < maxIterations && shouldContinue) {
+            iteration++
+            console.log(`🔄 Conversation iteration ${iteration}`)
             
-            if (content) {
-              tokenCount++
-              fullContent += content
+            // Check if there are pending tool calls
+            const pendingToolCalls = eventLog.getUnresolvedToolCalls()
+            if (pendingToolCalls.length > 0) {
+              console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`)
               
-              // Track first token timing
-              if (firstTokenTime === null) {
-                firstTokenTime = Date.now()
-                const timeToFirstToken = firstTokenTime - streamStartTime
-                console.log('⚡ PERF: Time to first token from LLM:', timeToFirstToken, 'ms')
-              }
+              // Execute all pending tool calls
+              const toolResults = await executeMCPToolCalls(
+                pendingToolCalls,
+                workspaceId,
+                budId
+              )
               
-              // Track inter-token timing
-              const timeSinceLastToken = chunkStartTime - lastTokenTime
-              if (tokenCount % 20 === 0) {
-                console.log(`⚡ PERF: Token ${tokenCount} - LLM inter-token delay:`, timeSinceLastToken, 'ms')
-              }
-              lastTokenTime = chunkStartTime
-              
-              // Send token to client immediately with aggressive anti-buffering
-              const encodeStart = Date.now()
-              
-              // Use minimal JSON and add padding to force immediate transmission
-              const data = `data: {"type":"token","content":${JSON.stringify(content)}}\n\n`
-              const chunk = encoder.encode(data)
-              controller.enqueue(chunk)
-              
-              // Send a keep-alive chunk to force flush (browsers batch small chunks)
-              if (tokenCount % 5 === 0) {
-                controller.enqueue(encoder.encode(': keep-alive\n\n'))
-              }
-              
-              const encodeTime = Date.now() - encodeStart
-              
-              if (encodeTime > 5) {
-                console.log('🐌 PERF: Slow server encoding:', encodeTime, 'ms')
-              }
-            }
-
-            // Check if conversation creation is complete (non-blocking)
-            if (!conversationCreated) {
-              try {
-                const result = await Promise.race([
-                  conversationCreationPromise,
-                  new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 0))
-                ])
-                conversationId = result.conversationId
-                budData = result.bud
-                conversationCreated = true
+              // Add tool results to event log
+              for (const result of toolResults) {
+                eventLog.addEvent(createToolResultEvent(result.id, result.output))
                 
-                // Update effective config if we got bud data
-                if (budData && budId) {
-                  try {
-                    const { getEffectiveConversationConfig } = await import('@/lib/budHelpers')
-                    const config = getEffectiveConversationConfig({ source_bud_id: budId }, budData)
-                    effectiveConfig = {
-                      model: config.model,
-                      temperature: config.temperature,
-                      max_tokens: config.max_tokens
-                    }
-                    console.log('📝 Updated effective config from bud:', effectiveConfig)
-                  } catch (error) {
-                    console.warn('Failed to get effective config:', error)
-                  }
-                }
-                
-                // Send conversation ID when available
+                // Stream tool result to user
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                  type: 'conversationCreated',
-                  conversationId
+                  type: "tool_result",
+                  tool_id: result.id,
+                  output: result.output,
+                  error: result.error || null
                 })}\n\n`))
                 
-                console.log('💾 Conversation creation completed during streaming:', conversationId)
-              } catch (error) {
-                // Conversation creation still in progress, continue streaming
+                // Stream tool completion to user
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: "tool_complete",
+                  tool_id: result.id,
+                  content: result.error ? "❌ Tool failed" : "✅ Tool completed"
+                })}\n\n`))
               }
-            }
-          }
-
-          // 4. Wait for conversation creation if still pending
-          if (!conversationCreated) {
-            try {
-              const result = await conversationCreationPromise
-              conversationId = result.conversationId
-              budData = result.bud
-              conversationCreated = true
               
-              // Update effective config if we got bud data
-              if (budData && budId) {
+              // Continue to next iteration to get follow-up response
+              continue
+            }
+            
+            // No pending tool calls, get next response from LLM
+            const events = eventLog.getEvents()
+            
+            console.log('📋 Events in log:', events.length)
+            console.log('📋 Event details:', JSON.stringify(events, null, 2))
+            
+            if (provider === 'anthropic') {
+              // Use Anthropic
+              const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events)
+              
+              console.log('🤖 Anthropic messages:', JSON.stringify(anthropicMessages, null, 2))
+              console.log('🤖 System message:', system)
+              console.log('🤖 Message count:', anthropicMessages?.length)
+              
+              // Get available tools if budId is provided
+              let tools: Anthropic.Tool[] = []
+              if (budId) {
                 try {
-                  const { getEffectiveConversationConfig } = await import('@/lib/budHelpers')
-                  const config = getEffectiveConversationConfig({ source_bud_id: budId }, budData)
-                  effectiveConfig = {
-                    model: config.model,
-                    temperature: config.temperature,
-                    max_tokens: config.max_tokens
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', budId)
+                    .single()
+                  
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId)
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
+                      const mcpClient = new Client({
+                        name: "bud-chat-tools-client",
+                        version: "1.0.0"
+                      }, { capabilities: { tools: {} } })
+                      
+                      await mcpClient.connect(transport)
+                      const { tools: mcpTools } = await mcpClient.listTools()
+                      
+                      tools = mcpTools.map(tool => ({
+                        name: tool.name,
+                        description: tool.description,
+                        input_schema: tool.inputSchema
+                      }))
+                      
+                      await mcpClient.close()
+                    }
                   }
-                  console.log('📝 Updated effective config from bud (post-stream):', effectiveConfig)
                 } catch (error) {
-                  console.warn('Failed to get effective config:', error)
+                  console.warn('Failed to get tools:', error)
                 }
               }
               
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                type: 'conversationCreated',
-                conversationId
-              })}\n\n`))
-              
-              console.log('💾 Conversation creation completed after streaming:', conversationId)
-            } catch (error) {
-              console.error('❌ Conversation creation failed:', error)
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                type: 'error',
-                error: 'Failed to save conversation'
-              })}\n\n`))
-            }
-          }
-
-          // 5. Save assistant message to database (if conversation was created)
-          if (conversationId && fullContent) {
-            try {
-              const assistantSaveStartTime = Date.now()
-              console.log('💾 PERF: Saving assistant message to DB...')
-              
-              // Get the last message order key to generate next one
-              const orderKeyStartTime = Date.now()
-              const { data: lastMessage } = await supabase
-                .from('messages')
-                .select('order_key')
-                .eq('conversation_id', conversationId)
-                .order('order_key', { ascending: false })
-                .limit(1)
-                .single()
-              const orderKeyTime = Date.now() - orderKeyStartTime
-
-              const assistantOrderKey = generateKeyBetween(lastMessage?.order_key || null, null)
-
-              const insertStartTime = Date.now()
-              const { error: assistantMsgError } = await supabase
-                .from('messages')
-                .insert({
-                  conversation_id: conversationId,
-                  order_key: assistantOrderKey,
-                  role: 'assistant',
-                  content: fullContent,
-                  json_meta: { model: effectiveConfig.model, token_count: tokenCount },
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
-                })
-              const insertTime = Date.now() - insertStartTime
-
-              const totalAssistantSaveTime = Date.now() - assistantSaveStartTime
-
-              if (assistantMsgError) {
-                console.error('❌ Error saving assistant message:', assistantMsgError)
-              } else {
-                console.log('✅ PERF: Assistant message saved in:', totalAssistantSaveTime, 'ms (order key:', orderKeyTime, 'ms, insert:', insertTime, 'ms)')
+              const request = {
+                model: apiModelName,
+                max_tokens: 4000,
+                temperature: 0.7,
+                messages: anthropicMessages,
+                stream: true,
+                ...(system && { system }),
+                ...(tools.length > 0 && { tools })
               }
-            } catch (error) {
-              console.error('❌ Error saving assistant message:', error)
+              
+              console.log('🔄 Sending request to Anthropic:', JSON.stringify(request, null, 2))
+              
+              const stream = await anthropic.messages.stream(request)
+              
+              console.log('📡 Anthropic stream created, starting to process...')
+              
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true }
+              );
+              
+              await streamHandler.handleAnthropicStream(stream);
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
+              }
+              
+            } else {
+              // Use OpenAI
+              const openaiMessages = eventsToOpenAIMessages(events)
+              
+              // Get available tools if budId is provided
+              let tools: OpenAI.ChatCompletionTool[] = []
+              if (budId) {
+                try {
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', budId)
+                    .single()
+                  
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId)
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
+                      const mcpClient = new Client({
+                        name: "bud-chat-tools-client",
+                        version: "1.0.0"
+                      }, { capabilities: { tools: {} } })
+                      
+                      await mcpClient.connect(transport)
+                      const { tools: mcpTools } = await mcpClient.listTools()
+                      
+                      // Convert to OpenAI tool format
+                      tools = mcpTools.map(tool => ({
+                        type: 'function',
+                        function: {
+                          name: tool.name,
+                          description: tool.description,
+                          parameters: tool.inputSchema
+                        }
+                      }))
+                      
+                      await mcpClient.close()
+                    }
+                  }
+                } catch (error) {
+                  console.warn('Failed to get OpenAI tools:', error)
+                }
+              }
+              
+              const request = {
+                model: apiModelName,
+                messages: openaiMessages,
+                temperature: 0.7,
+                stream: true,
+                ...(tools.length > 0 && { tools })
+              }
+              
+              console.log('🔄 Sending request to OpenAI:', JSON.stringify(request, null, 2));
+              
+              const stream = await openai.chat.completions.create(request) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+              
+              console.log('📡 OpenAI stream created, starting to process...');
+              
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true }
+              );
+              
+              await streamHandler.handleOpenAIStream(stream);
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
+              }
             }
+            
+            // Reset builder for next iteration
+            eventBuilder.reset('assistant');
           }
-
-          // 6. Send completion signal
+          
+          // Create conversation in background (only if not an existing conversation)
+          if (!conversationId) {
+            const allEvents = eventLog.getEvents()
+            const conversationResult = await createConversationInBackground(
+              allEvents,
+              workspaceId,
+              budId
+            )
+            
+            createdConversationId = conversationResult.conversationId
+            
+            // Send conversation created event
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: "conversationCreated",
+              conversationId: createdConversationId
+            })}\n\n`))
+          }
+          
+          // Send completion event
+          const finalContent = eventLog.getEvents()
+            .filter(e => e.role === 'assistant')
+            .flatMap(e => e.segments)
+            .filter(s => s.type === 'text')
+            .map(s => s.text)
+            .join('')
+          
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'complete',
-            content: fullContent,
-            conversationId
+            type: "complete",
+            content: finalContent
           })}\n\n`))
-
-          console.log('🏁 Streaming completed successfully')
-          controller.close()
+          
+          controller.close();
           
         } catch (error) {
-          console.error('❌ Streaming error:', error)
+          console.error('❌ Streaming error:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error)
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'error',
-            error: 'Failed to generate response'
+            type: "error",
+            error: errorMessage
           })}\n\n`))
-          controller.close()
+          controller.close();
         }
       }
     })
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no', // Disable nginx buffering
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Cache-Control',
       },
     })
+
   } catch (error) {
     console.error('❌ Chat API error:', error)
-    return new Response('Internal server error', { status: 500 })
+    return new Response(
+      JSON.stringify({ error: 'Internal server error' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    )
   }
 }
