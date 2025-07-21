@@ -111,8 +111,7 @@ export class OptimisticStateManager {
     // Update store with new events
     store.setConversation(conversationId, {
       ...conversation,
-      events: updatedEvents,
-      ts: Date.now()
+      events: updatedEvents
     });
 
     if (this.options.debug) {

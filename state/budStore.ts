@@ -6,9 +6,20 @@ import { useMemo } from 'react';
 import { Bud } from '@/lib/types';
 import { budManager, CreateBudArgs, UpdateBudArgs } from '@/lib/budHelpers';
 
+// Simplified type for store to avoid infinite type recursion
+interface BudForStore {
+  id: string;
+  owner_user_id: string | null;
+  workspace_id: string | null;
+  name: string;
+  default_json: any;
+  mcp_config: any;
+  created_at: string;
+}
+
 export interface BudStore {
   // Core data
-  buds: Record<string, Bud>                      // budId -> Bud
+  buds: Record<string, BudForStore>             // budId -> BudForStore
   workspaceBuds: Record<string, string[]>        // workspaceId -> budIds[]
   
   // Loading states
@@ -84,7 +95,7 @@ export const useBudStore = create<BudStore>()(
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud;
+                state.buds[bud.id] = bud as BudForStore;
               });
               
               // Store workspace -> bud ids mapping
@@ -120,7 +131,7 @@ export const useBudStore = create<BudStore>()(
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud;
+                state.buds[bud.id] = bud as BudForStore;
               });
               
               // Store workspace -> bud ids mapping
@@ -150,7 +161,7 @@ export const useBudStore = create<BudStore>()(
             
             set((state) => {
               // Add to buds collection
-              state.buds[newBud.id] = newBud;
+              state.buds[newBud.id] = newBud as BudForStore;
               
               // Add to workspace buds list
               if (!state.workspaceBuds[args.workspaceId]) {
@@ -182,7 +193,7 @@ export const useBudStore = create<BudStore>()(
             const updatedBud = await budManager.updateBud(budId, updates);
             
             set((state) => {
-              state.buds[budId] = updatedBud;
+              state.buds[budId] = updatedBud as BudForStore;
               state.loading.update[budId] = false;
             });
             

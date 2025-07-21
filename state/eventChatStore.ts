@@ -455,20 +455,23 @@ export function eventsToLegacyMessages(events: Event[]): unknown[] {
 
 // Helper function to convert legacy messages to events for migration
 export function legacyMessagesToEvents(messages: unknown[]): Event[] {
-  return messages.map(message => ({
-    id: message.id,
-    role: message.role,
-    segments: [
-      ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
-      ...(message.json_meta?.tool_calls || []).map((toolCall: any) => ({
-        type: 'tool_call' as const,
-        id: toolCall.id,
-        name: toolCall.function.name,
-        args: JSON.parse(toolCall.function.arguments || '{}')
-      }))
-    ],
-    ts: new Date(message.created_at).getTime()
-  }));
+  return messages.map(message => {
+    const msg = message as any; // Type assertion for legacy message structure
+    return {
+      id: msg.id,
+      role: msg.role,
+      segments: [
+        ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
+        ...(msg.json_meta?.tool_calls || []).map((toolCall: any) => ({
+          type: 'tool_call' as const,
+          id: toolCall.id,
+          name: toolCall.function.name,
+          args: JSON.parse(toolCall.function.arguments || '{}')
+        }))
+      ],
+      ts: new Date(msg.created_at).getTime()
+    };
+  });
 }
 
 // Event-based hooks

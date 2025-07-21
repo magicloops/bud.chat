@@ -346,7 +346,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           title: chatName || conversation.meta.title,
           assistant_name: assistantName, // Use exact form value
           assistant_avatar: avatar, // Use exact form value
-          model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides : undefined
+          model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides as Record<string, unknown> : undefined
         }
       };
       

@@ -3,6 +3,29 @@ import { NextRequest } from 'next/server';
 import { getConversationEvents } from '@/lib/db/events';
 import { Database } from '@/lib/types/database';
 
+// Types for complex Supabase queries with joins
+interface ConversationWithJoins {
+  id: string;
+  workspace_id: string;
+  title: string | null;
+  source_bud_id: string | null;
+  assistant_name: string | null;
+  assistant_avatar: string | null;
+  model_config_overrides: any;
+  mcp_config_overrides: any;
+  buds: {
+    id: string;
+    default_json: any;
+  } | null;
+  workspace: {
+    id: string;
+    workspace_members: Array<{
+      user_id: string;
+      role: string;
+    }>;
+  } | null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -52,9 +75,9 @@ export async function GET(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = conversation.workspace;
+    const workspace = (conversation as unknown as ConversationWithJoins).workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member) => member.user_id === user.id
+      (member: { user_id: string; role: string }) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });
@@ -65,7 +88,7 @@ export async function GET(
     let effectiveAssistantAvatar = conversation.assistant_avatar;
 
     // If no custom name/avatar and there's a source bud, use bud defaults
-    const buds = conversation.buds;
+    const buds = (conversation as unknown as ConversationWithJoins).buds;
     if ((!effectiveAssistantName || !effectiveAssistantAvatar) && buds) {
       const budConfig = buds.default_json;
       if (!effectiveAssistantName && budConfig.name) {
@@ -146,9 +169,9 @@ export async function PATCH(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = conversation.workspace;
+    const workspace = (conversation as unknown as ConversationWithJoins).workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member) => member.user_id === user.id
+      (member: { user_id: string; role: string }) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });
@@ -216,9 +239,9 @@ export async function DELETE(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = conversation.workspace;
+    const workspace = (conversation as unknown as ConversationWithJoins).workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member) => member.user_id === user.id
+      (member: { user_id: string; role: string }) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });

@@ -4,6 +4,19 @@ import { saveEvent } from '@/lib/db/events';
 import { createTextEvent } from '@/lib/types/events';
 import { generateKeyBetween } from 'fractional-indexing';
 
+// Types for complex Supabase queries with joins
+interface ConversationWithBuds {
+  id: string;
+  title: string | null;
+  assistant_name: string | null;
+  assistant_avatar: string | null;
+  source_bud_id: string | null;
+  buds: {
+    id: string;
+    default_json: any;
+  } | null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -64,7 +77,7 @@ export async function GET(request: NextRequest) {
       let effectiveAssistantAvatar = conversation.assistant_avatar;
 
       // If no custom name/avatar and there's a source bud, use bud defaults
-      const budData = conversation.buds;
+      const budData = (conversation as unknown as ConversationWithBuds).buds;
       if ((!effectiveAssistantName || !effectiveAssistantAvatar) && budData) {
         const budConfig = budData.default_json;
         if (!effectiveAssistantName && budConfig.name) {

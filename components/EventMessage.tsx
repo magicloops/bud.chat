@@ -200,7 +200,7 @@ const ToolResultSegment = memo(function ToolResultSegment({
                 {content}
               </div>
             ) : (
-              <MarkdownRenderer content={content} />
+              <MarkdownRenderer content={content || ''} />
             )}
           </div>
         </div>

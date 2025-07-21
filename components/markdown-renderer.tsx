@@ -64,7 +64,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           ul: ({ children }) => (
             <ul className="list-disc list-outside ml-6 my-2 space-y-1">{children}</ul>
           ),
-          ol: ({ ordered, className, children, ...rest }) => (
+          ol: ({ className, children, ...rest }) => (
             // ordered is a boolean that React doesn't understand, so we drop it, 
             // but keep everything else - especially "start"
             <ol
