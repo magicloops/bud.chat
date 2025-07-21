@@ -1,13 +1,13 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { LoginForm } from './login-form'
-import { SignupForm } from './signup-form'
+import { useState } from 'react';
+import { LoginForm } from './login-form';
+import { SignupForm } from './signup-form';
 
 export function AuthModal() {
-  const [isLogin, setIsLogin] = useState(true)
+  const [isLogin, setIsLogin] = useState(true);
 
-  const toggleMode = () => setIsLogin(!isLogin)
+  const toggleMode = () => setIsLogin(!isLogin);
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -17,5 +17,5 @@ export function AuthModal() {
         <SignupForm onToggleMode={toggleMode} />
       )}
     </div>
-  )
+  );
 }

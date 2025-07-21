@@ -1,16 +1,15 @@
-import { create } from 'zustand'
-import { subscribeWithSelector } from 'zustand/middleware'
-import { persist } from 'zustand/middleware'
-import { immer } from 'zustand/middleware/immer'
-import { useMemo } from 'react'
+import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
+import { immer } from 'zustand/middleware/immer';
+import { useMemo } from 'react';
 import { 
   Workspace, 
   WorkspaceMember, 
   Bud, 
   WorkspaceId, 
-  BudId,
-  BudConfig
-} from '@/lib/types'
+  BudId
+} from '@/lib/types';
 
 interface WorkspaceStore {
   // State
@@ -55,7 +54,7 @@ interface WorkspaceStore {
 export const useWorkspaceStore = create<WorkspaceStore>()(
   subscribeWithSelector(
     persist(
-      immer((set, get) => ({
+      immer((set) => ({
         // Initial state
         workspaces: {},
         members: {},
@@ -67,55 +66,55 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         
         // Workspace Management Actions
         setWorkspaces: (workspaces) => set((state) => {
-          state.workspaces = Object.fromEntries(workspaces.map(w => [w.id, w]))
+          state.workspaces = Object.fromEntries(workspaces.map(w => [w.id, w]));
         }),
         
         addWorkspace: (workspace) => set((state) => {
-          state.workspaces[workspace.id] = workspace
+          state.workspaces[workspace.id] = workspace;
         }),
         
         updateWorkspace: (id, updates) => set((state) => {
           if (state.workspaces[id]) {
-            Object.assign(state.workspaces[id], updates)
+            Object.assign(state.workspaces[id], updates);
           }
         }),
         
         removeWorkspace: (id) => set((state) => {
-          delete state.workspaces[id]
-          delete state.members[id]
-          delete state.buds[id]
-          delete state.loading.buds[id]
+          delete state.workspaces[id];
+          delete state.members[id];
+          delete state.buds[id];
+          delete state.loading.buds[id];
         }),
         
         // Members Management Actions
         setWorkspaceMembers: (workspaceId, members) => set((state) => {
-          state.members[workspaceId] = members
+          state.members[workspaceId] = members;
         }),
         
         addWorkspaceMember: (workspaceId, member) => set((state) => {
           if (!state.members[workspaceId]) {
-            state.members[workspaceId] = []
+            state.members[workspaceId] = [];
           }
-          const existing = state.members[workspaceId].findIndex(m => m.user_id === member.user_id)
+          const existing = state.members[workspaceId].findIndex(m => m.user_id === member.user_id);
           if (existing >= 0) {
-            state.members[workspaceId][existing] = member
+            state.members[workspaceId][existing] = member;
           } else {
-            state.members[workspaceId].push(member)
+            state.members[workspaceId].push(member);
           }
         }),
         
         removeWorkspaceMember: (workspaceId, userId) => set((state) => {
           if (state.members[workspaceId]) {
-            state.members[workspaceId] = state.members[workspaceId].filter(m => m.user_id !== userId)
+            state.members[workspaceId] = state.members[workspaceId].filter(m => m.user_id !== userId);
           }
         }),
         
         updateMemberRole: (workspaceId, userId, role) => set((state) => {
-          const members = state.members[workspaceId]
+          const members = state.members[workspaceId];
           if (members) {
-            const member = members.find(m => m.user_id === userId)
+            const member = members.find(m => m.user_id === userId);
             if (member) {
-              member.role = role
+              member.role = role;
             }
           }
         }),
@@ -123,33 +122,33 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         
         // Buds Management Actions
         setBuds: (workspaceId, buds) => set((state) => {
-          state.buds[workspaceId] = buds.sort((a, b) => a.name.localeCompare(b.name))
+          state.buds[workspaceId] = buds.sort((a, b) => a.name.localeCompare(b.name));
         }),
         
         addBud: (bud) => set((state) => {
-          const workspaceId = bud.workspace_id
-          if (!workspaceId) return // Personal buds not supported yet
+          const workspaceId = bud.workspace_id;
+          if (!workspaceId) return; // Personal buds not supported yet
           
           if (!state.buds[workspaceId]) {
-            state.buds[workspaceId] = []
+            state.buds[workspaceId] = [];
           }
           
-          state.buds[workspaceId].push(bud)
-          state.buds[workspaceId].sort((a, b) => a.name.localeCompare(b.name))
+          state.buds[workspaceId].push(bud);
+          state.buds[workspaceId].sort((a, b) => a.name.localeCompare(b.name));
         }),
         
         updateBud: (id, updates) => set((state) => {
           // Find bud across all workspaces
           for (const workspaceId in state.buds) {
-            const buds = state.buds[workspaceId]
-            const index = buds.findIndex(b => b.id === id)
+            const buds = state.buds[workspaceId];
+            const index = buds.findIndex(b => b.id === id);
             if (index >= 0) {
-              Object.assign(buds[index], updates)
+              Object.assign(buds[index], updates);
               // Re-sort if name changed
               if (updates.name) {
-                buds.sort((a, b) => a.name.localeCompare(b.name))
+                buds.sort((a, b) => a.name.localeCompare(b.name));
               }
-              break
+              break;
             }
           }
         }),
@@ -157,28 +156,28 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         removeBud: (id) => set((state) => {
           // Remove bud from all workspaces
           for (const workspaceId in state.buds) {
-            state.buds[workspaceId] = state.buds[workspaceId].filter(b => b.id !== id)
+            state.buds[workspaceId] = state.buds[workspaceId].filter(b => b.id !== id);
           }
         }),
         
         // Loading States Actions
         setWorkspacesLoading: (loading) => set((state) => {
-          state.loading.workspaces = loading
+          state.loading.workspaces = loading;
         }),
         
         
         setBudsLoading: (workspaceId, loading) => set((state) => {
-          state.loading.buds[workspaceId] = loading
+          state.loading.buds[workspaceId] = loading;
         }),
         
         
         // Persistence Actions
         hydrate: (data) => set((state) => {
           if (data.workspaces) {
-            Object.assign(state.workspaces, data.workspaces)
+            Object.assign(state.workspaces, data.workspaces);
           }
           if (data.buds) {
-            Object.assign(state.buds, data.buds)
+            Object.assign(state.buds, data.buds);
           }
         }),
       })),
@@ -193,30 +192,30 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       }
     )
   )
-)
+);
 
 // Selectors for performance
 export const useWorkspace = (workspaceId: WorkspaceId) =>
-  useWorkspaceStore((state) => state.workspaces[workspaceId])
+  useWorkspaceStore((state) => state.workspaces[workspaceId]);
 
 export const useWorkspaces = () => {
-  const workspaces = useWorkspaceStore((state) => state.workspaces)
-  return useMemo(() => Object.values(workspaces), [workspaces])
-}
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  return useMemo(() => Object.values(workspaces), [workspaces]);
+};
 
 
 export const useWorkspaceBuds = (workspaceId: WorkspaceId) => {
-  const buds = useWorkspaceStore((state) => state.buds[workspaceId])
-  return useMemo(() => buds || [], [buds])
-}
+  const buds = useWorkspaceStore((state) => state.buds[workspaceId]);
+  return useMemo(() => buds || [], [buds]);
+};
 
 export const useWorkspaceLoading = (workspaceId: WorkspaceId) =>
   useWorkspaceStore((state) => 
     state.loading.workspaces || 
     state.loading.buds[workspaceId] || 
     false
-  )
+  );
 
 // Individual action hooks - the proper Zustand way
-export const useSetWorkspaces = () => useWorkspaceStore((state) => state.setWorkspaces)
-export const useSetWorkspacesLoading = () => useWorkspaceStore((state) => state.setWorkspacesLoading)
+export const useSetWorkspaces = () => useWorkspaceStore((state) => state.setWorkspaces);
+export const useSetWorkspacesLoading = () => useWorkspaceStore((state) => state.setWorkspacesLoading);

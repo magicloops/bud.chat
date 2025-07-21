@@ -48,11 +48,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "workspaces_owner_user_id_fkey"
-            columns: ["owner_user_id"]
+            foreignKeyName: 'workspaces_owner_user_id_fkey'
+            columns: ['owner_user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -74,18 +74,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "workspace_members_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'workspace_members_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "workspace_members_user_id_fkey"
-            columns: ["user_id"]
+            foreignKeyName: 'workspace_members_user_id_fkey'
+            columns: ['user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -96,6 +96,7 @@ export type Database = {
           workspace_id: string | null
           name: string
           default_json: Json
+          mcp_config: Json | null
           created_at: string
         }
         Insert: {
@@ -104,6 +105,7 @@ export type Database = {
           workspace_id?: string | null
           name: string
           default_json: Json
+          mcp_config?: Json | null
           created_at?: string
         }
         Update: {
@@ -112,22 +114,23 @@ export type Database = {
           workspace_id?: string | null
           name?: string
           default_json?: Json
+          mcp_config?: Json | null
           created_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "buds_owner_user_id_fkey"
-            columns: ["owner_user_id"]
+            foreignKeyName: 'buds_owner_user_id_fkey'
+            columns: ['owner_user_id']
             isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
+            referencedRelation: 'users'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "buds_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'buds_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -138,6 +141,10 @@ export type Database = {
           root_msg_id: string | null
           bud_id: string | null
           title: string | null
+          assistant_name: string | null
+          assistant_avatar: string | null
+          model_config_overrides: Json | null
+          mcp_config_overrides: Json | null
           metadata: Json | null
           created_at: string
         }
@@ -147,6 +154,10 @@ export type Database = {
           root_msg_id?: string | null
           bud_id?: string | null
           title?: string | null
+          assistant_name?: string | null
+          assistant_avatar?: string | null
+          model_config_overrides?: Json | null
+          mcp_config_overrides?: Json | null
           metadata?: Json | null
           created_at?: string
         }
@@ -156,105 +167,77 @@ export type Database = {
           root_msg_id?: string | null
           bud_id?: string | null
           title?: string | null
+          assistant_name?: string | null
+          assistant_avatar?: string | null
+          model_config_overrides?: Json | null
+          mcp_config_overrides?: Json | null
           metadata?: Json | null
           created_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conversations_workspace_id_fkey"
-            columns: ["workspace_id"]
+            foreignKeyName: 'conversations_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           },
           {
-            foreignKeyName: "conversations_bud_id_fkey"
-            columns: ["bud_id"]
+            foreignKeyName: 'conversations_bud_id_fkey'
+            columns: ['bud_id']
             isOneToOne: false
-            referencedRelation: "buds"
-            referencedColumns: ["id"]
+            referencedRelation: 'buds'
+            referencedColumns: ['id']
           }
         ]
       }
-      messages: {
+      mcp_servers: {
         Row: {
           id: string
-          conversation_id: string
-          order_key: string
-          role: Database["public"]["Enums"]["role"]
-          content: string
-          json_meta: Json
-          version: number
-          created_at: string
-          updated_at: string
+          workspace_id: string | null
+          name: string
+          endpoint: string
+          transport_type: string
+          auth_config: Json | null
+          connection_config: Json | null
+          metadata: Json | null
+          is_active: boolean | null
+          created_at: string | null
+          updated_at: string | null
         }
         Insert: {
           id?: string
-          conversation_id: string
-          order_key: string
-          role: Database["public"]["Enums"]["role"]
-          content: string
-          json_meta?: Json
-          version?: number
-          created_at?: string
-          updated_at?: string
+          workspace_id?: string | null
+          name: string
+          endpoint: string
+          transport_type?: string
+          auth_config?: Json | null
+          connection_config?: Json | null
+          metadata?: Json | null
+          is_active?: boolean | null
+          created_at?: string | null
+          updated_at?: string | null
         }
         Update: {
           id?: string
-          conversation_id?: string
-          order_key?: string
-          role?: Database["public"]["Enums"]["role"]
-          content?: string
-          json_meta?: Json
-          version?: number
-          created_at?: string
-          updated_at?: string
+          workspace_id?: string | null
+          name?: string
+          endpoint?: string
+          transport_type?: string
+          auth_config?: Json | null
+          connection_config?: Json | null
+          metadata?: Json | null
+          is_active?: boolean | null
+          created_at?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "messages_conversation_id_fkey"
-            columns: ["conversation_id"]
+            foreignKeyName: 'mcp_servers_workspace_id_fkey'
+            columns: ['workspace_id']
             isOneToOne: false
-            referencedRelation: "conversations"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
-      message_revisions: {
-        Row: {
-          id: string
-          message_id: string
-          rev: number
-          role: string | null
-          content: string | null
-          meta: Json | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          message_id: string
-          rev: number
-          role?: string | null
-          content?: string | null
-          meta?: Json | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          message_id?: string
-          rev?: number
-          role?: string | null
-          content?: string | null
-          meta?: Json | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "message_revisions_message_id_fkey"
-            columns: ["message_id"]
-            isOneToOne: false
-            referencedRelation: "messages"
-            referencedColumns: ["id"]
+            referencedRelation: 'workspaces'
+            referencedColumns: ['id']
           }
         ]
       }
@@ -266,7 +249,7 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      role: "system" | "user" | "assistant"
+      role: 'system' | 'user' | 'assistant'
     }
     CompositeTypes: {
       [_ in never]: never

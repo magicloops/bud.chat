@@ -1,7 +1,7 @@
-'use client'
+'use client';
 
-import { Card, CardContent } from '@/components/ui/card'
-import { Plus } from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card';
+import { Plus } from 'lucide-react';
 
 interface CreateBudCardProps {
   onClick: () => void
@@ -25,5 +25,5 @@ export function CreateBudCard({ onClick }: CreateBudCardProps) {
         </p>
       </CardContent>
     </Card>
-  )
+  );
 }

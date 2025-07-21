@@ -1,6 +1,6 @@
 // MCP Configuration Resolver - Merges Bud configs with conversation overrides
-import { createClient } from '@/lib/supabase/server'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   MCPServerConfig,
   MCPBudConfig,
@@ -8,35 +8,35 @@ import type {
   ResolvedMCPConfig,
   MCPServer,
   MCPTool
-} from './types'
+} from './types';
 
 export class MCPConfigResolver {
   constructor(private supabase: SupabaseClient) {}
 
   static async create(): Promise<MCPConfigResolver> {
-    const supabase = await createClient()
-    return new MCPConfigResolver(supabase)
+    const supabase = await createClient();
+    return new MCPConfigResolver(supabase);
   }
 
   async resolveConfig(
     conversationId: string,
     workspaceId: string
   ): Promise<ResolvedMCPConfig> {
-    console.log(`🔧 Resolving MCP config for conversation ${conversationId} in workspace ${workspaceId}`)
+    console.log(`🔧 Resolving MCP config for conversation ${conversationId} in workspace ${workspaceId}`);
 
     // Get conversation with source bud and overrides
     const { data: conversation, error: convError } = await this.supabase
       .from('conversations')
       .select('source_bud_id, mcp_config_overrides')
       .eq('id', conversationId)
-      .single()
+      .single();
 
     if (convError) {
-      console.error('Failed to fetch conversation:', convError)
-      return this.getEmptyConfig()
+      console.error('Failed to fetch conversation:', convError);
+      return this.getEmptyConfig();
     }
 
-    let budMCPConfig: MCPBudConfig = {}
+    let budMCPConfig: MCPBudConfig = {};
 
     // Get bud MCP config if exists
     if (conversation?.source_bud_id) {
@@ -44,12 +44,12 @@ export class MCPConfigResolver {
         .from('buds')
         .select('mcp_config')
         .eq('id', conversation.source_bud_id)
-        .single()
+        .single();
 
       if (budError) {
-        console.warn('Failed to fetch bud MCP config:', budError)
+        console.warn('Failed to fetch bud MCP config:', budError);
       } else {
-        budMCPConfig = bud?.mcp_config || {}
+        budMCPConfig = bud?.mcp_config || {};
       }
     }
 
@@ -57,15 +57,15 @@ export class MCPConfigResolver {
     const mergedConfig = this.mergeConfigs(
       budMCPConfig,
       conversation?.mcp_config_overrides || {}
-    )
+    );
 
-    console.log('Merged MCP config:', mergedConfig)
+    console.log('Merged MCP config:', mergedConfig);
 
     // Resolve server configurations
-    const serverIds = this.getServerIds(mergedConfig)
+    const serverIds = this.getServerIds(mergedConfig);
     if (serverIds.length === 0) {
-      console.log('No MCP servers configured')
-      return this.getEmptyConfig()
+      console.log('No MCP servers configured');
+      return this.getEmptyConfig();
     }
 
     const { data: servers, error: serversError } = await this.supabase
@@ -76,59 +76,59 @@ export class MCPConfigResolver {
       `)
       .in('id', serverIds)
       .eq('workspace_id', workspaceId)
-      .eq('is_active', true)
+      .eq('is_active', true);
 
     if (serversError) {
-      console.error('Failed to fetch MCP servers:', serversError)
-      return this.getEmptyConfig()
+      console.error('Failed to fetch MCP servers:', serversError);
+      return this.getEmptyConfig();
     }
 
     if (!servers || servers.length === 0) {
-      console.log('No active MCP servers found')
-      return this.getEmptyConfig()
+      console.log('No active MCP servers found');
+      return this.getEmptyConfig();
     }
 
-    const serverConfigs = servers.map(server => this.mapServerConfig(server))
-    const availableTools = this.resolveAvailableTools(servers, mergedConfig)
+    const serverConfigs = servers.map(server => this.mapServerConfig(server));
+    const availableTools = this.resolveAvailableTools(servers, mergedConfig);
 
     const resolvedConfig: ResolvedMCPConfig = {
       servers: serverConfigs,
       available_tools: availableTools,
       tool_choice: mergedConfig.tool_choice || 'auto'
-    }
+    };
 
-    console.log(`✅ Resolved MCP config:`, {
+    console.log('✅ Resolved MCP config:', {
       serverCount: resolvedConfig.servers.length,
       toolCount: resolvedConfig.available_tools.length,
       toolChoice: resolvedConfig.tool_choice
-    })
+    });
 
-    return resolvedConfig
+    return resolvedConfig;
   }
 
   async resolveConfigForBud(
     budId: string,
     workspaceId: string
   ): Promise<ResolvedMCPConfig> {
-    console.log(`🔧 Resolving MCP config for bud ${budId} in workspace ${workspaceId}`)
+    console.log(`🔧 Resolving MCP config for bud ${budId} in workspace ${workspaceId}`);
 
     // Get bud MCP config
     const { data: bud, error: budError } = await this.supabase
       .from('buds')
       .select('mcp_config')
       .eq('id', budId)
-      .single()
+      .single();
 
     if (budError) {
-      console.error('Failed to fetch bud:', budError)
-      return this.getEmptyConfig()
+      console.error('Failed to fetch bud:', budError);
+      return this.getEmptyConfig();
     }
 
-    const budMCPConfig: MCPBudConfig = bud?.mcp_config || {}
-    const serverIds = this.getServerIds(budMCPConfig)
+    const budMCPConfig: MCPBudConfig = bud?.mcp_config || {};
+    const serverIds = this.getServerIds(budMCPConfig);
 
     if (serverIds.length === 0) {
-      return this.getEmptyConfig()
+      return this.getEmptyConfig();
     }
 
     const { data: servers, error: serversError } = await this.supabase
@@ -139,21 +139,21 @@ export class MCPConfigResolver {
       `)
       .in('id', serverIds)
       .eq('workspace_id', workspaceId)
-      .eq('is_active', true)
+      .eq('is_active', true);
 
     if (serversError || !servers) {
-      console.error('Failed to fetch MCP servers:', serversError)
-      return this.getEmptyConfig()
+      console.error('Failed to fetch MCP servers:', serversError);
+      return this.getEmptyConfig();
     }
 
-    const serverConfigs = servers.map(server => this.mapServerConfig(server))
-    const availableTools = this.resolveAvailableTools(servers, budMCPConfig)
+    const serverConfigs = servers.map(server => this.mapServerConfig(server));
+    const availableTools = this.resolveAvailableTools(servers, budMCPConfig);
 
     return {
       servers: serverConfigs,
       available_tools: availableTools,
       tool_choice: budMCPConfig.tool_choice || 'auto'
-    }
+    };
   }
 
   private mergeConfigs(
@@ -163,15 +163,15 @@ export class MCPConfigResolver {
     const mergedServers = [
       ...(budConfig.servers || []),
       ...(overrides.additional_servers || [])
-    ]
+    ];
     
     // Remove duplicates
-    const uniqueServers = [...new Set(mergedServers)]
+    const uniqueServers = [...new Set(mergedServers)];
 
     const mergedDisabledTools = [
       ...(budConfig.disabled_tools || []),
       ...(overrides.disabled_tools || [])
-    ]
+    ];
 
     return {
       servers: uniqueServers,
@@ -179,11 +179,11 @@ export class MCPConfigResolver {
       disabled_tools: mergedDisabledTools,
       tool_choice: overrides.tool_choice || budConfig.tool_choice || 'auto',
       additional_servers: overrides.additional_servers
-    }
+    };
   }
 
   private getServerIds(config: MCPBudConfig | (MCPBudConfig & MCPConversationOverrides)): string[] {
-    return config.servers || []
+    return config.servers || [];
   }
 
   private mapServerConfig(server: MCPServer & { mcp_tools: MCPTool[] }): MCPServerConfig {
@@ -203,7 +203,7 @@ export class MCPConfigResolver {
           inputSchema: tool.parameters_schema
         })) || []
       }
-    }
+    };
   }
 
   private resolveAvailableTools(
@@ -211,35 +211,35 @@ export class MCPConfigResolver {
     config: MCPBudConfig | (MCPBudConfig & MCPConversationOverrides)
   ): string[] {
     // Get all tools from all servers
-    const allTools: string[] = []
+    const allTools: string[] = [];
     
     for (const server of servers) {
       for (const tool of server.mcp_tools) {
         if (tool.is_enabled) {
-          const toolId = `${server.id}.${tool.name}`
-          allTools.push(toolId)
+          const toolId = `${server.id}.${tool.name}`;
+          allTools.push(toolId);
         }
       }
     }
 
     // Filter by available_tools if specified
-    let availableTools = allTools
+    let availableTools = allTools;
     if (config.available_tools && config.available_tools.length > 0) {
       availableTools = allTools.filter(toolId => {
-        const [serverId, toolName] = toolId.split('.', 2)
+        const [serverId, toolName] = toolId.split('.', 2);
         return config.available_tools!.includes(toolId) || 
-               config.available_tools!.includes(toolName)
-      })
+               config.available_tools!.includes(toolName);
+      });
     }
 
     // Remove disabled tools
-    const disabledTools = config.disabled_tools || []
+    const disabledTools = config.disabled_tools || [];
     availableTools = availableTools.filter(toolId => {
-      const [serverId, toolName] = toolId.split('.', 2)
-      return !disabledTools.includes(toolId) && !disabledTools.includes(toolName)
-    })
+      const [serverId, toolName] = toolId.split('.', 2);
+      return !disabledTools.includes(toolId) && !disabledTools.includes(toolName);
+    });
 
-    return availableTools
+    return availableTools;
   }
 
   private getEmptyConfig(): ResolvedMCPConfig {
@@ -247,7 +247,7 @@ export class MCPConfigResolver {
       servers: [],
       available_tools: [],
       tool_choice: 'none'
-    }
+    };
   }
 }
 
@@ -256,14 +256,14 @@ export async function resolveMCPConfig(
   conversationId: string,
   workspaceId: string
 ): Promise<ResolvedMCPConfig> {
-  const resolver = await MCPConfigResolver.create()
-  return resolver.resolveConfig(conversationId, workspaceId)
+  const resolver = await MCPConfigResolver.create();
+  return resolver.resolveConfig(conversationId, workspaceId);
 }
 
 export async function resolveMCPConfigForBud(
   budId: string,
   workspaceId: string
 ): Promise<ResolvedMCPConfig> {
-  const resolver = await MCPConfigResolver.create()
-  return resolver.resolveConfigForBud(budId, workspaceId)
+  const resolver = await MCPConfigResolver.create();
+  return resolver.resolveConfigForBud(budId, workspaceId);
 }

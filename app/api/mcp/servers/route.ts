@@ -1,22 +1,22 @@
 // MCP Server Management API
-import { createClient } from '@/lib/supabase/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
     
     // Get the authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(request.url)
-    const workspaceId = searchParams.get('workspaceId')
+    const { searchParams } = new URL(request.url);
+    const workspaceId = searchParams.get('workspaceId');
 
     if (!workspaceId) {
-      return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 })
+      return NextResponse.json({ error: 'Workspace ID is required' }, { status: 400 });
     }
 
     // Verify user has access to the workspace
@@ -25,10 +25,10 @@ export async function GET(request: NextRequest) {
       .select('workspace_id, role')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (membershipError || !membership) {
-      return NextResponse.json({ error: 'Workspace not found or access denied' }, { status: 404 })
+      return NextResponse.json({ error: 'Workspace not found or access denied' }, { status: 404 });
     }
 
     // Get MCP servers for the workspace
@@ -46,31 +46,31 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq('workspace_id', workspaceId)
-      .order('created_at', { ascending: false })
+      .order('created_at', { ascending: false });
 
     if (serversError) {
-      console.error('Error fetching MCP servers:', serversError)
-      return NextResponse.json({ error: 'Failed to fetch MCP servers' }, { status: 500 })
+      console.error('Error fetching MCP servers:', serversError);
+      return NextResponse.json({ error: 'Failed to fetch MCP servers' }, { status: 500 });
     }
 
-    return NextResponse.json({ data: servers || [] })
+    return NextResponse.json({ data: servers || [] });
   } catch (error) {
-    console.error('MCP servers API error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('MCP servers API error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const supabase = await createClient();
     
     // Get the authenticated user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json()
+    const body = await request.json();
     const {
       workspaceId,
       name,
@@ -79,20 +79,20 @@ export async function POST(request: NextRequest) {
       auth_config,
       connection_config,
       metadata
-    } = body
+    } = body;
 
     // Validate required fields
     if (!workspaceId || !name || !endpoint) {
       return NextResponse.json({ 
         error: 'Missing required fields: workspaceId, name, endpoint' 
-      }, { status: 400 })
+      }, { status: 400 });
     }
 
     // Validate transport type
     if (!['http', 'stdio', 'websocket'].includes(transport_type)) {
       return NextResponse.json({ 
         error: 'Invalid transport_type. Must be one of: http, stdio, websocket' 
-      }, { status: 400 })
+      }, { status: 400 });
     }
 
     // Verify user has access to the workspace
@@ -101,10 +101,10 @@ export async function POST(request: NextRequest) {
       .select('workspace_id, role')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (membershipError || !membership) {
-      return NextResponse.json({ error: 'Workspace not found or access denied' }, { status: 404 })
+      return NextResponse.json({ error: 'Workspace not found or access denied' }, { status: 404 });
     }
 
     // Check for duplicate server name in workspace
@@ -113,12 +113,12 @@ export async function POST(request: NextRequest) {
       .select('id')
       .eq('workspace_id', workspaceId)
       .eq('name', name)
-      .single()
+      .single();
 
     if (existingServer) {
       return NextResponse.json({ 
         error: 'A server with this name already exists in the workspace' 
-      }, { status: 409 })
+      }, { status: 409 });
     }
 
     // Create the MCP server
@@ -135,16 +135,16 @@ export async function POST(request: NextRequest) {
         is_active: true
       })
       .select()
-      .single()
+      .single();
 
     if (serverError) {
-      console.error('Error creating MCP server:', serverError)
-      return NextResponse.json({ error: 'Failed to create MCP server' }, { status: 500 })
+      console.error('Error creating MCP server:', serverError);
+      return NextResponse.json({ error: 'Failed to create MCP server' }, { status: 500 });
     }
 
-    return NextResponse.json({ data: server }, { status: 201 })
+    return NextResponse.json({ data: server }, { status: 201 });
   } catch (error) {
-    console.error('MCP server creation error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('MCP server creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

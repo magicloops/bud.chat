@@ -1,10 +1,10 @@
-'use client'
+'use client';
 
-import { memo } from 'react'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import MarkdownRenderer from '@/components/markdown-renderer'
+import { memo } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import MarkdownRenderer from '@/components/markdown-renderer';
 import { 
   Wrench, 
   ChevronDown, 
@@ -13,9 +13,9 @@ import {
   XCircle, 
   Clock,
   AlertTriangle
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { useState } from 'react'
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useState } from 'react';
 
 export interface ToolCall {
   id: string
@@ -46,36 +46,36 @@ const ToolCallMessage = memo(function ToolCallMessage({
   isExecuting = false,
   className
 }: ToolCallMessageProps) {
-  const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set())
+  const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (toolId: string) => {
     setExpandedCalls(prev => {
-      const newSet = new Set(prev)
+      const newSet = new Set(prev);
       if (newSet.has(toolId)) {
-        newSet.delete(toolId)
+        newSet.delete(toolId);
       } else {
-        newSet.add(toolId)
+        newSet.add(toolId);
       }
-      return newSet
-    })
-  }
+      return newSet;
+    });
+  };
 
   const formatArguments = (argumentsStr: string) => {
     try {
-      const args = JSON.parse(argumentsStr)
-      return JSON.stringify(args, null, 2)
+      const args = JSON.parse(argumentsStr);
+      return JSON.stringify(args, null, 2);
     } catch {
-      return argumentsStr
+      return argumentsStr;
     }
-  }
+  };
 
-  if (toolCalls.length === 0) return null
+  if (toolCalls.length === 0) return null;
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn('space-y-2', className)}>
       {toolCalls.map((toolCall) => {
-        const isExpanded = expandedCalls.has(toolCall.id)
-        const [serverId, toolName] = toolCall.function.name.split('.', 2)
+        const isExpanded = expandedCalls.has(toolCall.id);
+        const [serverId, toolName] = toolCall.function.name.split('.', 2);
         
         return (
           <Card key={toolCall.id} className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
@@ -117,30 +117,30 @@ const ToolCallMessage = memo(function ToolCallMessage({
               </CollapsibleContent>
             </Collapsible>
           </Card>
-        )
+        );
       })}
     </div>
-  )
-})
+  );
+});
 
 const ToolResultMessage = memo(function ToolResultMessage({
-  toolCallId,
+  toolCallId: _toolCallId,
   toolName,
   result,
   error,
   isExecuting = false,
   className
 }: ToolResultMessageProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const hasError = !!error
-  const [serverId, cleanToolName] = toolName.split('.', 2)
+  const [isExpanded, setIsExpanded] = useState(false);
+  const hasError = !!error;
+  const [serverId, cleanToolName] = toolName.split('.', 2);
 
   return (
     <Card className={cn(
-      "transition-colors",
+      'transition-colors',
       hasError 
-        ? "bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
-        : "bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800",
+        ? 'bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
+        : 'bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800',
       className
     )}>
       <Collapsible
@@ -195,7 +195,7 @@ const ToolResultMessage = memo(function ToolResultMessage({
         </CollapsibleContent>
       </Collapsible>
     </Card>
-  )
-})
+  );
+});
 
-export { ToolCallMessage, ToolResultMessage }
+export { ToolCallMessage, ToolResultMessage };

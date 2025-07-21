@@ -1,21 +1,22 @@
-'use client'
+'use client';
 
-import { useEffect, useRef, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { ConversationList } from './ConversationList'
-import { WorkspaceSelector } from './WorkspaceSelector'
-import { UserMenu } from './UserMenu'
-import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/simpleChatStore'
+import { useEffect, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { ConversationList } from './ConversationList';
+import { WorkspaceSelector } from './WorkspaceSelector';
+import { UserMenu } from './UserMenu';
+import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/eventChatStore';
+import { Workspace } from '@/lib/types';
 import { 
   useWorkspaces, 
   useSetWorkspaces, 
   useSetWorkspacesLoading 
-} from '@/state/workspaceStore'
-import { Plus, PanelLeftClose, PanelLeft, Settings } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { getRandomHeaderFont } from '@/lib/fontRotation'
+} from '@/state/workspaceStore';
+import { Plus, PanelLeftClose } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { getRandomHeaderFont } from '@/lib/fontRotation';
 
 interface SidebarProps {
   className?: string
@@ -23,28 +24,28 @@ interface SidebarProps {
 }
 
 export function Sidebar({ className, onClose }: SidebarProps) {
-  const router = useRouter()
-  const selectedWorkspaceId = useSelectedWorkspace()
-  const setSelectedWorkspace = useSetSelectedWorkspace()
-  const setWorkspaces = useSetWorkspaces()
-  const setWorkspacesLoading = useSetWorkspacesLoading()
-  const workspaces = useWorkspaces()
+  const router = useRouter();
+  const selectedWorkspaceId = useSelectedWorkspace();
+  const setSelectedWorkspace = useSetSelectedWorkspace();
+  const setWorkspaces = useSetWorkspaces();
+  const setWorkspacesLoading = useSetWorkspacesLoading();
+  const workspaces = useWorkspaces();
   
-  const hasLoadedWorkspaces = useRef(false)
+  const hasLoadedWorkspaces = useRef(false);
   
   // Get a random font config that stays consistent for this render
-  const headerFontConfig = useMemo(() => getRandomHeaderFont(), [])
+  const headerFontConfig = useMemo(() => getRandomHeaderFont(), []);
 
   // Load workspaces on mount
   useEffect(() => {
-    if (hasLoadedWorkspaces.current) return
+    if (hasLoadedWorkspaces.current) return;
     const loadWorkspaces = async () => {
       try {
-        setWorkspacesLoading(true)
+        setWorkspacesLoading(true);
         
-        const response = await fetch('/api/workspaces')
+        const response = await fetch('/api/workspaces');
         if (response.ok) {
-          const workspacesData = await response.json()
+          const workspacesData: Workspace[] = await response.json();
           
           // If no workspaces exist, create a default one
           if (workspacesData.length === 0) {
@@ -56,62 +57,57 @@ export function Sidebar({ className, onClose }: SidebarProps) {
               body: JSON.stringify({
                 name: 'My Workspace',
               }),
-            })
+            });
             
             if (createResponse.ok) {
-              const newWorkspace = await createResponse.json()
-              setWorkspaces([newWorkspace])
-              setSelectedWorkspace(newWorkspace.id)
-              localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id)
+              const newWorkspace = await createResponse.json();
+              setWorkspaces([newWorkspace]);
+              setSelectedWorkspace(newWorkspace.id);
+              localStorage.setItem('lastSelectedWorkspaceId', newWorkspace.id);
             }
           } else {
-            setWorkspaces(workspacesData)
+            setWorkspaces(workspacesData);
             
             // Try to restore last selected workspace from localStorage
-            const lastSelectedWorkspaceId = localStorage.getItem('lastSelectedWorkspaceId')
-            const validWorkspaceId = lastSelectedWorkspaceId && workspacesData.find(w => w.id === lastSelectedWorkspaceId)
+            const lastSelectedWorkspaceId = localStorage.getItem('lastSelectedWorkspaceId');
+            const validWorkspaceId = lastSelectedWorkspaceId && workspacesData.find(w => w.id === lastSelectedWorkspaceId);
             
             if (validWorkspaceId) {
               // Restore the last selected workspace
-              setSelectedWorkspace(lastSelectedWorkspaceId)
+              setSelectedWorkspace(lastSelectedWorkspaceId);
             } else if (workspacesData.length > 0) {
               // Fall back to first workspace and save it
-              const firstWorkspaceId = workspacesData[0].id
-              setSelectedWorkspace(firstWorkspaceId)
-              localStorage.setItem('lastSelectedWorkspaceId', firstWorkspaceId)
+              const firstWorkspaceId = workspacesData[0].id;
+              setSelectedWorkspace(firstWorkspaceId);
+              localStorage.setItem('lastSelectedWorkspaceId', firstWorkspaceId);
             }
           }
         }
       } catch (error) {
-        console.error('Failed to load workspaces:', error)
+        console.error('Failed to load workspaces:', error);
       } finally {
-        setWorkspacesLoading(false)
-        hasLoadedWorkspaces.current = true
+        setWorkspacesLoading(false);
+        hasLoadedWorkspaces.current = true;
       }
-    }
+    };
 
-    loadWorkspaces()
-  }, []) // Only run once on mount
+    loadWorkspaces();
+  }, []); // Only run once on mount
 
   const handleNewConversation = () => {
     // Navigate to home route to select a bud
-    router.push('/')
-  }
+    router.push('/');
+  };
 
-  const handleManageBuds = () => {
-    if (selectedWorkspaceId) {
-      router.push(`/workspace/${selectedWorkspaceId}/buds`)
-    }
-  }
 
   const toggleSidebar = () => {
-    onClose()
-  }
+    onClose();
+  };
 
-  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId)
+  const _selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId);
 
   return (
-    <div className={cn("w-60 border-r bg-muted/30 flex flex-col h-full", className)}>
+    <div className={cn('w-60 border-r bg-muted/30 flex flex-col h-full', className)}>
       {/* Header */}
       <div className="p-4 border-b flex-shrink-0">
         <div className="flex items-center justify-between mb-4">
@@ -125,14 +121,6 @@ export function Sidebar({ className, onClose }: SidebarProps) {
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleNewConversation}
-              className="h-8 w-8"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
               onClick={toggleSidebar}
               className="h-8 w-8"
             >
@@ -141,23 +129,22 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           </div>
         </div>
 
+        {/* New Chat Button */}
+        <div className="mb-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNewConversation}
+            className="w-full justify-start"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Chat
+          </Button>
+        </div>
+
         {/* Workspace Selector */}
         <WorkspaceSelector />
 
-        {/* Workspace Actions */}
-        {selectedWorkspaceId && (
-          <div className="mt-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleManageBuds}
-              className="w-full justify-start"
-            >
-              <Settings className="h-4 w-4 mr-2" />
-              Manage Buds
-            </Button>
-          </div>
-        )}
       </div>
 
       {/* Conversations - Constrained scroll area */}
@@ -180,5 +167,5 @@ export function Sidebar({ className, onClose }: SidebarProps) {
         <UserMenu />
       </div>
     </div>
-  )
+  );
 }

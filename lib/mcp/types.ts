@@ -5,8 +5,10 @@ export interface MCPServerConfig {
   name: string
   endpoint: string
   transport_type: 'http' | 'stdio' | 'websocket'
-  auth_config?: Record<string, any>
-  connection_config?: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  auth_config?: Record<string, any> // MCP protocol allows any JSON values for auth
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connection_config?: Record<string, any> // MCP protocol allows any JSON values for connection
   available_tools?: string[]
   metadata?: {
     name?: string
@@ -19,20 +21,24 @@ export interface MCPServerConfig {
 export interface MCPToolInfo {
   name: string
   description?: string
-  inputSchema?: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inputSchema?: Record<string, any> // MCP tool schemas can be any JSON schema
 }
 
 export interface MCPToolCall {
   tool_name: string
   server_id: string
-  parameters: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  parameters: Record<string, any> // MCP tool parameters can be any JSON values
 }
 
 export interface MCPToolResult {
   tool_name: string
-  result: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  result: any // MCP tool results can be any type returned from external tools
   error?: string
-  metadata?: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata?: Record<string, any> // MCP metadata can contain arbitrary tool-specific data
 }
 
 export interface MCPBudConfig {
@@ -60,7 +66,8 @@ export interface OpenAITool {
   function: {
     name: string
     description?: string
-    parameters?: Record<string, any>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parameters?: Record<string, any> // OpenAI function parameters can be any JSON schema
   }
 }
 
@@ -80,9 +87,12 @@ export interface MCPServer {
   name: string
   endpoint: string
   transport_type: 'http' | 'stdio' | 'websocket'
-  auth_config?: Record<string, any>
-  connection_config?: Record<string, any>
-  metadata?: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  auth_config?: Record<string, any> // MCP auth config allows arbitrary auth parameters
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connection_config?: Record<string, any> // MCP connection config allows arbitrary transport settings
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata?: Record<string, any> // MCP server metadata contains arbitrary server information
   is_active: boolean
   created_at: string
   updated_at: string
@@ -93,7 +103,8 @@ export interface MCPTool {
   server_id: string
   name: string
   description?: string
-  parameters_schema?: Record<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  parameters_schema?: Record<string, any> // MCP tool parameter schemas can be any JSON schema
   is_enabled: boolean
   created_at: string
 }

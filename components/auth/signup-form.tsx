@@ -1,67 +1,67 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useAuth } from '@/lib/auth/auth-provider'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Loader2 } from 'lucide-react'
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2 } from 'lucide-react';
 
 interface SignupFormProps {
   onToggleMode: () => void
 }
 
 export function SignupForm({ onToggleMode }: SignupFormProps) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
   
-  const { signUp, signInWithGoogle } = useAuth()
+  const { signUp, signInWithGoogle } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match')
-      setLoading(false)
-      return
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters')
-      setLoading(false)
-      return
+      setError('Password must be at least 6 characters');
+      setLoading(false);
+      return;
     }
 
-    const { error } = await signUp(email, password)
+    const { error } = await signUp(email, password);
     
     if (error) {
-      setError(error.message)
+      setError(error.message);
     } else {
-      setSuccess(true)
+      setSuccess(true);
     }
     
-    setLoading(false)
-  }
+    setLoading(false);
+  };
 
   const handleGoogleSignIn = async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     
-    const { error } = await signInWithGoogle()
+    const { error } = await signInWithGoogle();
     
     if (error) {
-      setError(error.message)
-      setLoading(false)
+      setError(error.message);
+      setLoading(false);
     }
-  }
+  };
 
   if (success) {
     return (
@@ -69,7 +69,7 @@ export function SignupForm({ onToggleMode }: SignupFormProps) {
         <CardHeader>
           <CardTitle>Check your email</CardTitle>
           <CardDescription>
-            We've sent you a confirmation link at {email}
+            We&apos;ve sent you a confirmation link at {email}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -78,7 +78,7 @@ export function SignupForm({ onToggleMode }: SignupFormProps) {
           </Button>
         </CardContent>
       </Card>
-    )
+    );
   }
 
   return (
@@ -166,5 +166,5 @@ export function SignupForm({ onToggleMode }: SignupFormProps) {
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }

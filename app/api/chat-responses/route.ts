@@ -1,12 +1,22 @@
 // New chat endpoint using OpenAI Responses API with native MCP support
-import { createClient } from '@/lib/supabase/server'
-import { Database } from '@/lib/types/database'
-import OpenAI from 'openai'
-import { NextRequest } from 'next/server'
+import { createClient } from '@/lib/supabase/server';
+import OpenAI from 'openai';
+
+// OpenAI Response API output types
+type ResponseOutput = 
+  | { type: 'text'; text: string }
+  | { type: 'mcp_list_tools'; tools?: { name: string; description?: string }[] }
+  | { type: 'mcp_call'; name: string; arguments?: Record<string, unknown>; result?: unknown; output?: unknown; error?: string; server_label?: string }
+  | { type: 'mcp_approval_request'; name: string };
+
+type OpenAIResponse = {
+  outputs?: ResponseOutput[];
+};
+import { NextRequest } from 'next/server';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
-})
+});
 
 interface ChatRequest {
   messages: { role: string; content: string }[]
@@ -18,8 +28,8 @@ interface ChatRequest {
 
 export async function POST(request: NextRequest) {
   try {
-    const body: ChatRequest = await request.json()
-    const { messages, model = 'gpt-4o', workspaceId, budId, conversationId } = body
+    const body: ChatRequest = await request.json();
+    const { messages, model = 'gpt-4o', workspaceId, budId, conversationId } = body;
 
     console.log('🚀 New Responses API chat request:', { 
       messageCount: messages.length, 
@@ -27,15 +37,15 @@ export async function POST(request: NextRequest) {
       workspaceId, 
       budId,
       conversationId 
-    })
+    });
 
     // Create Supabase client
-    const supabase = await createClient()
+    const supabase = await createClient();
 
     // Verify user authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
+      return new Response('Unauthorized', { status: 401 });
     }
 
     // Verify workspace access
@@ -44,17 +54,23 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('workspace_id', workspaceId)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (membershipError || !membership) {
-      return new Response('Workspace not found or access denied', { status: 404 })
+      return new Response('Workspace not found or access denied', { status: 404 });
     }
 
-    console.log('✅ User has access to workspace:', workspaceId)
+    console.log('✅ User has access to workspace:', workspaceId);
 
     // Get MCP server configuration from database
-    let mcpServers: any[] = []
-    let budData: any = null
+    let mcpServers: Array<{
+      type: string;
+      server_label: string;
+      server_url: string;
+      require_approval: string;
+      allowed_tools?: string[];
+    }> = [];
+    // let budData: Database['public']['Tables']['buds']['Row'] | null = null; // Unused for now
 
     try {
       if (budId) {
@@ -63,11 +79,11 @@ export async function POST(request: NextRequest) {
           .from('buds')
           .select('*, mcp_config')
           .eq('id', budId)
-          .single()
+          .single();
 
         if (bud && !budError) {
-          budData = bud
-          const mcpConfig = bud.mcp_config || {}
+          // budData = bud; // Unused for now
+          const mcpConfig = bud.mcp_config || {};
           
           if (mcpConfig.servers?.length > 0) {
             // Fetch MCP server details
@@ -75,46 +91,49 @@ export async function POST(request: NextRequest) {
               .from('mcp_servers')
               .select('*')
               .in('id', mcpConfig.servers)
-              .eq('workspace_id', workspaceId)
+              .eq('workspace_id', workspaceId);
 
             if (servers && !serversError) {
-              mcpServers = servers.map(server => ({
-                type: "mcp",
-                server_label: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
-                server_url: server.endpoint,
-                require_approval: server.metadata?.require_approval || "never",
-                ...(server.metadata?.allowed_tools && {
-                  allowed_tools: server.metadata.allowed_tools
-                })
-              }))
+              mcpServers = servers.map(server => {
+                const metadata = server.metadata as Record<string, unknown> | null; // Type assertion for metadata
+                return {
+                  type: 'mcp',
+                  server_label: (typeof metadata?.server_label === 'string' ? metadata.server_label : server.name.toLowerCase().replace(/\s+/g, '_')),
+                  server_url: server.endpoint,
+                  require_approval: (typeof metadata?.require_approval === 'string' ? metadata.require_approval : 'never'),
+                  ...(Array.isArray(metadata?.allowed_tools) ? {
+                    allowed_tools: metadata.allowed_tools
+                  } : {})
+                };
+              });
               
-              console.log('🔧 MCP: Found', mcpServers.length, 'MCP servers from bud')
+              console.log('🔧 MCP: Found', mcpServers.length, 'MCP servers from bud');
               mcpServers.forEach(server => {
-                console.log(`  - ${server.server_label}: ${server.server_url}`)
-              })
+                console.log(`  - ${server.server_label}: ${server.server_url}`);
+              });
             }
           }
         }
       }
     } catch (error) {
-      console.warn('MCP configuration loading failed:', error)
+      console.warn('MCP configuration loading failed:', error);
     }
 
     // Use the last user message as input
-    const lastMessage = messages[messages.length - 1]
-    const input = lastMessage?.content || ''
+    const lastMessage = messages[messages.length - 1];
+    const input = lastMessage?.content || '';
 
     // Create the Responses API request
-    console.log('🤖 Creating response with Responses API...')
-    const responseRequest: any = {
+    console.log('🤖 Creating response with Responses API...');
+    const responseRequest = {
       model,
       input,
-    }
+    } as Record<string, unknown>;
 
     // Add MCP tools if available
     if (mcpServers.length > 0) {
-      responseRequest.tools = mcpServers
-      console.log('🛠️ MCP: Including', mcpServers.length, 'MCP servers in request')
+      responseRequest.tools = mcpServers;
+      console.log('🛠️ MCP: Including', mcpServers.length, 'MCP servers in request');
     }
 
     // Add conversation history as context (if this is a continuing conversation)
@@ -123,55 +142,65 @@ export async function POST(request: NextRequest) {
       // The Responses API handles conversation state differently than chat completions
       const conversationContext = messages.slice(0, -1)
         .map(msg => `${msg.role}: ${msg.content}`)
-        .join('\n\n')
+        .join('\n\n');
       
-      responseRequest.input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`
+      (responseRequest as Record<string, unknown>).input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`;
     }
 
     // Make the Responses API call
-    const response = await openai.responses.create(responseRequest)
+    const response = await openai.responses.create(responseRequest);
 
-    console.log('✅ Responses API call completed')
-    console.log('📋 Response outputs:', response.outputs?.length || 0)
+    console.log('✅ Responses API call completed');
+    const hasOutputs = 'outputs' in response;
+    const outputs = hasOutputs ? (response as OpenAIResponse).outputs : [];
+    console.log('📋 Response outputs:', outputs?.length || 0);
 
     // Process the response outputs
-    let responseText = ''
-    const toolCalls: any[] = []
-    const toolResults: any[] = []
+    let responseText = '';
+    const toolCalls: Array<{
+      name: string;
+      arguments?: Record<string, unknown>;
+      server_label?: string;
+    }> = [];
+    const toolResults: Array<{
+      name: string;
+      output?: unknown;
+      error?: string;
+    }> = [];
 
-    for (const output of response.outputs || []) {
-      console.log('📄 Processing output type:', output.type)
+    for (const output of outputs || []) {
+      console.log('📄 Processing output type:', output.type);
       
       switch (output.type) {
         case 'text':
-          responseText += output.text
-          break
+          responseText += output.text;
+          break;
           
         case 'mcp_list_tools':
-          console.log('🛠️ MCP tools discovered:', output.tools?.length || 0)
-          break
+          console.log('🛠️ MCP tools discovered:', output.tools?.length || 0);
+          break;
           
         case 'mcp_call':
-          console.log('🔧 MCP tool called:', output.name)
+          console.log('🔧 MCP tool called:', output.name);
           toolCalls.push({
             name: output.name,
             arguments: output.arguments,
             server_label: output.server_label
-          })
+          });
           toolResults.push({
             name: output.name,
             output: output.output,
             error: output.error
-          })
-          break
+          });
+          break;
           
         case 'mcp_approval_request':
-          console.log('⚠️ MCP approval requested for:', output.name)
+          console.log('⚠️ MCP approval requested for:', output.name);
           // For now, we're using require_approval: "never", so this shouldn't happen
-          break
+          break;
           
         default:
-          console.log('❓ Unknown output type:', output.type)
+          console.log('❓ Unknown output type:', (output as Record<string, unknown>).type);
       }
     }
 
@@ -181,23 +210,23 @@ export async function POST(request: NextRequest) {
       text: responseText,
       tool_calls: toolCalls,
       tool_results: toolResults,
-      outputs: response.outputs,
+      outputs: outputs,
       usage: response.usage
-    }
+    };
 
     console.log('📤 Sending response:', {
       textLength: responseText.length,
       toolCallCount: toolCalls.length,
-      outputCount: response.outputs?.length || 0
-    })
+      outputCount: outputs?.length || 0
+    });
 
-    return Response.json(result)
+    return Response.json(result);
 
   } catch (error) {
-    console.error('❌ Responses API chat error:', error)
+    console.error('❌ Responses API chat error:', error);
     return Response.json(
       { error: 'Internal server error', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
-    )
+    );
   }
 }

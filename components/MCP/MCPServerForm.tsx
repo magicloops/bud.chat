@@ -1,13 +1,13 @@
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Plus, Server } from 'lucide-react'
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Loader2, Plus, Server } from 'lucide-react';
 
 interface MCPServerFormProps {
   workspaceId: string
@@ -30,24 +30,24 @@ const DEFAULT_TEST_SERVER: MCPServerFormData = {
   transport_type: 'http',
   description: 'A test MCP server with calculator tools using HTTP transport',
   tools: 'add, calculate'
-}
+};
 
 export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServerFormProps) {
-  const [formData, setFormData] = useState<MCPServerFormData>(DEFAULT_TEST_SERVER)
-  const [loading, setLoading] = useState(false)
-  const [errors, setErrors] = useState<string[]>([])
+  const [formData, setFormData] = useState<MCPServerFormData>(DEFAULT_TEST_SERVER);
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
 
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setErrors([])
+    e.preventDefault();
+    setLoading(true);
+    setErrors([]);
 
     try {
       // Validate required fields
       if (!formData.name.trim() || !formData.endpoint.trim()) {
-        setErrors(['Name and endpoint are required'])
-        return
+        setErrors(['Name and endpoint are required']);
+        return;
       }
 
       // Build metadata object
@@ -61,7 +61,7 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
         capabilities: formData.transport_type === 'stdio' 
           ? ['JavaScript execution in sandboxed environment', 'Mathematical calculations', 'Array operations (sum, average, min, max, sort)']
           : ['External API integration']
-      }
+      };
 
       const response = await fetch('/api/mcp/servers', {
         method: 'POST',
@@ -75,32 +75,32 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
           transport_type: formData.transport_type,
           metadata
         })
-      })
+      });
 
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to create MCP server')
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create MCP server');
       }
 
       // Success - close form and refresh parent
-      onSuccess()
-      onClose()
+      onSuccess();
+      onClose();
       
       // Reset form for next use
-      setFormData(DEFAULT_TEST_SERVER)
+      setFormData(DEFAULT_TEST_SERVER);
       
     } catch (error) {
-      console.error('Failed to create MCP server:', error)
-      setErrors([error instanceof Error ? error.message : 'Failed to create MCP server'])
+      console.error('Failed to create MCP server:', error);
+      setErrors([error instanceof Error ? error.message : 'Failed to create MCP server']);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleReset = () => {
-    setFormData(DEFAULT_TEST_SERVER)
-    setErrors([])
-  }
+    setFormData(DEFAULT_TEST_SERVER);
+    setErrors([]);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -134,7 +134,7 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
             <CardContent className="pt-4">
               <p className="text-sm text-blue-800">
                 💡 <strong>Quick Start:</strong> The form is pre-filled with our JavaScript test server. 
-                Just click "Add Server" to get started, or customize the settings below.
+                Just click &ldquo;Add Server&rdquo; to get started, or customize the settings below.
               </p>
             </CardContent>
           </Card>
@@ -160,7 +160,7 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
                 required
               />
               <p className="text-xs text-muted-foreground mt-1">
-                For stdio transport: Command to run the server (e.g., "node server.js")
+                For stdio transport: Command to run the server (e.g., &ldquo;node server.js&rdquo;)
               </p>
             </div>
 
@@ -248,5 +248,5 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

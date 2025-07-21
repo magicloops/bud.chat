@@ -1,29 +1,29 @@
-"use client"
+'use client';
 
-import React, { createContext, useContext, useState, ReactNode } from 'react'
-import { getDefaultModel } from '@/lib/modelMapping'
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { getDefaultModel } from '@/lib/modelMapping';
 
 interface ModelContextType {
   selectedModel: string
   setSelectedModel: (model: string) => void
 }
 
-const ModelContext = createContext<ModelContextType | undefined>(undefined)
+const ModelContext = createContext<ModelContextType | undefined>(undefined);
 
 export function ModelProvider({ children }: { children: ReactNode }) {
-  const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel())
+  const [selectedModel, setSelectedModel] = useState<string>(getDefaultModel());
 
   return (
     <ModelContext.Provider value={{ selectedModel, setSelectedModel }}>
       {children}
     </ModelContext.Provider>
-  )
+  );
 }
 
 export function useModel() {
-  const context = useContext(ModelContext)
+  const context = useContext(ModelContext);
   if (context === undefined) {
-    throw new Error('useModel must be used within a ModelProvider')
+    throw new Error('useModel must be used within a ModelProvider');
   }
-  return context
+  return context;
 }

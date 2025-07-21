@@ -1,8 +1,8 @@
 // MCP Tool Call Message Helpers
-import { createClient } from '@/lib/supabase/server'
-import type { SupabaseClient } from '@supabase/supabase-js'
-import { generateKeyBetween } from 'fractional-indexing'
-import type { MessageRole, ToolCallMetadata } from '@/lib/types'
+import { createClient } from '@/lib/supabase/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { generateKeyBetween } from 'fractional-indexing';
+import type { MessageRole, ToolCallMetadata } from '@/lib/types';
 
 export interface ToolCallMessage {
   role: 'assistant'
@@ -29,8 +29,9 @@ export async function saveToolCallMessage(
   conversationId: string,
   message: ToolCallMessage,
   orderKey: string
-): Promise<{ data: any; error: any }> {
-  console.log(`💾 Saving tool call message for conversation ${conversationId}`)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
+  console.log(`💾 Saving tool call message for conversation ${conversationId}`);
 
   const messageData = {
     conversation_id: conversationId,
@@ -44,21 +45,21 @@ export async function saveToolCallMessage(
     } as ToolCallMetadata,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
-  }
+  };
 
   const result = await supabase
     .from('messages')
     .insert(messageData)
     .select()
-    .single()
+    .single();
 
   if (result.error) {
-    console.error('Failed to save tool call message:', result.error)
+    console.error('Failed to save tool call message:', result.error);
   } else {
-    console.log(`✅ Tool call message saved with ID: ${result.data?.id}`)
+    console.log(`✅ Tool call message saved with ID: ${result.data?.id}`);
   }
 
-  return result
+  return result;
 }
 
 export async function saveToolResultMessage(
@@ -67,8 +68,9 @@ export async function saveToolResultMessage(
   message: ToolResultMessage,
   orderKey: string,
   mcpServerId?: string
-): Promise<{ data: any; error: any }> {
-  console.log(`💾 Saving tool result message for conversation ${conversationId}`)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
+  console.log(`💾 Saving tool result message for conversation ${conversationId}`);
 
   const messageData = {
     conversation_id: conversationId,
@@ -83,21 +85,21 @@ export async function saveToolResultMessage(
     } as ToolCallMetadata,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
-  }
+  };
 
   const result = await supabase
     .from('messages')
     .insert(messageData)
     .select()
-    .single()
+    .single();
 
   if (result.error) {
-    console.error('Failed to save tool result message:', result.error)
+    console.error('Failed to save tool result message:', result.error);
   } else {
-    console.log(`✅ Tool result message saved with ID: ${result.data?.id}`)
+    console.log(`✅ Tool result message saved with ID: ${result.data?.id}`);
   }
 
-  return result
+  return result;
 }
 
 export async function updateMessageWithToolCalls(
@@ -111,8 +113,9 @@ export async function updateMessageWithToolCalls(
       arguments: string
     }
   }>
-): Promise<{ data: any; error: any }> {
-  console.log(`🔧 Updating message ${messageId} with tool calls`)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
+  console.log(`🔧 Updating message ${messageId} with tool calls`);
 
   const result = await supabase
     .from('messages')
@@ -126,13 +129,13 @@ export async function updateMessageWithToolCalls(
     })
     .eq('id', messageId)
     .select()
-    .single()
+    .single();
 
   if (result.error) {
-    console.error('Failed to update message with tool calls:', result.error)
+    console.error('Failed to update message with tool calls:', result.error);
   }
 
-  return result
+  return result;
 }
 
 export function generateOrderKeysForToolSequence(
@@ -144,26 +147,26 @@ export function generateOrderKeysForToolSequence(
   nextAssistantOrderKey: string
 } {
   // Generate order key for the assistant message with tool calls
-  const assistantOrderKey = generateKeyBetween(lastOrderKey, null)
+  const assistantOrderKey = generateKeyBetween(lastOrderKey, null);
   
   // Generate order keys for each tool result
-  let currentKey = assistantOrderKey
-  const toolResultOrderKeys: string[] = []
+  let currentKey = assistantOrderKey;
+  const toolResultOrderKeys: string[] = [];
   
   for (let i = 0; i < toolCallCount; i++) {
-    const toolResultKey = generateKeyBetween(currentKey, null)
-    toolResultOrderKeys.push(toolResultKey)
-    currentKey = toolResultKey
+    const toolResultKey = generateKeyBetween(currentKey, null);
+    toolResultOrderKeys.push(toolResultKey);
+    currentKey = toolResultKey;
   }
   
   // Generate order key for the next assistant message (after tool results)
-  const nextAssistantOrderKey = generateKeyBetween(currentKey, null)
+  const nextAssistantOrderKey = generateKeyBetween(currentKey, null);
   
   return {
     assistantOrderKey,
     toolResultOrderKeys,
     nextAssistantOrderKey
-  }
+  };
 }
 
 export function formatToolCallForDisplay(toolCall: {
@@ -175,54 +178,58 @@ export function formatToolCallForDisplay(toolCall: {
   }
 }): string {
   try {
-    const args = JSON.parse(toolCall.function.arguments)
-    return `🔧 **${toolCall.function.name}**\n\`\`\`json\n${JSON.stringify(args, null, 2)}\n\`\`\``
+    const args = JSON.parse(toolCall.function.arguments);
+    return `🔧 **${toolCall.function.name}**\n\`\`\`json\n${JSON.stringify(args, null, 2)}\n\`\`\``;
   } catch (error) {
-    return `🔧 **${toolCall.function.name}**\n\`\`\`\n${toolCall.function.arguments}\n\`\`\``
+    return `🔧 **${toolCall.function.name}**\n\`\`\`\n${toolCall.function.arguments}\n\`\`\``;
   }
 }
 
 export function formatToolResultForDisplay(
-  toolResult: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolResult: any, // MCP tool results can be any type
   toolName: string,
   error?: string
 ): string {
   if (error) {
-    return `❌ **${toolName}** failed: ${error}`
+    return `❌ **${toolName}** failed: ${error}`;
   }
 
   if (typeof toolResult === 'string') {
-    return `✅ **${toolName}**:\n${toolResult}`
+    return `✅ **${toolName}**:\n${toolResult}`;
   }
 
   if (Array.isArray(toolResult)) {
     // Handle MCP content blocks
     return `✅ **${toolName}**:\n${toolResult.map(block => {
       if (block.type === 'text') {
-        return block.text
+        return block.text;
       }
-      return JSON.stringify(block, null, 2)
-    }).join('\n')}`
+      return JSON.stringify(block, null, 2);
+    }).join('\n')}`;
   }
 
   if (typeof toolResult === 'object' && toolResult !== null) {
-    return `✅ **${toolName}**:\n\`\`\`json\n${JSON.stringify(toolResult, null, 2)}\n\`\`\``
+    return `✅ **${toolName}**:\n\`\`\`json\n${JSON.stringify(toolResult, null, 2)}\n\`\`\``;
   }
 
-  return `✅ **${toolName}**: ${String(toolResult)}`
+  return `✅ **${toolName}**: ${String(toolResult)}`;
 }
 
-export function isToolCallMessage(message: any): boolean {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isToolCallMessage(message: any): boolean { // Legacy message format
   return message.json_meta?.is_tool_call === true || 
-         (message.json_meta?.tool_calls && Array.isArray(message.json_meta.tool_calls))
+         (message.json_meta?.tool_calls && Array.isArray(message.json_meta.tool_calls));
 }
 
-export function isToolResultMessage(message: any): boolean {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isToolResultMessage(message: any): boolean { // Legacy message format
   return message.json_meta?.is_tool_result === true ||
-         message.json_meta?.tool_call_id !== undefined
+         message.json_meta?.tool_call_id !== undefined;
 }
 
-export function extractToolCallsFromMessage(message: any): Array<{
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractToolCallsFromMessage(message: any): Array<{ // Legacy message format
   id: string
   type: 'function'
   function: {
@@ -230,17 +237,18 @@ export function extractToolCallsFromMessage(message: any): Array<{
     arguments: string
   }
 }> {
-  return message.json_meta?.tool_calls || []
+  return message.json_meta?.tool_calls || [];
 }
 
-export function extractToolResultFromMessage(message: any): {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractToolResultFromMessage(message: any): { // Legacy message format
   tool_call_id: string
   tool_name: string
   content: string
   mcp_server_id?: string
 } | null {
   if (!isToolResultMessage(message)) {
-    return null
+    return null;
   }
 
   return {
@@ -248,5 +256,5 @@ export function extractToolResultFromMessage(message: any): {
     tool_name: message.json_meta?.tool_name,
     content: message.content,
     mcp_server_id: message.json_meta?.mcp_server_id
-  }
+  };
 }

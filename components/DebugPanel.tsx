@@ -1,15 +1,15 @@
-"use client"
+'use client';
 
-import { useState, useEffect } from 'react'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Button } from '@/components/ui/button'
-import { X, Bug } from 'lucide-react'
+import { useState, useEffect } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import { X, Bug } from 'lucide-react';
 
 interface DebugEvent {
   id: string
   timestamp: string
   type: 'mcp_tool_use' | 'mcp_tool_result' | 'stream_event' | 'api_call' | 'system' | 'error'
-  data: any
+  data: object | string | number | boolean | null
   conversationId?: string
 }
 
@@ -19,79 +19,79 @@ interface DebugPanelProps {
 }
 
 export function DebugPanel({ conversationId, className }: DebugPanelProps) {
-  const [isVisible, setIsVisible] = useState(false)
-  const [events, setEvents] = useState<DebugEvent[]>([])
-  const [debugMode, setDebugMode] = useState(false)
+  const [isVisible, setIsVisible] = useState(false);
+  const [events, setEvents] = useState<DebugEvent[]>([]);
+  const [debugMode, setDebugMode] = useState(false);
 
   // Check debug mode on mount and listen for changes
   useEffect(() => {
     const checkDebugMode = () => {
       if (typeof window !== 'undefined') {
-        const enabled = localStorage.getItem('debug-mode') === 'true'
-        setDebugMode(enabled)
-        setIsVisible(enabled)
+        const enabled = localStorage.getItem('debug-mode') === 'true';
+        setDebugMode(enabled);
+        setIsVisible(enabled);
       }
-    }
+    };
     
-    checkDebugMode()
+    checkDebugMode();
     
     const handleDebugModeChange = (event: CustomEvent) => {
-      setDebugMode(event.detail)
-      setIsVisible(event.detail)
-    }
+      setDebugMode(event.detail);
+      setIsVisible(event.detail);
+    };
     
-    window.addEventListener('debug-mode-changed', handleDebugModeChange as EventListener)
-    return () => window.removeEventListener('debug-mode-changed', handleDebugModeChange as EventListener)
-  }, [])
+    window.addEventListener('debug-mode-changed', handleDebugModeChange as EventListener);
+    return () => window.removeEventListener('debug-mode-changed', handleDebugModeChange as EventListener);
+  }, []);
 
   // Listen for debug events
   useEffect(() => {
-    if (!debugMode) return
+    if (!debugMode) return;
     
     const handleDebugEvent = (event: CustomEvent<DebugEvent>) => {
-      const debugEvent = event.detail
+      const debugEvent = event.detail;
       
       // Filter events by conversation ID if provided
       if (conversationId && debugEvent.conversationId && debugEvent.conversationId !== conversationId) {
-        return
+        return;
       }
       
-      setEvents(prev => [...prev, debugEvent].slice(-100)) // Keep last 100 events
-    }
+      setEvents(prev => [...prev, debugEvent].slice(-100)); // Keep last 100 events
+    };
     
-    window.addEventListener('debug-event', handleDebugEvent as EventListener)
-    return () => window.removeEventListener('debug-event', handleDebugEvent as EventListener)
-  }, [debugMode, conversationId])
+    window.addEventListener('debug-event', handleDebugEvent as EventListener);
+    return () => window.removeEventListener('debug-event', handleDebugEvent as EventListener);
+  }, [debugMode, conversationId]);
 
   const clearEvents = () => {
-    setEvents([])
-  }
+    setEvents([]);
+  };
 
   const getEventColor = (type: DebugEvent['type']) => {
     switch (type) {
-      case 'mcp_tool_use': return 'text-blue-600'
-      case 'mcp_tool_result': return 'text-green-600'
-      case 'stream_event': return 'text-purple-600'
-      case 'api_call': return 'text-orange-600'
-      case 'system': return 'text-gray-600'
-      case 'error': return 'text-red-600'
-      default: return 'text-gray-600'
+      case 'mcp_tool_use': return 'text-blue-600';
+      case 'mcp_tool_result': return 'text-green-600';
+      case 'stream_event': return 'text-purple-600';
+      case 'api_call': return 'text-orange-600';
+      case 'system': return 'text-gray-600';
+      case 'error': return 'text-red-600';
+      default: return 'text-gray-600';
     }
-  }
+  };
 
   const getEventIcon = (type: DebugEvent['type']) => {
     switch (type) {
-      case 'mcp_tool_use': return '🔧'
-      case 'mcp_tool_result': return '✅'
-      case 'stream_event': return '📨'
-      case 'api_call': return '🌐'
-      case 'system': return '⚙️'
-      case 'error': return '❌'
-      default: return '•'
+      case 'mcp_tool_use': return '🔧';
+      case 'mcp_tool_result': return '✅';
+      case 'stream_event': return '📨';
+      case 'api_call': return '🌐';
+      case 'system': return '⚙️';
+      case 'error': return '❌';
+      default: return '•';
     }
-  }
+  };
 
-  if (!debugMode) return null
+  if (!debugMode) return null;
 
   return (
     <div className={`fixed bottom-4 right-4 w-96 max-w-[90vw] bg-background border rounded-lg shadow-lg z-50 ${className}`}>
@@ -161,13 +161,13 @@ export function DebugPanel({ conversationId, className }: DebugPanelProps) {
         </Button>
       )}
     </div>
-  )
+  );
 }
 
 // Utility function for components to emit debug events
 export const emitDebugEvent = (
   type: DebugEvent['type'],
-  data: any,
+  data: object | string | number | boolean | null,
   conversationId?: string
 ) => {
   if (typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true') {
@@ -177,8 +177,8 @@ export const emitDebugEvent = (
       type,
       data,
       conversationId
-    }
+    };
     
-    window.dispatchEvent(new CustomEvent('debug-event', { detail: event }))
+    window.dispatchEvent(new CustomEvent('debug-event', { detail: event }));
   }
-}
+};

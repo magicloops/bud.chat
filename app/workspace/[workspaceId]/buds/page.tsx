@@ -1,12 +1,12 @@
-'use client'
+'use client';
 
-import { useState, useEffect, use } from 'react'
-import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useState, useEffect, use } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Search, 
   Plus, 
@@ -19,13 +19,13 @@ import {
   RefreshCw,
   Users,
   Bot
-} from 'lucide-react'
+} from 'lucide-react';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
   DropdownMenuTrigger 
-} from '@/components/ui/dropdown-menu'
+} from '@/components/ui/dropdown-menu';
 import { 
   Table,
   TableBody,
@@ -33,8 +33,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
-import { BudForm } from '@/components/BudForm'
+} from '@/components/ui/table';
+import { BudForm } from '@/components/BudForm';
 import { 
   useWorkspaceBuds, 
   useWorkspaceBudsLoading, 
@@ -44,101 +44,101 @@ import {
   useBudCreateLoading,
   useUpdateBud,
   useDeleteBud
-} from '@/state/budStore'
-import { Bud, BudConfig } from '@/lib/types'
-import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers'
+} from '@/state/budStore';
+import { Bud, BudConfig } from '@/lib/types';
+import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers';
 
 interface BudsManagementPageProps {
   params: Promise<{ workspaceId: string }>
 }
 
 export default function BudsManagementPage({ params }: BudsManagementPageProps) {
-  const router = useRouter()
-  const { workspaceId } = use(params)
+  const router = useRouter();
+  const { workspaceId } = use(params);
   
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('')
-  const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editingBud, setEditingBud] = useState<Bud | null>(null)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingBud, setEditingBud] = useState<Bud | null>(null);
   
   // State management
-  const buds = useWorkspaceBuds(workspaceId)
-  const loading = useWorkspaceBudsLoading(workspaceId)
-  const error = useWorkspaceBudsError(workspaceId)
-  const loadWorkspaceBuds = useLoadWorkspaceBuds()
-  const createBud = useCreateBud()
-  const createLoading = useBudCreateLoading()
-  const updateBud = useUpdateBud()
-  const deleteBud = useDeleteBud()
+  const buds = useWorkspaceBuds(workspaceId);
+  const loading = useWorkspaceBudsLoading(workspaceId);
+  const error = useWorkspaceBudsError(workspaceId);
+  const loadWorkspaceBuds = useLoadWorkspaceBuds();
+  const createBud = useCreateBud();
+  const createLoading = useBudCreateLoading();
+  const updateBud = useUpdateBud();
+  const deleteBud = useDeleteBud();
 
   // Load buds on mount
   useEffect(() => {
-    loadWorkspaceBuds(workspaceId)
-  }, [workspaceId, loadWorkspaceBuds])
+    loadWorkspaceBuds(workspaceId);
+  }, [workspaceId, loadWorkspaceBuds]);
 
   // Filter buds based on search and model
   const filteredBuds = buds.filter(bud => {
-    const config = getBudConfig(bud)
+    const config = getBudConfig(bud as unknown as Bud);
     const matchesSearch = !searchQuery || 
       config.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase())
+      config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase());
     
-    const matchesModel = !selectedModel || config.model === selectedModel
+    const matchesModel = !selectedModel || config.model === selectedModel;
     
-    return matchesSearch && matchesModel
-  })
+    return matchesSearch && matchesModel;
+  });
 
   // Get unique models for filter
-  const availableModels = [...new Set(buds.map(bud => getBudModel(bud)))]
+  const availableModels = [...new Set(buds.map(bud => getBudModel(bud as unknown as Bud)))];
 
   const handleCreateBud = async (config: BudConfig, name: string) => {
     await createBud({
       name,
       config,
       workspaceId
-    })
-    await loadWorkspaceBuds(workspaceId)
-  }
+    });
+    await loadWorkspaceBuds(workspaceId);
+  };
 
   const handleEditBud = async (config: BudConfig, name: string) => {
-    if (!editingBud) return
+    if (!editingBud) return;
     
     await updateBud(editingBud.id, {
       name,
       config
-    })
-    await loadWorkspaceBuds(workspaceId)
-    setEditingBud(null)
-  }
+    });
+    await loadWorkspaceBuds(workspaceId);
+    setEditingBud(null);
+  };
 
   const handleDuplicateBud = async (bud: Bud) => {
-    const config = getBudConfig(bud)
+    const config = getBudConfig(bud);
     const newConfig = {
       ...config,
       name: `${config.name} (Copy)`
-    }
+    };
     
     await createBud({
       name: newConfig.name,
       config: newConfig,
       workspaceId
-    })
-    await loadWorkspaceBuds(workspaceId)
-  }
+    });
+    await loadWorkspaceBuds(workspaceId);
+  };
 
   const handleDeleteBud = async (budId: string) => {
     if (confirm('Are you sure you want to delete this bud? This action cannot be undone.')) {
-      await deleteBud(budId)
+      await deleteBud(budId);
     }
-  }
+  };
 
   const handleRefresh = () => {
-    loadWorkspaceBuds(workspaceId)
-  }
+    loadWorkspaceBuds(workspaceId);
+  };
 
   const handleStartChat = (budId: string) => {
-    router.push(`/new?bud=${budId}`)
-  }
+    router.push(`/new?bud=${budId}`);
+  };
 
   if (error) {
     return (
@@ -153,7 +153,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -307,10 +307,10 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
               </TableHeader>
               <TableBody>
                 {filteredBuds.map((bud) => {
-                  const config = getBudConfig(bud)
-                  const displayName = getBudDisplayName(bud)
-                  const avatar = getBudAvatar(bud)
-                  const model = getBudModel(bud)
+                  const config = getBudConfig(bud as unknown as Bud);
+                  const displayName = getBudDisplayName(bud as unknown as Bud);
+                  const avatar = getBudAvatar(bud as unknown as Bud);
+                  const model = getBudModel(bud as unknown as Bud);
                   
                   return (
                     <TableRow key={bud.id} className="hover:bg-muted/50">
@@ -348,11 +348,11 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                               <Bot className="h-4 w-4 mr-2" />
                               Start Chat
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setEditingBud(bud)}>
+                            <DropdownMenuItem onClick={() => setEditingBud(bud as unknown as Bud)}>
                               <Edit className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDuplicateBud(bud)}>
+                            <DropdownMenuItem onClick={() => handleDuplicateBud(bud as unknown as Bud)}>
                               <Copy className="h-4 w-4 mr-2" />
                               Duplicate
                             </DropdownMenuItem>
@@ -367,7 +367,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  )
+                  );
                 })}
               </TableBody>
             </Table>
@@ -394,5 +394,5 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
         loading={false}
       />
     </div>
-  )
+  );
 }

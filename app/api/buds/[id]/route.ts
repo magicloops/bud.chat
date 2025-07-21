@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { BudConfig } from '../route'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { BudConfig } from '@/lib/types';
+import { Database } from '@/lib/types/database';
 
 export interface UpdateBudRequest {
   name?: string
@@ -13,16 +14,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient()
-    const { id: budId } = await params
+    const supabase = await createClient();
+    const { id: budId } = await params;
 
     // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
-      )
+      );
     }
 
     // Get the bud with workspace access check
@@ -33,13 +34,13 @@ export async function GET(
         workspaces!inner(id)
       `)
       .eq('id', budId)
-      .single()
+      .single();
 
     if (budError || !bud) {
       return NextResponse.json(
         { error: 'Bud not found' },
         { status: 404 }
-      )
+      );
     }
 
     // Check if user has access to the workspace
@@ -48,22 +49,22 @@ export async function GET(
       .select('role')
       .eq('workspace_id', bud.workspace_id)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (memberError || !membership) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
-      )
+      );
     }
 
-    return NextResponse.json({ bud })
+    return NextResponse.json({ bud });
   } catch (error) {
-    console.error('GET /api/buds/[id] error:', error)
+    console.error('GET /api/buds/[id] error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }
 
@@ -73,17 +74,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient()
-    const { id: budId } = await params
-    const body: UpdateBudRequest = await request.json()
+    const supabase = await createClient();
+    const { id: budId } = await params;
+    const body: UpdateBudRequest = await request.json();
 
     // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
-      )
+      );
     }
 
     // Get the existing bud to check permissions
@@ -91,13 +92,13 @@ export async function PUT(
       .from('buds')
       .select('*, workspaces!inner(id)')
       .eq('id', budId)
-      .single()
+      .single();
 
     if (fetchError || !existingBud) {
       return NextResponse.json(
         { error: 'Bud not found' },
         { status: 404 }
-      )
+      );
     }
 
     // Check if user is the owner or has admin access to workspace
@@ -106,13 +107,13 @@ export async function PUT(
       .select('role')
       .eq('workspace_id', existingBud.workspace_id)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (memberError || !membership) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
-      )
+      );
     }
 
     // Only owner or admin can edit
@@ -120,27 +121,28 @@ export async function PUT(
       return NextResponse.json(
         { error: 'Only the owner or workspace admin can edit this bud' },
         { status: 403 }
-      )
+      );
     }
 
     // Prepare update data
-    const updateData: any = {}
+    const updateData: Partial<Database['public']['Tables']['buds']['Update']> = {};
     
     if (body.name) {
-      updateData.name = body.name
+      updateData.name = body.name;
     }
     
     if (body.config) {
       // Extract MCP config from the update
-      const { mcpConfig, ...budConfig } = body.config
+      const fullConfig = body.config as BudConfig;
+      const { mcpConfig, ...budConfig } = fullConfig;
       
       // Merge with existing config (excluding MCP config)
-      const currentConfig = existingBud.default_json as BudConfig
-      updateData.default_json = { ...currentConfig, ...budConfig }
+      const currentConfig = existingBud.default_json as BudConfig;
+      updateData.default_json = { ...currentConfig, ...budConfig } as unknown as Database['public']['Tables']['buds']['Update']['default_json'];
       
       // Update MCP config separately if provided
       if (mcpConfig !== undefined) {
-        updateData.mcp_config = mcpConfig
+        updateData.mcp_config = mcpConfig as unknown as Database['public']['Tables']['buds']['Update']['mcp_config'];
       }
     }
 
@@ -150,23 +152,23 @@ export async function PUT(
       .update(updateData)
       .eq('id', budId)
       .select()
-      .single()
+      .single();
 
     if (updateError) {
-      console.error('Error updating bud:', updateError)
+      console.error('Error updating bud:', updateError);
       return NextResponse.json(
         { error: 'Failed to update bud' },
         { status: 500 }
-      )
+      );
     }
 
-    return NextResponse.json({ bud: updatedBud })
+    return NextResponse.json({ bud: updatedBud });
   } catch (error) {
-    console.error('PUT /api/buds/[id] error:', error)
+    console.error('PUT /api/buds/[id] error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }
 
@@ -176,16 +178,16 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createClient()
-    const { id: budId } = await params
+    const supabase = await createClient();
+    const { id: budId } = await params;
 
     // Get current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
-      )
+      );
     }
 
     // Get the existing bud to check permissions
@@ -193,13 +195,13 @@ export async function DELETE(
       .from('buds')
       .select('*, workspaces!inner(id)')
       .eq('id', budId)
-      .single()
+      .single();
 
     if (fetchError || !existingBud) {
       return NextResponse.json(
         { error: 'Bud not found' },
         { status: 404 }
-      )
+      );
     }
 
     // Check if user is the owner or has admin access to workspace
@@ -208,13 +210,13 @@ export async function DELETE(
       .select('role')
       .eq('workspace_id', existingBud.workspace_id)
       .eq('user_id', user.id)
-      .single()
+      .single();
 
     if (memberError || !membership) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
-      )
+      );
     }
 
     // Only owner or admin can delete
@@ -222,29 +224,29 @@ export async function DELETE(
       return NextResponse.json(
         { error: 'Only the owner or workspace admin can delete this bud' },
         { status: 403 }
-      )
+      );
     }
 
     // Delete the bud
     const { error: deleteError } = await supabase
       .from('buds')
       .delete()
-      .eq('id', budId)
+      .eq('id', budId);
 
     if (deleteError) {
-      console.error('Error deleting bud:', deleteError)
+      console.error('Error deleting bud:', deleteError);
       return NextResponse.json(
         { error: 'Failed to delete bud' },
         { status: 500 }
-      )
+      );
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('DELETE /api/buds/[id] error:', error)
+    console.error('DELETE /api/buds/[id] error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
   }
 }

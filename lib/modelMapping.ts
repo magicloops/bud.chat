@@ -81,7 +81,7 @@ export const MODEL_MAPPING: Record<string, ModelInfo> = {
     provider: 'anthropic',
     displayName: 'Claude 3 Haiku'
   }
-}
+};
 
 /**
  * Get the actual API model name from a friendly model name
@@ -89,12 +89,12 @@ export const MODEL_MAPPING: Record<string, ModelInfo> = {
  * @returns The actual API model name (e.g., 'claude-3-5-sonnet-20241022')
  */
 export function getApiModelName(friendlyName: string): string {
-  const modelInfo = MODEL_MAPPING[friendlyName]
+  const modelInfo = MODEL_MAPPING[friendlyName];
   if (!modelInfo) {
-    console.warn(`Unknown model: ${friendlyName}, using as-is`)
-    return friendlyName // Fallback to original name if not found
+    console.warn(`Unknown model: ${friendlyName}, using as-is`);
+    return friendlyName; // Fallback to original name if not found
   }
-  return modelInfo.apiName
+  return modelInfo.apiName;
 }
 
 /**
@@ -103,15 +103,15 @@ export function getApiModelName(friendlyName: string): string {
  * @returns The provider ('openai' | 'anthropic')
  */
 export function getModelProvider(friendlyName: string): 'openai' | 'anthropic' {
-  const modelInfo = MODEL_MAPPING[friendlyName]
+  const modelInfo = MODEL_MAPPING[friendlyName];
   if (!modelInfo) {
     // Fallback logic based on model name patterns
     if (friendlyName.toLowerCase().includes('claude')) {
-      return 'anthropic'
+      return 'anthropic';
     }
-    return 'openai' // Default to OpenAI
+    return 'openai'; // Default to OpenAI
   }
-  return modelInfo.provider
+  return modelInfo.provider;
 }
 
 /**
@@ -120,7 +120,7 @@ export function getModelProvider(friendlyName: string): 'openai' | 'anthropic' {
  * @returns ModelInfo object or null if not found
  */
 export function getModelInfo(friendlyName: string): ModelInfo | null {
-  return MODEL_MAPPING[friendlyName] || null
+  return MODEL_MAPPING[friendlyName] || null;
 }
 
 /**
@@ -129,7 +129,7 @@ export function getModelInfo(friendlyName: string): ModelInfo | null {
  * @returns true if it's a Claude model
  */
 export function isClaudeModel(friendlyName: string): boolean {
-  return getModelProvider(friendlyName) === 'anthropic'
+  return getModelProvider(friendlyName) === 'anthropic';
 }
 
 /**
@@ -138,7 +138,7 @@ export function isClaudeModel(friendlyName: string): boolean {
  * @returns true if it's a GPT model
  */
 export function isGPTModel(friendlyName: string): boolean {
-  return getModelProvider(friendlyName) === 'openai'
+  return getModelProvider(friendlyName) === 'openai';
 }
 
 /**
@@ -149,13 +149,13 @@ export function getAvailableModels(): Record<'openai' | 'anthropic', ModelInfo[]
   const result: Record<'openai' | 'anthropic', ModelInfo[]> = {
     openai: [],
     anthropic: []
-  }
+  };
   
   Object.values(MODEL_MAPPING).forEach(model => {
-    result[model.provider].push(model)
-  })
+    result[model.provider].push(model);
+  });
   
-  return result
+  return result;
 }
 
 /**
@@ -166,7 +166,7 @@ export function getAvailableModels(): Record<'openai' | 'anthropic', ModelInfo[]
 export function getModelsByProvider(provider: 'openai' | 'anthropic'): string[] {
   return Object.keys(MODEL_MAPPING).filter(name => 
     MODEL_MAPPING[name].provider === provider
-  )
+  );
 }
 
 /**
@@ -178,7 +178,7 @@ export function getModelsForUI(): Array<{value: string, label: string, provider:
     value: friendlyName,
     label: modelInfo.displayName,
     provider: modelInfo.provider
-  }))
+  }));
 }
 
 /**
@@ -186,11 +186,11 @@ export function getModelsForUI(): Array<{value: string, label: string, provider:
  * @returns Object with models grouped by provider for UI
  */
 export function getModelsGroupedForUI() {
-  const models = getModelsForUI()
+  const models = getModelsForUI();
   return {
     openai: models.filter(m => m.provider === 'openai'),
     anthropic: models.filter(m => m.provider === 'anthropic')
-  }
+  };
 }
 
 /**
@@ -198,5 +198,5 @@ export function getModelsGroupedForUI() {
  * @returns The default friendly model name
  */
 export function getDefaultModel(): string {
-  return 'gpt-4o' // Can be changed here to update system-wide default
+  return 'gpt-4o'; // Can be changed here to update system-wide default
 }

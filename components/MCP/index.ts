@@ -1,5 +1,5 @@
-export { MCPServerList } from './MCPServerList'
-export { MCPConfigurationPanel } from './MCPConfigurationPanel'
-export { MCPServerForm } from './MCPServerForm'
-export type { MCPServer } from './MCPServerList'
-export type { MCPConfiguration, MCPConfigurationPanelProps } from './MCPConfigurationPanel'
+export { MCPServerList } from './MCPServerList';
+export { MCPConfigurationPanel } from './MCPConfigurationPanel';
+export { MCPServerForm } from './MCPServerForm';
+export type { MCPServer } from './MCPServerList';
+export type { MCPConfiguration, MCPConfigurationPanelProps } from './MCPConfigurationPanel';
