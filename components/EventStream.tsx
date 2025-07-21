@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useCallback } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore } from '@/state/eventChatStore';
@@ -36,6 +37,10 @@ export function EventStream({
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
   
+  // Local streaming state for existing conversations during streaming (similar to new conversations)
+  const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);
+  const [isLocalStreaming, setIsLocalStreaming] = useState(false);
+  
   // Load current bud data if conversation has a source_bud_id
   const currentBudData = useBud(conversation?.meta?.source_bud_id || '');
   
@@ -67,18 +72,6 @@ export function EventStream({
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
     
-    console.log('🚀 [STREAM] Starting message send', {
-      timestamp: Date.now(),
-      conversationId: conversationId || 'new',
-      localEventCount: conversation?.events.length || 0,
-      content: content.substring(0, 50) + (content.length > 50 ? '...' : '')
-    });
-    
-    console.log('🎯 Adding optimistic events:', { 
-      userEvent: userEvent.id, 
-      assistantPlaceholder: assistantPlaceholder.id,
-      currentEvents: conversation.events.length 
-    });
     
     // Add events optimistically to store
     const store = useEventChatStore.getState();
@@ -89,13 +82,6 @@ export function EventStream({
       streamingEventId: assistantPlaceholder.id
     };
     
-    console.log('📝 [STREAM] Updating conversation', {
-      timestamp: Date.now(),
-      conversationId,
-      action: 'setConversation',
-      eventCount: updatedConversation.events.length,
-      previousEventCount: conversation.events.length
-    });
     
     store.setConversation(conversationId, updatedConversation);
     
@@ -111,23 +97,52 @@ export function EventStream({
         })
       });
       
-      // Create unified event handler for store state management
+      // Create unified event handler for existing conversations - use SAME approach as new conversations
       const eventHandler = new FrontendEventHandler(
-        conversationId,
-        useEventChatStore,
+        null, // No store updates during streaming - keep it local
+        null,
         { debug: true }
       );
       
-      // Set assistant placeholder for store updates
+      // Track final events for store update on completion
+      let finalEvents = [...conversation.events, userEvent, assistantPlaceholder];
+      
+      // Set local streaming state for real-time display
+      setLocalStreamingEvents(finalEvents);
+      setIsLocalStreaming(true);
+      
+      // Set up local state updater to track streaming events locally (NOT in store during streaming)
       eventHandler.setLocalStateUpdater(
-        () => {}, // Not used for store state
+        (updater) => {
+          // Update local tracking of events (not the store during streaming)
+          finalEvents = updater(finalEvents);
+          
+          // Update local streaming state for real-time UI display
+          setLocalStreamingEvents([...finalEvents]);
+        },
         assistantPlaceholder
       );
       
       // Process streaming response with unified handler
       await eventHandler.processStreamingResponse(response);
+      
+      // After streaming completes, update store with final events
+      store.setConversation(conversationId, {
+        ...conversation,
+        events: finalEvents,
+        isStreaming: false,
+        streamingEventId: undefined
+      });
+      
+      // Clear local streaming state
+      setLocalStreamingEvents(null);
+      setIsLocalStreaming(false);
     } catch (error) {
       console.error('Error sending message:', error);
+      // Clear local streaming state on error
+      setLocalStreamingEvents(null);
+      setIsLocalStreaming(false);
+      
       // Remove optimistic updates on error
       const errorStore = useEventChatStore.getState();
       const errorConv = errorStore.conversations[conversationId];
@@ -170,7 +185,7 @@ export function EventStream({
           
           {/* Status indicators and space for settings toggle */}
           <div className="flex items-center gap-2 text-xs text-muted-foreground w-12 justify-end">
-            {isStreaming && (
+            {(isStreaming || isLocalStreaming) && (
               <div className="flex items-center gap-1">
                 <div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
                 <span className="text-xs">•••</span>
@@ -183,7 +198,7 @@ export function EventStream({
       {/* Events */}
       <div className="flex-1 min-h-0 h-full overflow-hidden">
         {events ? (
-          // Local state - render events directly
+          // Local state - render events directly (new conversations)
           <EventList 
             events={events}
             conversation={optimisticConversation}
@@ -191,8 +206,17 @@ export function EventStream({
             className="h-full"
             isStreaming={isStreaming}
           />
+        ) : localStreamingEvents ? (
+          // Local streaming state - render streaming events directly (existing conversations during streaming)
+          <EventList 
+            events={localStreamingEvents}
+            conversation={conversation}
+            autoScroll={true}
+            className="h-full"
+            isStreaming={isLocalStreaming}
+          />
         ) : conversationId ? (
-          // Server state - fetch from store
+          // Server state - fetch from store (existing conversations not streaming)
           <EventList 
             conversationId={conversationId}
             autoScroll={true}

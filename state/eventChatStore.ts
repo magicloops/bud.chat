@@ -101,13 +101,6 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
-          console.log('🏦 [STORE] Setting conversation', {
-            timestamp: Date.now(),
-            conversationId: id,
-            eventCount: conversation.events.length,
-            previousEventCount: state.conversations[id]?.events?.length || 0,
-            source: new Error().stack?.split('\n')[2]?.trim() // Capture caller
-          });
           state.conversations[id] = conversation;
         }),
         

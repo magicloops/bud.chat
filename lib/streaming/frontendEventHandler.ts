@@ -56,7 +56,7 @@ export class FrontendEventHandler {
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\\n');
+        const lines = chunk.split('\n');
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -109,10 +109,6 @@ export class FrontendEventHandler {
    * Handle token events (text streaming)
    */
   private async handleTokenEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('🔄 Received token:', data.content);
-    }
-
     if (this.isLocalState()) {
       // Local state update for optimistic flow
       this.updateLocalStateToken(data);
@@ -126,10 +122,6 @@ export class FrontendEventHandler {
    * Handle tool start events
    */
   private async handleToolStartEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('🔧 Tool started:', data.tool_name, data.tool_id);
-    }
-
     if (this.isLocalState()) {
       this.updateLocalStateToolStart(data);
     } else {
@@ -141,10 +133,6 @@ export class FrontendEventHandler {
    * Handle tool finalized events
    */
   private async handleToolFinalizedEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('🔧 Tool finalized:', data.tool_name, data.tool_id, data.args);
-    }
-
     if (this.isLocalState()) {
       this.updateLocalStateToolFinalized(data);
     } else {
@@ -156,10 +144,6 @@ export class FrontendEventHandler {
    * Handle tool result events
    */
   private async handleToolResultEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('📋 Tool result received:', data.tool_id, data.output);
-    }
-
     if (this.isLocalState()) {
       this.updateLocalStateToolResult(data);
     } else {
@@ -171,10 +155,6 @@ export class FrontendEventHandler {
    * Handle tool complete events
    */
   private async handleToolCompleteEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('✅ Tool completed:', data.tool_id);
-    }
-
     if (this.isLocalState()) {
       this.updateLocalStateToolComplete(data);
     } else {
@@ -186,10 +166,6 @@ export class FrontendEventHandler {
    * Handle complete events
    */
   private async handleCompleteEvent(data: StreamEvent): Promise<void> {
-    if (this.options.debug) {
-      console.log('🏁 Stream completed');
-    }
-
     if (this.isLocalState()) {
       this.updateLocalStateComplete(data);
     } else {
@@ -301,8 +277,22 @@ export class FrontendEventHandler {
   }
 
   private updateLocalStateToolComplete(data: StreamEvent): void {
-    // For local state, we might need to prepare for a new assistant message
-    // This is handled by the calling code
+    // Create a new assistant placeholder for the next streaming response
+    if (!this.localStateUpdater) return;
+    
+    const newAssistantPlaceholder: Event = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      segments: [{ type: 'text', text: '' }],
+      ts: Date.now()
+    };
+    
+    this.localStateUpdater(events => {
+      return [...events, newAssistantPlaceholder];
+    });
+    
+    // Update the assistant placeholder reference for future token updates
+    this.assistantPlaceholder = newAssistantPlaceholder;
   }
 
   private updateLocalStateComplete(data: StreamEvent): void {
@@ -322,162 +312,43 @@ export class FrontendEventHandler {
 
   /**
    * STORE STATE UPDATES (for existing /chat/[id] flow)
+   * NOTE: During streaming, we keep updates LOCAL and only update store on completion
    */
 
   private updateStoreStateToken(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.content) {
-      console.log('🚫 Token update skipped:', { hasConversationId: !!this.conversationId, hasStore: !!this.storeInstance, hasContent: !!data.content });
-      return;
+    // For store mode, only update when we have a local state updater (means we're tracking locally)
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateToken(data);
     }
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) {
-      console.log('❌ Conversation not found for token update:', { conversationId: this.conversationId, availableIds: Object.keys(store.conversations) });
-      return;
-    }
-    
-    console.log('✅ Updating store token for:', { conversationId: this.conversationId, content: data.content });
-
-    // Use the exact same logic as the original EventStream component
-    const placeholderEvent = conversation.events.find(e => e.id === this.assistantPlaceholder?.id);
-    
-    // Check if we need to create a new assistant event after tool calls
-    if (conversation.shouldCreateNewEvent && data.content.trim()) {
-      // Create a new assistant event for the final response after tool calls
-      const newAssistantEvent: Event = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        segments: [{ type: 'text', text: data.content }],
-        ts: Date.now()
-      };
-      
-      // Add the new assistant event at the end and update streaming ID
-      store.setConversation(this.conversationId, {
-        ...conversation,
-        events: [...conversation.events, newAssistantEvent],
-        streamingEventId: newAssistantEvent.id,
-        shouldCreateNewEvent: false
-      });
-    } else {
-      // Update the current streaming event
-      const streamingId = conversation.streamingEventId || this.assistantPlaceholder?.id;
-      const updatedEvents = conversation.events.map(event => 
-        event.id === streamingId 
-          ? { 
-              ...event, 
-              segments: event.segments.map(s => 
-                s.type === 'text' ? { ...s, text: s.text + data.content } : s
-              ),
-              ts: Date.now()
-            }
-          : event
-      );
-      
-      store.setConversation(this.conversationId, {
-        ...conversation,
-        events: updatedEvents,
-        shouldCreateNewEvent: false
-      });
-    }
+    // If no local state updater, we don't update the store during streaming (prevents infinite loops)
   }
 
   private updateStoreStateToolStart(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.tool_name) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    const streamingId = conversation.streamingEventId || this.assistantPlaceholder?.id;
-    const updatedEvents = conversation.events.map(event => 
-      event.id === streamingId 
-        ? { 
-            ...event, 
-            segments: [
-              ...event.segments,
-              {
-                type: 'tool_call' as const,
-                id: data.tool_id!,
-                name: data.tool_name!,
-                args: {}
-              }
-            ],
-            ts: Date.now()
-          }
-        : event
-    );
-    
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: updatedEvents
-    });
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateToolStart(data);
+    }
   }
 
   private updateStoreStateToolFinalized(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.args) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    const streamingId = conversation.streamingEventId || this.assistantPlaceholder?.id;
-    const updatedEvents = conversation.events.map(event => 
-      event.id === streamingId 
-        ? { 
-            ...event, 
-            segments: event.segments.map(segment => 
-              segment.type === 'tool_call' && segment.id === data.tool_id
-                ? { ...segment, args: data.args! }
-                : segment
-            ),
-            ts: Date.now()
-          }
-        : event
-    );
-    
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: updatedEvents
-    });
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateToolFinalized(data);
+    }
   }
 
   private updateStoreStateToolResult(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.output) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    const toolResultEvent: Event = {
-      id: crypto.randomUUID(),
-      role: 'tool',
-      segments: [{
-        type: 'tool_result',
-        id: data.tool_id,
-        output: data.output
-      }],
-      ts: Date.now()
-    };
-    
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: [...conversation.events, toolResultEvent]
-    });
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater) {
+      this.updateLocalStateToolResult(data);
+    }
   }
 
   private updateStoreStateToolComplete(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    // Mark that we should create a new event on the next token
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      shouldCreateNewEvent: true
-    });
+    // Delegate to local state updater which will create a new assistant placeholder
+    if (this.localStateUpdater) {
+      this.updateLocalStateToolComplete(data);
+    }
   }
 
   private updateStoreStateComplete(data: StreamEvent): void {
@@ -486,7 +357,8 @@ export class FrontendEventHandler {
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
     if (!conversation) return;
-
+    
+    // Mark streaming as complete
     store.setConversation(this.conversationId, {
       ...conversation,
       isStreaming: false,
@@ -507,6 +379,31 @@ export class FrontendEventHandler {
       events: conversation.events.slice(0, -2), // Remove user + assistant events
       isStreaming: false,
       streamingEventId: undefined
+    });
+  }
+
+  /**
+   * Finalize streaming by updating the store with completed events
+   * This should be called by the component when streaming is complete
+   */
+  finalizeStreamingInStore(completedEvents: Event[]): void {
+    if (!this.conversationId || !this.storeInstance) {
+      return;
+    }
+
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation) {
+      return;
+    }
+
+    // Update store with final, complete events
+    store.setConversation(this.conversationId, {
+      ...conversation,
+      events: completedEvents,
+      isStreaming: false,
+      streamingEventId: undefined,
+      shouldCreateNewEvent: false
     });
   }
 }

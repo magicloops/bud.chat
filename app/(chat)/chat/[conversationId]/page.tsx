@@ -1,8 +1,8 @@
 'use client';
 
-import { use, useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { use, useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { EventStream } from '@/components/EventStream';
 import { Loader2 } from 'lucide-react';
 import { 
@@ -14,7 +14,7 @@ import {
   useEventChatStore,
   Conversation,
   ConversationMeta,
-  Event 
+  Event
 } from '@/state/eventChatStore';
 import { 
   createGreetingEvent, 
@@ -36,46 +36,41 @@ interface ChatPageProps {
 
 export default function ChatPage({ params }: ChatPageProps) {
   const resolvedParams = use(params);
-  const conversationId = resolvedParams.conversationId;
+  const initialConversationId = resolvedParams.conversationId;
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Track if we've transitioned from new -> real ID to prevent re-renders
-  const hasTransitionedRef = useRef(false);
-  const realConversationIdRef = useRef<string | null>(null);
+  // Track the current conversation ID (may change from 'new' to real ID during streaming)
+  const [currentConversationId, setCurrentConversationId] = useState(initialConversationId);
   
-  // Check if this is a new conversation
-  const isNewConversation = conversationId === 'new' && !hasTransitionedRef.current;
+  // Use current conversation ID for all logic
+  const conversationId = currentConversationId;
+  const isNewConversation = conversationId === 'new';
   
-  // Use real conversation ID if we've transitioned, otherwise use URL ID
-  const effectiveConversationId = realConversationIdRef.current || conversationId;
+  // State for new conversations only
+  const budId = searchParams.get('bud');
+  const storeBud = useBud(budId || '');
+  const [bud, setBud] = useState<Bud | null>(null);
+  const [budLoading, setBudLoading] = useState(!!budId && isNewConversation);
   
-  // Generate temporary ID for new conversations (stable across renders)
-  const tempId = useMemo(() => 
-    isNewConversation ? crypto.randomUUID() : effectiveConversationId, 
-    [isNewConversation, effectiveConversationId]
+  // Generate temporary ID for new conversations (stable)
+  const tempConversationId = useMemo(() => 
+    isNewConversation ? crypto.randomUUID() : conversationId, 
+    [isNewConversation, conversationId]
   );
-  
-  // Use tempId for new conversations, effectiveConversationId for existing
-  const workingConversationId = isNewConversation ? tempId : effectiveConversationId;
   
   const selectedWorkspace = useSelectedWorkspace();
   const setSelectedWorkspace = useSetSelectedWorkspace();
   const setConversation = useSetConversation();
   const addConversationToWorkspace = useAddConversationToWorkspace();
   
-  // New conversation state (only for new conversations)
-  const budId = searchParams.get('bud');
-  const storeBud = useBud(budId || '');
-  const [bud, setBud] = useState<Bud | null>(null);
-  const [budLoading, setBudLoading] = useState(!!budId && isNewConversation);
-  const [events, setEvents] = useState<Event[]>([]);
-  const [, setIsStreaming] = useState(false);
+  // Use temp ID for new conversations, real ID for existing
+  const workingConversationId = isNewConversation ? tempConversationId : conversationId;
   
   // Check if conversation is already in store
   const existingConversation = useConversation(workingConversationId);
 
-  // Fetch conversation from server if not in store and not a new conversation
+  // Fetch conversation from server if not in store
   const { data: conversationData, isLoading, error } = useQuery({
     queryKey: ['conversation', conversationId],
     queryFn: async () => {
@@ -87,155 +82,14 @@ export default function ChatPage({ params }: ChatPageProps) {
       const data = await response.json();
       return data;
     },
-    enabled: !isNewConversation && !hasTransitionedRef.current && !!conversationId && !existingConversation,
+    enabled: !isNewConversation && !!conversationId && !existingConversation,
     staleTime: Infinity, // Don't refetch unless manually invalidated
     gcTime: Infinity,
   });
 
-  // Load bud for new conversations
+  // Load conversation data into store when received from server
   useEffect(() => {
-    if (!isNewConversation || hasTransitionedRef.current) return;
-    
-    const loadBud = async () => {
-      if (!budId) {
-        // No bud specified, use default events and clear any custom theme
-        setEvents([
-          createGreetingEvent(),
-          ...createSystemEvents()
-        ]);
-        
-        // Clear any existing custom theme
-        const root = document.documentElement;
-        const commonThemeVars = [
-          '--background', '--foreground', '--card', '--card-foreground',
-          '--popover', '--popover-foreground', '--primary', '--primary-foreground',
-          '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
-          '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
-          '--border', '--input', '--ring'
-        ];
-        
-        commonThemeVars.forEach(varName => {
-          root.style.removeProperty(varName);
-        });
-        
-        setBudLoading(false);
-        return;
-      }
-
-      try {
-        setBudLoading(true);
-        const loadedBud = await budManager.getBud(budId);
-        setBud(loadedBud);
-        
-        // Initialize events with bud configuration
-        const budEvents = createBudInitialEvents(loadedBud);
-        setEvents(budEvents);
-        
-        // Apply bud's theme or reset to default
-        const budConfig = loadedBud.default_json as Record<string, any>;
-        const root = document.documentElement;
-        
-        // Clear existing theme first
-        const commonThemeVars = [
-          '--background', '--foreground', '--card', '--card-foreground',
-          '--popover', '--popover-foreground', '--primary', '--primary-foreground',
-          '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
-          '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
-          '--border', '--input', '--ring'
-        ];
-        
-        commonThemeVars.forEach(varName => {
-          root.style.removeProperty(varName);
-        });
-        
-        if (budConfig?.customTheme) {
-          // Apply bud's custom theme
-          Object.entries(budConfig.customTheme.cssVariables).forEach(([key, value]) => {
-            root.style.setProperty(key, value as string);
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load bud:', error);
-        // Fallback to default events
-        setEvents([
-          createGreetingEvent(),
-          ...createSystemEvents()
-        ]);
-      } finally {
-        setBudLoading(false);
-      }
-    };
-
-    loadBud();
-  }, [budId, isNewConversation, conversationId, tempId, selectedWorkspace, setConversation]);
-  
-  // Watch for bud updates from store and regenerate events (new conversations only)
-  useEffect(() => {
-    if (!isNewConversation || !budId || !storeBud || hasTransitionedRef.current) return;
-    
-    // Update local bud state
-    setBud(storeBud);
-    
-    // Regenerate events with updated bud configuration
-    const budEvents = createBudInitialEvents(storeBud);
-    setEvents(budEvents);
-    
-    // Apply updated theme
-    const budConfig = storeBud.default_json as Record<string, any>;
-    const root = document.documentElement;
-    
-    // Clear existing theme first
-    const commonThemeVars = [
-      '--background', '--foreground', '--card', '--card-foreground',
-      '--popover', '--popover-foreground', '--primary', '--primary-foreground',
-      '--secondary', '--secondary-foreground', '--muted', '--muted-foreground',
-      '--accent', '--accent-foreground', '--destructive', '--destructive-foreground',
-      '--border', '--input', '--ring'
-    ];
-    
-    commonThemeVars.forEach(varName => {
-      root.style.removeProperty(varName);
-    });
-    
-    if (budConfig?.customTheme) {
-      // Apply bud's custom theme
-      Object.entries(budConfig.customTheme.cssVariables).forEach(([key, value]) => {
-        root.style.setProperty(key, value as string);
-      });
-    }
-  }, [budId, storeBud, isNewConversation]);
-
-  // Load conversation data into store when received from server (existing conversations only)
-  useEffect(() => {
-    if (isNewConversation || hasTransitionedRef.current) return;
-    
-    console.log('🔄 [EFFECT] Conversation loading effect triggered', {
-      timestamp: Date.now(),
-      conversationId,
-      hasConversationData: !!conversationData,
-      hasExistingConversation: !!existingConversation,
-      existingEventCount: existingConversation?.events?.length || 0,
-      trigger: 'dependency change'
-    });
-    
     if (conversationData && (!existingConversation || existingConversation.events.length === 0)) {
-      
-      console.log('📊 [LOAD] Loading conversation from API', {
-        timestamp: Date.now(),
-        conversationId,
-        apiEventCount: conversationData?.events?.length || 0,
-        existingEventCount: existingConversation?.events?.length || 0,
-        willOverwrite: !existingConversation || existingConversation.events.length === 0
-      });
-      
-      console.log('🔍 Loading conversation data:', {
-        id: conversationData.id,
-        assistant_name: conversationData.assistant_name,
-        assistant_avatar: conversationData.assistant_avatar,
-        effective_assistant_name: conversationData.effective_assistant_name,
-        effective_assistant_avatar: conversationData.effective_assistant_avatar,
-        source_bud_id: conversationData.source_bud_id
-      });
       
       const conversationMeta: ConversationMeta = {
         id: conversationData.id,
@@ -272,211 +126,256 @@ export default function ChatPage({ params }: ChatPageProps) {
         setSelectedWorkspace(conversationData.workspace_id);
       }
     }
-  }, [conversationData, existingConversation, setConversation, selectedWorkspace, setSelectedWorkspace, isNewConversation]);
+  }, [conversationData, existingConversation, setConversation, selectedWorkspace, setSelectedWorkspace, conversationId]);
   
-  // Handle sending messages (unified for both new and existing conversations)
-  const handleSendMessage = useCallback(async (content: string) => {
-    if (!selectedWorkspace) {
-      console.error('No workspace selected');
-      return;
-    }
-
-    if (isNewConversation) {
-      // NEW CONVERSATION FLOW: Create temporary conversation and stream immediately
-      const userEvent = createUserEvent(content);
-      const assistantPlaceholder = createAssistantPlaceholder();
-      
-      // Get current events from store
-      const currentConversation = useEventChatStore.getState().conversations[tempId];
-      const currentEvents = currentConversation?.events || [];
-      const newEvents = [...currentEvents, userEvent, assistantPlaceholder];
-      
-      // Store in Zustand with temporary ID immediately
-      const store = useEventChatStore.getState();
-      const budConfig = bud?.default_json as Record<string, any>;
-      
-      const tempConversationMeta: ConversationMeta = {
-        id: tempId,
-        title: 'New Chat',
-        workspace_id: selectedWorkspace,
-        source_bud_id: bud?.id,
-        assistant_name: budConfig?.name || 'Assistant',
-        assistant_avatar: budConfig?.avatar || '🤖',
-        model_config_overrides: undefined,
-        created_at: new Date().toISOString()
-      };
-      
-      const tempConversation = {
-        id: tempId,
-        events: newEvents,
-        isStreaming: true,
-        streamingEventId: assistantPlaceholder.id,
-        meta: tempConversationMeta
-      };
-      
-      store.setConversation(tempId, tempConversation);
-      addConversationToWorkspace(selectedWorkspace, tempId);
-      setIsStreaming(true);
+  // Load bud for new conversations
+  useEffect(() => {
+    if (!isNewConversation) return;
+    
+    const loadBud = async () => {
+      if (!budId) {
+        // No bud specified, create default conversation in store
+        const defaultEvents = [
+          createGreetingEvent(),
+          ...createSystemEvents()
+        ];
+        
+        const defaultConversation = {
+          id: tempConversationId,
+          events: defaultEvents,
+          isStreaming: false,
+          meta: {
+            id: tempConversationId,
+            title: 'New Chat',
+            workspace_id: selectedWorkspace || '',
+            assistant_name: 'Assistant',
+            assistant_avatar: '🤖',
+            created_at: new Date().toISOString()
+          }
+        };
+        
+        setConversation(tempConversationId, defaultConversation);
+        setBudLoading(false);
+        return;
+      }
 
       try {
-        // Start streaming immediately
-        console.log('📡 Starting streaming request...');
-        const response = await fetch('/api/chat-new', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messages: [...currentEvents, userEvent],
-            workspaceId: selectedWorkspace,
-            budId: bud?.id,
-            model: bud ? (bud.default_json as Record<string, any>).model || 'gpt-4o' : 'gpt-4o'
-          })
+        setBudLoading(true);
+        const loadedBud = await budManager.getBud(budId);
+        setBud(loadedBud);
+        
+        const budEvents = createBudInitialEvents(loadedBud);
+        const budConfig = loadedBud.default_json as Record<string, any>;
+        
+        const budConversation = {
+          id: tempConversationId,
+          events: budEvents,
+          isStreaming: false,
+          meta: {
+            id: tempConversationId,
+            title: 'New Chat',
+            workspace_id: selectedWorkspace || '',
+            source_bud_id: loadedBud.id,
+            assistant_name: budConfig?.name || 'Assistant',
+            assistant_avatar: budConfig?.avatar || '🤖',
+            created_at: new Date().toISOString()
+          }
+        };
+        
+        setConversation(tempConversationId, budConversation);
+        
+        // Apply theme
+        if (budConfig?.customTheme) {
+          const root = document.documentElement;
+          Object.entries(budConfig.customTheme.cssVariables).forEach(([key, value]) => {
+            root.style.setProperty(key, value as string);
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load bud:', error);
+        // Fallback
+        const fallbackEvents = [
+          createGreetingEvent(),
+          ...createSystemEvents()
+        ];
+        
+        const fallbackConversation = {
+          id: tempConversationId,
+          events: fallbackEvents,
+          isStreaming: false,
+          meta: {
+            id: tempConversationId,
+            title: 'New Chat',
+            workspace_id: selectedWorkspace || '',
+            assistant_name: 'Assistant',
+            assistant_avatar: '🤖',
+            created_at: new Date().toISOString()
+          }
+        };
+        
+        setConversation(tempConversationId, fallbackConversation);
+      } finally {
+        setBudLoading(false);
+      }
+    };
+
+    loadBud();
+  }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation]);
+  
+  // Local streaming state for new conversations
+  const [streamingEvents, setStreamingEvents] = useState<Event[] | null>(null);
+  const [isLocalStreaming, setIsLocalStreaming] = useState(false);
+  
+  // Clear streaming events when store conversation is ready (for seamless transitions)
+  useEffect(() => {
+    if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents) {
+      setStreamingEvents(null);
+      setIsLocalStreaming(false);
+    }
+  }, [isNewConversation, existingConversation, streamingEvents]);
+
+  // Message handler for new conversations
+  const handleSendMessage = useCallback(async (content: string) => {
+    if (!selectedWorkspace || !isNewConversation) return;
+
+    const currentConversation = useEventChatStore.getState().conversations[tempConversationId];
+    const currentEvents = currentConversation?.events || [];
+    
+    const userEvent = createUserEvent(content);
+    const assistantPlaceholder = createAssistantPlaceholder();
+    const newEvents = [...currentEvents, userEvent, assistantPlaceholder];
+    
+    // Set local streaming state instead of updating store immediately
+    setStreamingEvents(newEvents);
+    setIsLocalStreaming(true);
+    
+    // Only update store with user event + placeholder (no streaming updates)
+    const budConfig = bud?.default_json as Record<string, any>;
+    const updatedConversation = {
+      ...currentConversation!,
+      events: [...currentEvents, userEvent, assistantPlaceholder],
+      isStreaming: true,
+      streamingEventId: assistantPlaceholder.id
+    };
+    
+    const store = useEventChatStore.getState();
+    store.setConversation(tempConversationId, updatedConversation);
+    addConversationToWorkspace(selectedWorkspace, tempConversationId);
+
+    try {
+      const response = await fetch('/api/chat-new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [...currentEvents, userEvent],
+          workspaceId: selectedWorkspace,
+          budId: bud?.id,
+          model: bud ? (bud.default_json as Record<string, any>).model || 'gpt-4o' : 'gpt-4o'
+        })
+      });
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const eventHandler = new FrontendEventHandler(
+        tempConversationId,
+        useEventChatStore,
+        { debug: true }
+      );
+      
+      // Set up local state updater for streaming and track final events
+      let finalStreamingEvents: Event[] = newEvents; // Track events outside React state
+      
+      eventHandler.setLocalStateUpdater((updater) => {
+        setStreamingEvents(prevEvents => {
+          if (!prevEvents) return prevEvents;
+          const updated = updater(prevEvents);
+          finalStreamingEvents = updated; // Keep sync'd copy for transition
+          return updated;
         });
+      }, assistantPlaceholder);
+      
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+      const decoder = new TextDecoder();
+      let realConversationId: string | null = null;
 
-        // Process streaming with unified handler
-        let realConversationId: string | null = null;
-        let hasTransitioned = false;
-        
-        const eventHandler = new FrontendEventHandler(
-          tempId,
-          useEventChatStore,
-          { debug: true }
-        );
-        
-        eventHandler.setLocalStateUpdater(null, assistantPlaceholder);
-        
-        const reader = response.body?.getReader();
-        if (!reader) {
-          throw new Error('No response body');
-        }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-        const decoder = new TextDecoder();
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'conversationCreated') {
+                realConversationId = data.conversationId;
+                addConversationToWorkspace(selectedWorkspace, realConversationId);
+              } else if (data.type === 'complete') {
+                setIsLocalStreaming(false);
                 
-                if (data.type === 'conversationCreated') {
-                  realConversationId = data.conversationId;
-                  console.log('💾 Conversation created:', realConversationId);
-                  
-                  if (selectedWorkspace && realConversationId) {
-                    const conversationMetaForWorkspace: ConversationMeta = {
+                if (realConversationId && finalStreamingEvents) {
+                  // Create final conversation with completed streaming events
+                  const tempConv = store.conversations[tempConversationId];
+                  if (tempConv) {
+                    const realConv = {
+                      ...tempConv,
                       id: realConversationId,
-                      title: 'New Chat',
-                      workspace_id: selectedWorkspace,
-                      source_bud_id: bud?.id,
-                      assistant_name: (bud?.default_json as Record<string, any>)?.name,
-                      assistant_avatar: (bud?.default_json as Record<string, any>)?.avatar,
-                      model_config_overrides: undefined,
-                      mcp_config_overrides: undefined,
-                      created_at: new Date().toISOString()
+                      events: finalStreamingEvents, // Use final streaming events
+                      isStreaming: false,
+                      streamingEventId: undefined,
+                      meta: { ...tempConv.meta, id: realConversationId }
                     };
                     
-                    addConversationToWorkspace(selectedWorkspace, realConversationId);
-                  }
-                } else if (data.type === 'debug') {
-                  // Handle debug events
-                  if (typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true') {
-                    const debugEvent = {
-                      id: Math.random().toString(36).substr(2, 9),
-                      timestamp: new Date().toISOString(),
-                      type: data.debug_type,
-                      data: data.data,
-                      conversationId: realConversationId || 'new-conversation'
-                    };
-                    window.dispatchEvent(new CustomEvent('debug-event', { detail: debugEvent }));
-                  }
-                } else if (data.type === 'complete') {
-                  console.log('🏁 Complete event received', { realConversationId, tempId, hasTransitioned });
-                  setIsStreaming(false);
-                  
-                  // SEAMLESS TRANSITION: Update store and URL without page navigation
-                  if (realConversationId && tempId && !hasTransitioned) {
-                    hasTransitioned = true;
-                    console.log('🔄 Seamless transition: renaming temp conversation', {
-                      from: tempId,
-                      to: realConversationId
-                    });
+                    store.setConversation(realConversationId, realConv);
+                    store.removeConversation(tempConversationId);
+                    store.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
                     
-                    const store = useEventChatStore.getState();
-                    const tempConversation = store.conversations[tempId];
-                    
-                    if (tempConversation) {
-                      // Copy conversation to real ID (don't remove temp yet)
-                      const updatedConversation = {
-                        ...tempConversation,
-                        id: realConversationId,
-                        isStreaming: false,
-                        streamingEventId: undefined,
-                        meta: {
-                          ...tempConversation.meta,
-                          id: realConversationId
-                        }
-                      };
-                      
-                      // Set conversation with real ID
-                      store.setConversation(realConversationId, updatedConversation);
-                      
-                      // Update workspace conversation list
-                      store.addConversationToWorkspace(selectedWorkspace, realConversationId);
-                      
-                      // Update our working conversation ID to the real one
-                      realConversationIdRef.current = realConversationId;
-                      hasTransitionedRef.current = true;
-                      
-                      // Remove temp conversation AFTER we've switched (prevents flash)
-                      setTimeout(() => {
-                        const currentStore = useEventChatStore.getState();
-                        currentStore.removeConversation(tempId);
-                        currentStore.removeConversationFromWorkspace(selectedWorkspace, tempId);
-                      }, 100);
-                    }
-                    
-                    // NATIVE BROWSER URL UPDATE: Use History API directly
+                    // Update URL without page navigation - shallow update only
                     window.history.replaceState(
                       { ...window.history.state },
                       '',
                       `/chat/${realConversationId}`
                     );
                     
-                    console.log('🎯 Seamless transition complete - URL updated via native History API');
+                    // Notify other components that the URL changed
+                    window.dispatchEvent(new CustomEvent('urlchange', { 
+                      detail: { pathname: `/chat/${realConversationId}` }
+                    }));
+                    
+                    // Update the current conversation ID for this component
+                    setCurrentConversationId(realConversationId);
+                    
+                    // Clear local streaming state since store now has the data
+                    setStreamingEvents(null);
+                    setIsLocalStreaming(false);
+                  } else {
+                    console.error('No temp conversation found for transition');
                   }
                 } else {
-                  // Handle all other streaming events
-                  await eventHandler.handleStreamEvent(data);
+                  console.error('Missing realConversationId or finalStreamingEvents');
                 }
-              } catch (e) {
-                console.error('Error parsing stream data:', e);
+              } else {
+                await eventHandler.handleStreamEvent(data);
               }
+            } catch (e) {
+              console.error('Error parsing stream data:', e);
             }
           }
         }
-      } catch (error) {
-        console.error('Failed to start streaming:', error);
-        setIsStreaming(false);
       }
-    } else {
-      // EXISTING CONVERSATION FLOW: Use existing EventStream logic
-      // This will be handled by the EventStream component's onSendMessage prop
-      console.log('Existing conversation flow - handled by EventStream component');
+    } catch (error) {
+      console.error('Failed to start streaming:', error);
+      setIsLocalStreaming(false);
+      setStreamingEvents(null);
     }
-  }, [selectedWorkspace, addConversationToWorkspace, router, bud, isNewConversation, tempId, setConversation]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, router]);
 
-  // Show loading state (layout handles auth)
+  // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -508,8 +407,9 @@ export default function ChatPage({ params }: ChatPageProps) {
     );
   }
 
-  // Show loading state while conversation loads (existing conversations only)
-  if (!isNewConversation && !existingConversation && !conversationData) {
+  // Show loading state while conversation loads (existing only)
+  // BUT: if we have local streaming state, continue showing that instead of welcome screen
+  if (!isNewConversation && !existingConversation && !conversationData && !streamingEvents) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -517,20 +417,27 @@ export default function ChatPage({ params }: ChatPageProps) {
     );
   }
 
-  // Render chat interface with unified store state (no local events)
-  // Always use store state and effectiveConversationId for seamless transitions
+  // Render chat interface
   const placeholder = isNewConversation && bud 
     ? `Chat with ${(bud.default_json as Record<string, any>).name || 'your bud'}...`
     : isNewConversation 
-    ? 'Start a new conversation...' 
+    ? 'Start a new conversation...'
     : 'Type your message...';
 
+  // Determine which data source to use
+  const hasStoreConversation = existingConversation && existingConversation.events.length > 0;
+  const shouldUseStreamingEvents = streamingEvents && streamingEvents.length > 0;
+  const shouldUseStoreData = hasStoreConversation && !shouldUseStreamingEvents;
+  
   return (
     <EventStream
-      conversationId={workingConversationId}
+      conversationId={!isNewConversation ? workingConversationId : undefined}
+      events={shouldUseStreamingEvents ? streamingEvents : undefined}
       onSendMessage={isNewConversation ? handleSendMessage : undefined}
       placeholder={placeholder}
       budData={isNewConversation ? bud : undefined}
+      isStreaming={shouldUseStreamingEvents ? isLocalStreaming : undefined}
     />
   );
+
 }
