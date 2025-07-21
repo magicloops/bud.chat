@@ -2,7 +2,7 @@
 
 import { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event, Conversation } from '@/state/eventChatStore';
 import { cn } from '@/lib/utils';
@@ -12,7 +12,6 @@ import {
   Trash2,
   GitBranch,
   MoreHorizontal,
-  Bot,
   AlertCircle,
   Wrench,
   ChevronDown,
@@ -44,8 +43,8 @@ interface EventItemProps {
 export const EventItem = memo(function EventItem({
   event,
   conversation,
-  index = 0,
-  isLast,
+  index: _index = 0,
+  isLast: _isLast,
   isStreaming = false,
   onEdit,
   onDelete,
@@ -134,7 +133,7 @@ export const EventItem = memo(function EventItem({
     }
   }, []);
 
-  const isOptimistic = false; // Events don't have optimistic state like messages did
+  // const isOptimistic = false; // Events don't have optimistic state like messages did
   const isPending = false;
   const canEdit = isUser && !isPending;
   const canDelete = !isPending;
@@ -235,7 +234,7 @@ export const EventItem = memo(function EventItem({
                 {assistantName}
               </span>
               <span className="text-xs text-muted-foreground">
-                · {formatEventDuration(event, index)}
+                · {formatEventDuration(event, _index)}
               </span>
             </div>
             <div className="relative">
@@ -264,8 +263,8 @@ export const EventItem = memo(function EventItem({
                     const hasResult = resultSegment !== undefined;
                     const hasError = resultSegment && resultSegment.output && typeof resultSegment.output === 'object' && 'error' in resultSegment.output;
                     const resultContent = hasError 
-                      ? (resultSegment.output as any).error 
-                      : resultSegment ? ((resultSegment.output as any).content || JSON.stringify(resultSegment.output, null, 2)) : null;
+                      ? (resultSegment.output as { error?: string }).error 
+                      : resultSegment ? ((resultSegment.output as { content?: string }).content || JSON.stringify(resultSegment.output, null, 2)) : null;
                   
                     const isExpanded = expandedToolCalls.has(toolCallSegment.id);
                   
@@ -454,7 +453,7 @@ export const EventItem = memo(function EventItem({
               {isUser ? 'You' : (isTool || isToolResult) ? 'Tool' : assistantName}
             </span>
             <span className="text-xs text-muted-foreground">
-              · {isStreaming ? 'typing...' : formatEventDuration(event, index)}
+              · {isStreaming ? 'typing...' : formatEventDuration(event, _index)}
             </span>
           </div>
           <div className="relative">
@@ -483,8 +482,8 @@ export const EventItem = memo(function EventItem({
                   const hasResult = resultSegment !== undefined;
                   const hasError = resultSegment && resultSegment.output && typeof resultSegment.output === 'object' && 'error' in resultSegment.output;
                   const resultContent = hasError 
-                    ? (resultSegment.output as any).error 
-                    : resultSegment ? ((resultSegment.output as any).content || JSON.stringify(resultSegment.output, null, 2)) : null;
+                    ? (resultSegment.output as { error?: string }).error 
+                    : resultSegment ? ((resultSegment.output as { content?: string }).content || JSON.stringify(resultSegment.output, null, 2)) : null;
                   
                   const isExpanded = expandedToolCalls.has(toolCallSegment.id);
                   

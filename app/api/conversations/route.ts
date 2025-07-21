@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
       let effectiveAssistantAvatar = conversation.assistant_avatar;
 
       // If no custom name/avatar and there's a source bud, use bud defaults
-      const budData = (conversation as any).buds;
+      const budData = conversation.buds;
       if ((!effectiveAssistantName || !effectiveAssistantAvatar) && budData) {
         const budConfig = budData.default_json;
         if (!effectiveAssistantName && budConfig.name) {
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Return conversation with effective identity, remove nested bud data
-      const { buds, ...conversationData } = conversation;
+      const { buds: _buds, ...conversationData } = conversation;
       return {
         ...conversationData,
         effective_assistant_name: effectiveAssistantName || 'Assistant',

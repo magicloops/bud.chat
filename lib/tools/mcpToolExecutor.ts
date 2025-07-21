@@ -1,4 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
+import { Database } from '@/lib/types/database';
+
+// MCP Client interface (based on @modelcontextprotocol/sdk)
+interface MCPClient {
+  connect(transport: any): Promise<void>;
+  close(): Promise<void>;
+  callTool(params: { name: string; arguments: Record<string, unknown> }): Promise<any>;
+  listTools(): Promise<{ tools?: any[] }>;
+}
 
 export interface ToolCall {
   id: string;
@@ -62,8 +71,8 @@ export class MCPToolExecutor {
    * Get MCP configuration for a bud and workspace
    */
   private async getMCPConfiguration(budId: string, workspaceId: string): Promise<{
-    servers: any[];
-    config: any;
+    servers: Database['public']['Tables']['mcp_servers']['Row'][];
+    config: Record<string, unknown>;
   } | null> {
     const supabase = await createClient();
     
@@ -100,7 +109,7 @@ export class MCPToolExecutor {
    */
   private async executeMCPCalls(
     toolCalls: ToolCall[],
-    mcpConfig: { servers: any[]; config: any }
+    mcpConfig: { servers: Database['public']['Tables']['mcp_servers']['Row'][]; config: Record<string, unknown> }
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
     
@@ -142,7 +151,7 @@ export class MCPToolExecutor {
   /**
    * Execute a single tool call
    */
-  private async executeToolCall(mcpClient: any, toolCall: ToolCall): Promise<ToolResult> {
+  private async executeToolCall(mcpClient: MCPClient, toolCall: ToolCall): Promise<ToolResult> {
     try {
       if (this.options.debug) {
         console.log('🔧 Executing tool call:', {

@@ -8,10 +8,10 @@ import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler';
 import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor';
 import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events';
 import { saveEvent, getConversationEvents } from '@/lib/db/events';
-import { eventsToAnthropicMessages, extractPendingToolCalls } from '@/lib/providers/anthropic';
+import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
 import { eventsToOpenAIMessages } from '@/lib/providers/openai';
 import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
-import { generateKeyBetween } from 'fractional-indexing';
+;
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -148,7 +148,7 @@ export async function POST(
           const eventBuilder = new EventStreamBuilder('assistant');
           
           // Main conversation loop - handles tool calls automatically
-          let maxIterations = 10;
+          const maxIterations = 10;
           let iteration = 0;
           let shouldContinue = true;
           
@@ -204,7 +204,7 @@ export async function POST(
               const { messages: anthropicMessages, system } = eventsToAnthropicMessages(events);
               
               // Get available tools if budId is provided
-              let tools: any[] = [];
+              let tools: Anthropic.Tool[] = [];
               if (conversation.source_bud_id) {
                 try {
                   const { data: bud } = await supabase

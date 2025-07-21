@@ -44,7 +44,6 @@ export default function EventChatInterface({
   const {
     events,
     isStreaming,
-    streamingEventId,
     error,
     sendMessage,
     stopStreaming,

@@ -167,7 +167,7 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               required
             />
             <p className="text-xs text-muted-foreground mt-1">
-              This defines your bud's personality and instructions.
+              This defines your bud&apos;s personality and instructions.
             </p>
           </div>
           

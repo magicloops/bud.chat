@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     
     // Add member workspaces (skip if already owned)
     memberWorkspaces?.forEach(member => {
-      const workspace = (member as any).workspaces;
+      const workspace = member.workspaces;
       if (!allWorkspaces.has(workspace.id)) {
         allWorkspaces.set(workspace.id, workspace);
       }

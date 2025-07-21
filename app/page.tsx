@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { Sidebar } from '@/components/Sidebar';
@@ -13,7 +12,6 @@ import { BudSelectionGrid } from '@/components/BudSelectionGrid';
 
 export default function HomePage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
   const selectedWorkspace = useSelectedWorkspace();
   
   const [sidebarOpen, setSidebarOpen] = useState(true);

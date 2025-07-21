@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 import { getConversationEvents } from '@/lib/db/events';
+import { Database } from '@/lib/types/database';
 
 export async function GET(
   request: NextRequest,
@@ -51,9 +52,9 @@ export async function GET(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = (conversation as any).workspace;
+    const workspace = conversation.workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member: any) => member.user_id === user.id
+      (member) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });
@@ -64,7 +65,7 @@ export async function GET(
     let effectiveAssistantAvatar = conversation.assistant_avatar;
 
     // If no custom name/avatar and there's a source bud, use bud defaults
-    const buds = (conversation as any).buds;
+    const buds = conversation.buds;
     if ((!effectiveAssistantName || !effectiveAssistantAvatar) && buds) {
       const budConfig = buds.default_json;
       if (!effectiveAssistantName && budConfig.name) {
@@ -77,7 +78,7 @@ export async function GET(
 
     // Add effective identity to response
     // Destructure to exclude buds from response
-    const { buds: _, ...conversationWithoutBuds } = conversation as any;
+    const { buds: _, ...conversationWithoutBuds } = conversation;
     const responseData = {
       ...conversationWithoutBuds,
       effective_assistant_name: effectiveAssistantName || 'Assistant',
@@ -145,16 +146,16 @@ export async function PATCH(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = (conversation as any).workspace;
+    const workspace = conversation.workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member: any) => member.user_id === user.id
+      (member) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });
     }
 
     // Prepare update data - only include fields that are not undefined
-    const updateData: any = {};
+    const updateData: Partial<Database['public']['Tables']['conversations']['Update']> = {};
     if (title !== undefined) updateData.title = title;
     if (assistant_name !== undefined) updateData.assistant_name = assistant_name;
     if (assistant_avatar !== undefined) updateData.assistant_avatar = assistant_avatar;
@@ -215,9 +216,9 @@ export async function DELETE(
     }
 
     // Check if user is a member of the workspace  
-    const workspace = (conversation as any).workspace;
+    const workspace = conversation.workspace;
     const isMember = workspace?.workspace_members?.some(
-      (member: any) => member.user_id === user.id
+      (member) => member.user_id === user.id
     );
     if (!isMember) {
       return new Response('Access denied', { status: 403 });

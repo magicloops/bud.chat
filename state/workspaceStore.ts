@@ -8,8 +8,7 @@ import {
   WorkspaceMember, 
   Bud, 
   WorkspaceId, 
-  BudId,
-  BudConfig
+  BudId
 } from '@/lib/types';
 
 interface WorkspaceStore {
@@ -55,7 +54,7 @@ interface WorkspaceStore {
 export const useWorkspaceStore = create<WorkspaceStore>()(
   subscribeWithSelector(
     persist(
-      immer((set, get) => ({
+      immer((set) => ({
         // Initial state
         workspaces: {},
         members: {},

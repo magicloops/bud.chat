@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useEffect } from 'react';
+import React, { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -24,8 +24,8 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
         rehypePlugins={[rehypeHighlight]}
         components={{
         // Custom styling for different elements
-          code: ({ node, className, children, ...props }: any) => {
-            const inline = (props as any)?.inline;
+          code: ({ node: _node, className, children, ...props }: any) => {
+            const inline = (props as { inline?: boolean })?.inline;
             const match = /language-(\w+)/.exec(className || '');
             return !inline && match ? (
               <pre className="bg-muted rounded-md p-1 overflow-x-auto my-2 w-0 min-w-full">

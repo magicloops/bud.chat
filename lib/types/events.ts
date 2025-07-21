@@ -121,7 +121,7 @@ export class EventLog {
   }
 
   // Convert to provider-specific message format
-  toProviderMessages(provider: 'anthropic' | 'openai'): any[] {
+  toProviderMessages(provider: 'anthropic' | 'openai'): unknown[] {
     if (provider === 'anthropic') {
       return this.toAnthropicMessages();
     } else if (provider === 'openai') {
@@ -145,8 +145,8 @@ export class EventLog {
     return '';
   }
 
-  private toAnthropicMessages(): any[] {
-    const messages: any[] = [];
+  private toAnthropicMessages(): unknown[] {
+    const messages: unknown[] = [];
     
     for (let i = 0; i < this.events.length; i++) {
       const event = this.events[i];
@@ -156,7 +156,7 @@ export class EventLog {
         continue;
       }
 
-      const content: any[] = [];
+      const content: unknown[] = [];
       
       for (const segment of event.segments) {
         switch (segment.type) {
@@ -201,8 +201,8 @@ export class EventLog {
     return messages;
   }
 
-  private toOpenAIMessages(): any[] {
-    const messages: any[] = [];
+  private toOpenAIMessages(): unknown[] {
+    const messages: unknown[] = [];
     
     for (const event of this.events) {
       if (event.role === 'tool') {

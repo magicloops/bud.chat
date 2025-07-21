@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore } from '@/state/eventChatStore';
+import { Bud } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { getDefaultModel } from '@/lib/modelMapping';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
-import { OptimisticStateManager } from '@/lib/optimistic/stateTransition';
 
 interface EventStreamProps {
   // For local state (new conversations)
@@ -17,7 +17,7 @@ interface EventStreamProps {
   isStreaming?: boolean
   onSendMessage?: (content: string) => void | Promise<void>
   placeholder?: string
-  budData?: any // Bud data for optimistic assistant identity
+  budData?: Bud // Bud data for optimistic assistant identity
   
   // For server state (existing conversations) 
   conversationId?: string
@@ -60,7 +60,7 @@ export function EventStream({
     }
   } : null;
   
-  const handleEventSent = (eventId: string) => {
+  const handleEventSent = (_eventId: string) => {
     // For server-state conversations, the store handles updates
     // For local-state conversations, the parent component handles updates
   };
