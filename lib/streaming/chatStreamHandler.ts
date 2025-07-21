@@ -126,7 +126,7 @@ export class ChatStreamHandler {
    */
   async handleOpenAIStream(stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>): Promise<void> {
     try {
-      let activeToolCalls = new Map<number, { id: string; name: string; args: string }>();
+      const activeToolCalls = new Map<number, { id: string; name: string; args: string }>();
 
       for await (const chunk of stream) {
         const choice = chunk.choices?.[0];

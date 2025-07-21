@@ -1,7 +1,7 @@
 'use client';
 
 import { use, useEffect, useState, useCallback, useMemo } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { EventStream } from '@/components/EventStream';
 import { Loader2 } from 'lucide-react';
@@ -27,7 +27,6 @@ import {
   budManager
 } from '@/lib/budHelpers';
 import { Bud } from '@/lib/types';
-import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
 
 interface ChatPageProps {
@@ -37,8 +36,8 @@ interface ChatPageProps {
 export default function ChatPage({ params }: ChatPageProps) {
   const resolvedParams = use(params);
   const initialConversationId = resolvedParams.conversationId;
-  const router = useRouter();
   const searchParams = useSearchParams();
+  const router = useRouter();
   
   // Track the current conversation ID (may change from 'new' to real ID during streaming)
   const [currentConversationId, setCurrentConversationId] = useState(initialConversationId);
@@ -49,7 +48,6 @@ export default function ChatPage({ params }: ChatPageProps) {
   
   // State for new conversations only
   const budId = searchParams.get('bud');
-  const storeBud = useBud(budId || '');
   const [bud, setBud] = useState<Bud | null>(null);
   const [budLoading, setBudLoading] = useState(!!budId && isNewConversation);
   
@@ -165,7 +163,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         setBud(loadedBud);
         
         const budEvents = createBudInitialEvents(loadedBud);
-        const budConfig = loadedBud.default_json as Record<string, any>;
+        const budConfig = loadedBud.default_json;
         
         const budConversation = {
           id: tempConversationId,
@@ -250,7 +248,6 @@ export default function ChatPage({ params }: ChatPageProps) {
     setIsLocalStreaming(true);
     
     // Only update store with user event + placeholder (no streaming updates)
-    const budConfig = bud?.default_json as Record<string, any>;
     const updatedConversation = {
       ...currentConversation!,
       events: [...currentEvents, userEvent, assistantPlaceholder],
@@ -260,7 +257,9 @@ export default function ChatPage({ params }: ChatPageProps) {
     
     const store = useEventChatStore.getState();
     store.setConversation(tempConversationId, updatedConversation);
-    addConversationToWorkspace(selectedWorkspace, tempConversationId);
+    if (selectedWorkspace) {
+      addConversationToWorkspace(selectedWorkspace, tempConversationId);
+    }
 
     try {
       const response = await fetch('/api/chat-new', {
@@ -270,7 +269,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           messages: [...currentEvents, userEvent],
           workspaceId: selectedWorkspace,
           budId: bud?.id,
-          model: bud ? (bud.default_json as Record<string, any>).model || 'gpt-4o' : 'gpt-4o'
+          model: bud ? bud.default_json.model || 'gpt-4o' : 'gpt-4o'
         })
       });
 
@@ -314,7 +313,9 @@ export default function ChatPage({ params }: ChatPageProps) {
               
               if (data.type === 'conversationCreated') {
                 realConversationId = data.conversationId;
-                addConversationToWorkspace(selectedWorkspace, realConversationId);
+                if (selectedWorkspace && realConversationId) {
+                  addConversationToWorkspace(selectedWorkspace, realConversationId);
+                }
               } else if (data.type === 'complete') {
                 setIsLocalStreaming(false);
                 
@@ -335,17 +336,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                     store.removeConversation(tempConversationId);
                     store.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
                     
-                    // Update URL without page navigation - shallow update only
-                    window.history.replaceState(
-                      { ...window.history.state },
-                      '',
-                      `/chat/${realConversationId}`
-                    );
-                    
-                    // Notify other components that the URL changed
-                    window.dispatchEvent(new CustomEvent('urlchange', { 
-                      detail: { pathname: `/chat/${realConversationId}` }
-                    }));
+                    // Update URL using Next.js router - this will trigger pathname updates
+                    router.replace(`/chat/${realConversationId}`);
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
@@ -419,15 +411,13 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   // Render chat interface
   const placeholder = isNewConversation && bud 
-    ? `Chat with ${(bud.default_json as Record<string, any>).name || 'your bud'}...`
+    ? `Chat with ${bud.default_json.name || 'your bud'}...`
     : isNewConversation 
     ? 'Start a new conversation...'
     : 'Type your message...';
 
   // Determine which data source to use
-  const hasStoreConversation = existingConversation && existingConversation.events.length > 0;
   const shouldUseStreamingEvents = streamingEvents && streamingEvents.length > 0;
-  const shouldUseStoreData = hasStoreConversation && !shouldUseStreamingEvents;
   
   return (
     <EventStream
@@ -435,7 +425,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       events={shouldUseStreamingEvents ? streamingEvents : undefined}
       onSendMessage={isNewConversation ? handleSendMessage : undefined}
       placeholder={placeholder}
-      budData={isNewConversation ? bud : undefined}
+      budData={isNewConversation ? (bud || undefined) : undefined}
       isStreaming={shouldUseStreamingEvents ? isLocalStreaming : undefined}
     />
   );

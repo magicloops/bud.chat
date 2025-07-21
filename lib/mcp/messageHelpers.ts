@@ -29,7 +29,8 @@ export async function saveToolCallMessage(
   conversationId: string,
   message: ToolCallMessage,
   orderKey: string
-): Promise<{ data: any; error: any }> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
   console.log(`💾 Saving tool call message for conversation ${conversationId}`);
 
   const messageData = {
@@ -67,7 +68,8 @@ export async function saveToolResultMessage(
   message: ToolResultMessage,
   orderKey: string,
   mcpServerId?: string
-): Promise<{ data: any; error: any }> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
   console.log(`💾 Saving tool result message for conversation ${conversationId}`);
 
   const messageData = {
@@ -111,7 +113,8 @@ export async function updateMessageWithToolCalls(
       arguments: string
     }
   }>
-): Promise<{ data: any; error: any }> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<{ data: any; error: any }> { // Supabase query result type
   console.log(`🔧 Updating message ${messageId} with tool calls`);
 
   const result = await supabase
@@ -183,7 +186,8 @@ export function formatToolCallForDisplay(toolCall: {
 }
 
 export function formatToolResultForDisplay(
-  toolResult: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolResult: any, // MCP tool results can be any type
   toolName: string,
   error?: string
 ): string {
@@ -212,17 +216,20 @@ export function formatToolResultForDisplay(
   return `✅ **${toolName}**: ${String(toolResult)}`;
 }
 
-export function isToolCallMessage(message: any): boolean {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isToolCallMessage(message: any): boolean { // Legacy message format
   return message.json_meta?.is_tool_call === true || 
          (message.json_meta?.tool_calls && Array.isArray(message.json_meta.tool_calls));
 }
 
-export function isToolResultMessage(message: any): boolean {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isToolResultMessage(message: any): boolean { // Legacy message format
   return message.json_meta?.is_tool_result === true ||
          message.json_meta?.tool_call_id !== undefined;
 }
 
-export function extractToolCallsFromMessage(message: any): Array<{
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractToolCallsFromMessage(message: any): Array<{ // Legacy message format
   id: string
   type: 'function'
   function: {
@@ -233,7 +240,8 @@ export function extractToolCallsFromMessage(message: any): Array<{
   return message.json_meta?.tool_calls || [];
 }
 
-export function extractToolResultFromMessage(message: any): {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function extractToolResultFromMessage(message: any): { // Legacy message format
   tool_call_id: string
   tool_name: string
   content: string

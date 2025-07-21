@@ -3,11 +3,11 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 import { EventStreamBuilder } from '@/lib/streaming/eventBuilder';
-import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events';
-import { saveEvent, getConversationEvents } from '@/lib/db/events';
-import { eventsToAnthropicMessages, extractPendingToolCalls } from '@/lib/providers/anthropic';
+import { EventLog, createTextEvent, createToolResultEvent, Event } from '@/lib/types/events';
+import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
 import { eventsToOpenAIMessages } from '@/lib/providers/openai';
 import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
+import { Database } from '@/lib/types/database';
 import { generateKeyBetween } from 'fractional-indexing';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
@@ -22,10 +22,10 @@ const anthropic = new Anthropic({
 
 // Helper function to create conversation in background
 async function createConversationInBackground(
-  events: any[],
+  events: Event[],
   workspaceId: string,
   budId?: string
-): Promise<{ conversationId: string; bud?: any }> {
+): Promise<{ conversationId: string; bud?: Database['public']['Tables']['buds']['Row'] }> {
   const supabase = await createClient();
   
   try {
@@ -213,7 +213,12 @@ export async function POST(request: NextRequest) {
       return new Response('Unauthorized', { status: 401 });
     }
 
-    const body = await request.json();
+    const body = await request.json() as {
+      messages: Array<{role: string; content: string; json_meta?: Record<string, unknown>}>;
+      workspaceId: string;
+      budId?: string;
+      model?: string;
+    };
     const { 
       messages, 
       workspaceId,
@@ -256,7 +261,7 @@ export async function POST(request: NextRequest) {
         if (message.content) {
           segments.push({ type: 'text' as const, text: message.content });
         }
-        if (message.json_meta?.tool_calls) {
+        if (message.json_meta?.tool_calls && Array.isArray(message.json_meta.tool_calls)) {
           for (const toolCall of message.json_meta.tool_calls) {
             segments.push({
               type: 'tool_call' as const,
@@ -293,7 +298,7 @@ export async function POST(request: NextRequest) {
           let conversationId: string | null = null;
           
           // Main conversation loop - handles tool calls automatically
-          let maxIterations = 5; // Prevent infinite loops
+          const maxIterations = 5; // Prevent infinite loops
           let iteration = 0;
           
           while (iteration < maxIterations) {
@@ -336,7 +341,7 @@ export async function POST(request: NextRequest) {
               const { messages, system } = eventsToAnthropicMessages(events);
               
               // Get available tools if budId is provided
-              let tools: any[] = [];
+              let tools: Anthropic.Tool[] = [];
               if (budId) {
                 try {
                   const supabase = await createClient();
@@ -496,7 +501,7 @@ export async function POST(request: NextRequest) {
                   for (const choice of chunk.choices) {
                     if (choice.finish_reason) {
                       // Finalize any pending tool calls
-                      for (const [index, toolCall] of activeToolCalls.entries()) {
+                      for (const [_index, toolCall] of activeToolCalls.entries()) {
                         if (toolCall.id && toolCall.name && toolCall.args) {
                           try {
                             const args = JSON.parse(toolCall.args);
@@ -509,7 +514,7 @@ export async function POST(request: NextRequest) {
                               tool_name: toolCall.name,
                               args: args
                             })}\n\n`));
-                          } catch (e) {
+                          } catch (_e) {
                             eventBuilder.addToolCall(toolCall.id, toolCall.name, {});
                           }
                         }
@@ -585,7 +590,7 @@ export async function POST(request: NextRequest) {
                           if (toolCallDelta.function?.arguments) {
                             toolCall.args = (toolCall.args || '') + toolCallDelta.function.arguments;
                           }
-                        } catch (toolError) {
+                        } catch (_toolError) {
                           // Don't let tool call errors break the entire stream
                           continue;
                         }
@@ -599,7 +604,7 @@ export async function POST(request: NextRequest) {
                   try {
                     const partialEvent = eventBuilder.finalize();
                     eventLog.addEvent(partialEvent);
-                  } catch (finalizeError) {
+                  } catch (_finalizeError) {
                     // Ignore finalization errors for partial content
                   }
                 }

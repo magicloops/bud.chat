@@ -82,13 +82,13 @@ export async function POST(
 
     // Check if user is a member of the workspace
     const isMember = originalConversation.workspace?.workspace_members?.some(
-      (member: any) => member.user_id === user.id
+      (member: { user_id: string; role: string }) => member.user_id === user.id
     );
     if (!isMember) {
       console.log('🌿 Access denied - not a workspace member:', {
         userId: user.id,
         workspaceId: originalConversation.workspace?.id,
-        members: originalConversation.workspace?.workspace_members?.map((m: any) => m.user_id)
+        members: originalConversation.workspace?.workspace_members?.map((m: { user_id: string }) => m.user_id)
       });
       return new Response('Access denied', { status: 403 });
     }
@@ -172,7 +172,7 @@ export async function POST(
     });
 
     // Initialize insertedEvents for return value
-    let insertedEvents = [];
+    const insertedEvents = [];
 
     // Copy events to new conversation, preserving the parent-child chain structure
     if (relevantEvents.length > 0) {

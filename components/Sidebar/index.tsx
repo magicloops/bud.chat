@@ -14,7 +14,7 @@ import {
   useSetWorkspaces, 
   useSetWorkspacesLoading 
 } from '@/state/workspaceStore';
-import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { Plus, PanelLeftClose } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getRandomHeaderFont } from '@/lib/fontRotation';
 
@@ -104,7 +104,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     onClose();
   };
 
-  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId);
+  const _selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId);
 
   return (
     <div className={cn('w-60 border-r bg-muted/30 flex flex-col h-full', className)}>

@@ -82,8 +82,8 @@ const ToolCallSegment = memo(function ToolCallSegment({
   
   const hasError = resultSegment && resultSegment.output && typeof resultSegment.output === 'object' && 'error' in resultSegment.output;
   const resultContent = hasError 
-    ? (resultSegment.output as any).error 
-    : resultSegment ? ((resultSegment.output as any).content || JSON.stringify(resultSegment.output)) : null;
+    ? (resultSegment.output as { error?: string }).error 
+    : resultSegment ? ((resultSegment.output as { content?: string }).content || JSON.stringify(resultSegment.output)) : null;
 
   return (
     <Card className="bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 my-2">
@@ -159,15 +159,15 @@ const ToolCallSegment = memo(function ToolCallSegment({
   );
 });
 
-const ToolResultSegment = memo(function ToolResultSegment({ 
+const _ToolResultSegment = memo(function ToolResultSegment({ 
   segment 
 }: { 
   segment: { type: 'tool_result'; id: string; output: object }
 }) {
   const hasError = segment.output && typeof segment.output === 'object' && 'error' in segment.output;
   const content = hasError 
-    ? (segment.output as any).error 
-    : (segment.output as any).content || JSON.stringify(segment.output);
+    ? (segment.output as { error?: string }).error 
+    : (segment.output as { content?: string }).content || JSON.stringify(segment.output);
 
   return (
     <Card className={cn(
@@ -200,7 +200,7 @@ const ToolResultSegment = memo(function ToolResultSegment({
                 {content}
               </div>
             ) : (
-              <MarkdownRenderer content={content} />
+              <MarkdownRenderer content={content || ''} />
             )}
           </div>
         </div>

@@ -9,7 +9,7 @@ interface DebugEvent {
   id: string
   timestamp: string
   type: 'mcp_tool_use' | 'mcp_tool_result' | 'stream_event' | 'api_call' | 'system' | 'error'
-  data: any
+  data: object | string | number | boolean | null
   conversationId?: string
 }
 
@@ -167,7 +167,7 @@ export function DebugPanel({ conversationId, className }: DebugPanelProps) {
 // Utility function for components to emit debug events
 export const emitDebugEvent = (
   type: DebugEvent['type'],
-  data: any,
+  data: object | string | number | boolean | null,
   conversationId?: string
 ) => {
   if (typeof window !== 'undefined' && localStorage.getItem('debug-mode') === 'true') {

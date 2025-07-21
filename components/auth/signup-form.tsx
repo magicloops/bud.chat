@@ -69,7 +69,7 @@ export function SignupForm({ onToggleMode }: SignupFormProps) {
         <CardHeader>
           <CardTitle>Check your email</CardTitle>
           <CardDescription>
-            We've sent you a confirmation link at {email}
+            We&apos;ve sent you a confirmation link at {email}
           </CardDescription>
         </CardHeader>
         <CardContent>

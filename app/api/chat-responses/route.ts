@@ -1,7 +1,17 @@
 // New chat endpoint using OpenAI Responses API with native MCP support
 import { createClient } from '@/lib/supabase/server';
-import { Database } from '@/lib/types/database';
 import OpenAI from 'openai';
+
+// OpenAI Response API output types
+type ResponseOutput = 
+  | { type: 'text'; text: string }
+  | { type: 'mcp_list_tools'; tools?: { name: string; description?: string }[] }
+  | { type: 'mcp_call'; name: string; arguments?: Record<string, unknown>; result?: unknown; output?: unknown; error?: string; server_label?: string }
+  | { type: 'mcp_approval_request'; name: string };
+
+type OpenAIResponse = {
+  outputs?: ResponseOutput[];
+};
 import { NextRequest } from 'next/server';
 
 const openai = new OpenAI({
@@ -53,8 +63,14 @@ export async function POST(request: NextRequest) {
     console.log('✅ User has access to workspace:', workspaceId);
 
     // Get MCP server configuration from database
-    let mcpServers: any[] = [];
-    let budData: any = null;
+    let mcpServers: Array<{
+      type: string;
+      server_label: string;
+      server_url: string;
+      require_approval: string;
+      allowed_tools?: string[];
+    }> = [];
+    // let budData: Database['public']['Tables']['buds']['Row'] | null = null; // Unused for now
 
     try {
       if (budId) {
@@ -66,7 +82,7 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (bud && !budError) {
-          budData = bud;
+          // budData = bud; // Unused for now
           const mcpConfig = bud.mcp_config || {};
           
           if (mcpConfig.servers?.length > 0) {
@@ -78,15 +94,18 @@ export async function POST(request: NextRequest) {
               .eq('workspace_id', workspaceId);
 
             if (servers && !serversError) {
-              mcpServers = servers.map(server => ({
-                type: 'mcp',
-                server_label: server.metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
-                server_url: server.endpoint,
-                require_approval: server.metadata?.require_approval || 'never',
-                ...(server.metadata?.allowed_tools && {
-                  allowed_tools: server.metadata.allowed_tools
-                })
-              }));
+              mcpServers = servers.map(server => {
+                const metadata = server.metadata as Record<string, unknown> | null; // Type assertion for metadata
+                return {
+                  type: 'mcp',
+                  server_label: (typeof metadata?.server_label === 'string' ? metadata.server_label : server.name.toLowerCase().replace(/\s+/g, '_')),
+                  server_url: server.endpoint,
+                  require_approval: (typeof metadata?.require_approval === 'string' ? metadata.require_approval : 'never'),
+                  ...(Array.isArray(metadata?.allowed_tools) ? {
+                    allowed_tools: metadata.allowed_tools
+                  } : {})
+                };
+              });
               
               console.log('🔧 MCP: Found', mcpServers.length, 'MCP servers from bud');
               mcpServers.forEach(server => {
@@ -106,10 +125,10 @@ export async function POST(request: NextRequest) {
 
     // Create the Responses API request
     console.log('🤖 Creating response with Responses API...');
-    const responseRequest: any = {
+    const responseRequest = {
       model,
       input,
-    };
+    } as Record<string, unknown>;
 
     // Add MCP tools if available
     if (mcpServers.length > 0) {
@@ -125,7 +144,7 @@ export async function POST(request: NextRequest) {
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n\n');
       
-      responseRequest.input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`;
+      (responseRequest as Record<string, unknown>).input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`;
     }
 
     // Make the Responses API call
@@ -133,13 +152,21 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Responses API call completed');
     const hasOutputs = 'outputs' in response;
-    const outputs = hasOutputs ? (response as any).outputs : [];
+    const outputs = hasOutputs ? (response as OpenAIResponse).outputs : [];
     console.log('📋 Response outputs:', outputs?.length || 0);
 
     // Process the response outputs
     let responseText = '';
-    const toolCalls: any[] = [];
-    const toolResults: any[] = [];
+    const toolCalls: Array<{
+      name: string;
+      arguments?: Record<string, unknown>;
+      server_label?: string;
+    }> = [];
+    const toolResults: Array<{
+      name: string;
+      output?: unknown;
+      error?: string;
+    }> = [];
 
     for (const output of outputs || []) {
       console.log('📄 Processing output type:', output.type);
@@ -173,7 +200,7 @@ export async function POST(request: NextRequest) {
           break;
           
         default:
-          console.log('❓ Unknown output type:', output.type);
+          console.log('❓ Unknown output type:', (output as Record<string, unknown>).type);
       }
     }
 

@@ -106,7 +106,7 @@ export class MCPClientManager {
     try {
       console.log(`🔧 Executing MCP tool: ${toolName}`);
       
-      let parameters: Record<string, any> = {};
+      let parameters: Record<string, unknown> = {};
       try {
         parameters = JSON.parse(toolCall.function.arguments || '{}');
       } catch (parseError) {

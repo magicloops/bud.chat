@@ -6,11 +6,11 @@ import { NextRequest } from 'next/server'
 import { EventStreamBuilder } from '@/lib/streaming/eventBuilder'
 import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler'
 import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor'
-import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/events'
-import { saveEvent, getConversationEvents } from '@/lib/db/events'
-import { eventsToAnthropicMessages, extractPendingToolCalls } from '@/lib/providers/anthropic'
+import { EventLog, createTextEvent, createToolResultEvent, Event } from '@/lib/types/events'
+import { eventsToAnthropicMessages } from '@/lib/providers/anthropic'
 import { eventsToOpenAIMessages } from '@/lib/providers/openai'
 import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
+import { Database } from '@/lib/types/database'
 import { generateKeyBetween } from 'fractional-indexing'
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
@@ -24,7 +24,7 @@ const anthropic = new Anthropic({
 })
 
 // Helper function to generate a conversation title (async, non-blocking)
-async function generateConversationTitleInBackground(conversationId: string, events: any[], supabase: any) {
+async function generateConversationTitleInBackground(conversationId: string, events: Event[], supabase: Awaited<ReturnType<typeof createClient>>) {
   try {
     console.log('🏷️ Generating title for conversation:', conversationId)
     
@@ -37,8 +37,8 @@ async function generateConversationTitleInBackground(conversationId: string, eve
       .slice(0, 4) // Use first few events
       .map(event => {
         const textContent = event.segments
-          .filter((s: any) => s.type === 'text')
-          .map((s: any) => s.text)
+          .filter(s => s.type === 'text')
+          .map(s => s.type === 'text' ? s.text : '')
           .join('')
         return `${event.role}: ${textContent}`
       })
@@ -81,10 +81,10 @@ Title:`
 
 // Helper function to create conversation in background
 async function createConversationInBackground(
-  events: any[],
+  events: Event[],
   workspaceId: string,
   budId?: string
-): Promise<{ conversationId: string; bud?: any }> {
+): Promise<{ conversationId: string; bud?: Database['public']['Tables']['buds']['Row'] }> {
   const supabase = await createClient()
   
   try {
@@ -296,7 +296,7 @@ export async function POST(request: NextRequest) {
           let createdConversationId: string | null = null
           
           // Main conversation loop - handles tool calls automatically
-          let maxIterations = 10 // Prevent infinite loops
+          const maxIterations = 10 // Prevent infinite loops
           let iteration = 0
           let shouldContinue = true
           
@@ -355,7 +355,7 @@ export async function POST(request: NextRequest) {
               console.log('🤖 Message count:', anthropicMessages?.length)
               
               // Get available tools if budId is provided
-              let tools: any[] = []
+              let tools: Anthropic.Tool[] = []
               if (budId) {
                 try {
                   const { data: bud } = await supabase
@@ -439,7 +439,7 @@ export async function POST(request: NextRequest) {
               const openaiMessages = eventsToOpenAIMessages(events)
               
               // Get available tools if budId is provided
-              let tools: any[] = []
+              let tools: OpenAI.ChatCompletionTool[] = []
               if (budId) {
                 try {
                   const { data: bud } = await supabase

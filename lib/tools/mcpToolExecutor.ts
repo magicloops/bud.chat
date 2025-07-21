@@ -1,4 +1,16 @@
 import { createClient } from '@/lib/supabase/server';
+import { Database } from '@/lib/types/database';
+
+// MCP Client interface (based on @modelcontextprotocol/sdk)
+interface MCPClient {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connect(transport: any): Promise<void>; // MCP transport can be any transport type
+  close(): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  callTool(params: { name: string; arguments: Record<string, unknown> }): Promise<any>; // MCP tool results are untyped
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listTools(): Promise<{ tools?: any[] }>; // MCP tool definitions are untyped
+}
 
 export interface ToolCall {
   id: string;
@@ -62,8 +74,8 @@ export class MCPToolExecutor {
    * Get MCP configuration for a bud and workspace
    */
   private async getMCPConfiguration(budId: string, workspaceId: string): Promise<{
-    servers: any[];
-    config: any;
+    servers: Database['public']['Tables']['mcp_servers']['Row'][];
+    config: Record<string, unknown>;
   } | null> {
     const supabase = await createClient();
     
@@ -100,7 +112,7 @@ export class MCPToolExecutor {
    */
   private async executeMCPCalls(
     toolCalls: ToolCall[],
-    mcpConfig: { servers: any[]; config: any }
+    mcpConfig: { servers: Database['public']['Tables']['mcp_servers']['Row'][]; config: Record<string, unknown> }
   ): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
     
@@ -142,7 +154,7 @@ export class MCPToolExecutor {
   /**
    * Execute a single tool call
    */
-  private async executeToolCall(mcpClient: any, toolCall: ToolCall): Promise<ToolResult> {
+  private async executeToolCall(mcpClient: MCPClient, toolCall: ToolCall): Promise<ToolResult> {
     try {
       if (this.options.debug) {
         console.log('🔧 Executing tool call:', {
@@ -205,7 +217,8 @@ export class MCPToolExecutor {
   /**
    * Get available tools for a workspace and bud
    */
-  async getAvailableTools(workspaceId: string, budId?: string): Promise<any[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getAvailableTools(workspaceId: string, budId?: string): Promise<any[]> { // MCP tool definitions are untyped
     if (!budId) {
       return [];
     }

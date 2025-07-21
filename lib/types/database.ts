@@ -96,6 +96,7 @@ export type Database = {
           workspace_id: string | null
           name: string
           default_json: Json
+          mcp_config: Json | null
           created_at: string
         }
         Insert: {
@@ -104,6 +105,7 @@ export type Database = {
           workspace_id?: string | null
           name: string
           default_json: Json
+          mcp_config?: Json | null
           created_at?: string
         }
         Update: {
@@ -112,6 +114,7 @@ export type Database = {
           workspace_id?: string | null
           name?: string
           default_json?: Json
+          mcp_config?: Json | null
           created_at?: string
         }
         Relationships: [
@@ -138,6 +141,10 @@ export type Database = {
           root_msg_id: string | null
           bud_id: string | null
           title: string | null
+          assistant_name: string | null
+          assistant_avatar: string | null
+          model_config_overrides: Json | null
+          mcp_config_overrides: Json | null
           metadata: Json | null
           created_at: string
         }
@@ -147,6 +154,10 @@ export type Database = {
           root_msg_id?: string | null
           bud_id?: string | null
           title?: string | null
+          assistant_name?: string | null
+          assistant_avatar?: string | null
+          model_config_overrides?: Json | null
+          mcp_config_overrides?: Json | null
           metadata?: Json | null
           created_at?: string
         }
@@ -156,6 +167,10 @@ export type Database = {
           root_msg_id?: string | null
           bud_id?: string | null
           title?: string | null
+          assistant_name?: string | null
+          assistant_avatar?: string | null
+          model_config_overrides?: Json | null
+          mcp_config_overrides?: Json | null
           metadata?: Json | null
           created_at?: string
         }
@@ -172,6 +187,56 @@ export type Database = {
             columns: ['bud_id']
             isOneToOne: false
             referencedRelation: 'buds'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      mcp_servers: {
+        Row: {
+          id: string
+          workspace_id: string | null
+          name: string
+          endpoint: string
+          transport_type: string
+          auth_config: Json | null
+          connection_config: Json | null
+          metadata: Json | null
+          is_active: boolean | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          workspace_id?: string | null
+          name: string
+          endpoint: string
+          transport_type?: string
+          auth_config?: Json | null
+          connection_config?: Json | null
+          metadata?: Json | null
+          is_active?: boolean | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          workspace_id?: string | null
+          name?: string
+          endpoint?: string
+          transport_type?: string
+          auth_config?: Json | null
+          connection_config?: Json | null
+          metadata?: Json | null
+          is_active?: boolean | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'mcp_servers_workspace_id_fkey'
+            columns: ['workspace_id']
+            isOneToOne: false
+            referencedRelation: 'workspaces'
             referencedColumns: ['id']
           }
         ]

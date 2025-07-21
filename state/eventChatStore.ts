@@ -2,9 +2,8 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-import { shallow } from 'zustand/shallow';
 import { createClient } from '@/lib/supabase/client';
-import { Event, EventLog } from '@/lib/types/events';
+import { Event, Role } from '@/lib/types/events';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // Properly typed Supabase realtime payload
@@ -12,11 +11,11 @@ interface RealtimePayload {
   eventType: 'INSERT' | 'UPDATE' | 'DELETE';
   new?: {
     id: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   old?: {
     id: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -28,8 +27,8 @@ export interface EventConversationMeta {
   source_bud_id?: string
   assistant_name?: string
   assistant_avatar?: string
-  model_config_overrides?: Record<string, any>
-  mcp_config_overrides?: Record<string, any>
+  model_config_overrides?: Record<string, unknown>
+  mcp_config_overrides?: Record<string, unknown>
   created_at: string
 }
 
@@ -247,8 +246,8 @@ export const useEventChatStore = create<EventChatStore>()(
                         title: 'title' in updatedConversation ? updatedConversation.title as string : state.conversations[conversationId].meta.title,
                         assistant_name: 'assistant_name' in updatedConversation ? updatedConversation.assistant_name as string : state.conversations[conversationId].meta.assistant_name,
                         assistant_avatar: 'assistant_avatar' in updatedConversation ? updatedConversation.assistant_avatar as string : state.conversations[conversationId].meta.assistant_avatar,
-                        model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, any> : state.conversations[conversationId].meta.model_config_overrides,
-                        mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, any> : state.conversations[conversationId].meta.mcp_config_overrides,
+                        model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.model_config_overrides,
+                        mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.mcp_config_overrides,
                       };
                       console.log('✅ Conversation updated in store:', currentTitle, '→', title);
                     } else {
@@ -265,8 +264,8 @@ export const useEventChatStore = create<EventChatStore>()(
                               title: 'title' in updatedConversation ? updatedConversation.title as string : retryState.conversations[conversationId].meta.title,
                               assistant_name: 'assistant_name' in updatedConversation ? updatedConversation.assistant_name as string : retryState.conversations[conversationId].meta.assistant_name,
                               assistant_avatar: 'assistant_avatar' in updatedConversation ? updatedConversation.assistant_avatar as string : retryState.conversations[conversationId].meta.assistant_avatar,
-                              model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, any> : retryState.conversations[conversationId].meta.model_config_overrides,
-                              mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, any> : retryState.conversations[conversationId].meta.mcp_config_overrides,
+                              model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, unknown> : retryState.conversations[conversationId].meta.model_config_overrides,
+                              mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, unknown> : retryState.conversations[conversationId].meta.mcp_config_overrides,
                             };
                             console.log('✅ Delayed update successful:', title);
                           });
@@ -326,8 +325,8 @@ export const useEventChatStore = create<EventChatStore>()(
                       source_bud_id: 'source_bud_id' in newConversation ? newConversation.source_bud_id as string : undefined,
                       assistant_name: 'assistant_name' in newConversation ? newConversation.assistant_name as string : undefined,
                       assistant_avatar: 'assistant_avatar' in newConversation ? newConversation.assistant_avatar as string : undefined,
-                      model_config_overrides: 'model_config_overrides' in newConversation ? newConversation.model_config_overrides as Record<string, any> : undefined,
-                      mcp_config_overrides: 'mcp_config_overrides' in newConversation ? newConversation.mcp_config_overrides as Record<string, any> : undefined,
+                      model_config_overrides: 'model_config_overrides' in newConversation ? newConversation.model_config_overrides as Record<string, unknown> : undefined,
+                      mcp_config_overrides: 'mcp_config_overrides' in newConversation ? newConversation.mcp_config_overrides as Record<string, unknown> : undefined,
                       created_at: 'created_at' in newConversation ? newConversation.created_at as string : new Date().toISOString()
                     };
 
@@ -424,7 +423,7 @@ export const useEventChatStore = create<EventChatStore>()(
 );
 
 // Helper function to convert events to legacy message format for compatibility
-export function eventsToLegacyMessages(events: Event[]): any[] {
+export function eventsToLegacyMessages(events: Event[]): unknown[] {
   return events.map(event => {
     const textContent = event.segments
       .filter(s => s.type === 'text')
@@ -455,21 +454,38 @@ export function eventsToLegacyMessages(events: Event[]): any[] {
 }
 
 // Helper function to convert legacy messages to events for migration
-export function legacyMessagesToEvents(messages: any[]): Event[] {
-  return messages.map(message => ({
-    id: message.id,
-    role: message.role,
-    segments: [
-      ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
-      ...(message.json_meta?.tool_calls || []).map((toolCall: any) => ({
-        type: 'tool_call' as const,
-        id: toolCall.id,
-        name: toolCall.function.name,
-        args: JSON.parse(toolCall.function.arguments || '{}')
-      }))
-    ],
-    ts: new Date(message.created_at).getTime()
-  }));
+export function legacyMessagesToEvents(messages: unknown[]): Event[] {
+  return messages.map(message => {
+    const msg = message as {
+      id: string;
+      role: string;
+      content?: string;
+      created_at: string;
+      json_meta?: {
+        tool_calls?: Array<{
+          id: string;
+          function: {
+            name: string;
+            arguments: string;
+          };
+        }>;
+      };
+    }; // Type assertion for legacy message structure
+    return {
+      id: msg.id,
+      role: msg.role as Role,
+      segments: [
+        ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
+        ...(msg.json_meta?.tool_calls || []).map((toolCall: { id: string; function: { name: string; arguments: string } }) => ({
+          type: 'tool_call' as const,
+          id: toolCall.id,
+          name: toolCall.function.name,
+          args: JSON.parse(toolCall.function.arguments || '{}')
+        }))
+      ],
+      ts: new Date(msg.created_at).getTime()
+    };
+  });
 }
 
 // Event-based hooks

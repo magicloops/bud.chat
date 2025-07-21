@@ -134,7 +134,7 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
             <CardContent className="pt-4">
               <p className="text-sm text-blue-800">
                 💡 <strong>Quick Start:</strong> The form is pre-filled with our JavaScript test server. 
-                Just click "Add Server" to get started, or customize the settings below.
+                Just click &ldquo;Add Server&rdquo; to get started, or customize the settings below.
               </p>
             </CardContent>
           </Card>
@@ -160,7 +160,7 @@ export function MCPServerForm({ workspaceId, open, onClose, onSuccess }: MCPServ
                 required
               />
               <p className="text-xs text-muted-foreground mt-1">
-                For stdio transport: Command to run the server (e.g., "node server.js")
+                For stdio transport: Command to run the server (e.g., &ldquo;node server.js&rdquo;)
               </p>
             </div>
 

@@ -22,7 +22,8 @@ export interface StreamingContext {
 export interface ToolCallState {
   toolCalls: Map<string, OpenAI.Chat.Completions.ChatCompletionMessageToolCall>
   pendingToolCalls: Set<string>
-  toolResults: Map<string, any>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  toolResults: Map<string, any> // MCP tool results can be any type
 }
 
 export class MCPStreamingHandler {
@@ -248,7 +249,8 @@ export class MCPStreamingHandler {
     await Promise.all(promises);
   }
 
-  private sendToClient(data: any): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private sendToClient(data: any): void { // SSE message data can be any shape
     try {
       const message = `data: ${JSON.stringify(data)}\n\n`;
       this.context.controller.enqueue(this.context.encoder.encode(message));
@@ -261,7 +263,8 @@ export class MCPStreamingHandler {
     return this.toolCallState.pendingToolCalls.size > 0;
   }
 
-  getToolResults(): Map<string, any> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getToolResults(): Map<string, any> { // MCP tool results can be any type
     return this.toolCallState.toolResults;
   }
 

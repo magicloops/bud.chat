@@ -78,7 +78,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
 
   // Filter buds based on search and model
   const filteredBuds = buds.filter(bud => {
-    const config = getBudConfig(bud);
+    const config = getBudConfig(bud as unknown as Bud);
     const matchesSearch = !searchQuery || 
       config.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase());
@@ -89,7 +89,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
   });
 
   // Get unique models for filter
-  const availableModels = [...new Set(buds.map(bud => getBudModel(bud)))];
+  const availableModels = [...new Set(buds.map(bud => getBudModel(bud as unknown as Bud)))];
 
   const handleCreateBud = async (config: BudConfig, name: string) => {
     await createBud({
@@ -307,10 +307,10 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
               </TableHeader>
               <TableBody>
                 {filteredBuds.map((bud) => {
-                  const config = getBudConfig(bud);
-                  const displayName = getBudDisplayName(bud);
-                  const avatar = getBudAvatar(bud);
-                  const model = getBudModel(bud);
+                  const config = getBudConfig(bud as unknown as Bud);
+                  const displayName = getBudDisplayName(bud as unknown as Bud);
+                  const avatar = getBudAvatar(bud as unknown as Bud);
+                  const model = getBudModel(bud as unknown as Bud);
                   
                   return (
                     <TableRow key={bud.id} className="hover:bg-muted/50">
@@ -348,11 +348,11 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                               <Bot className="h-4 w-4 mr-2" />
                               Start Chat
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setEditingBud(bud)}>
+                            <DropdownMenuItem onClick={() => setEditingBud(bud as unknown as Bud)}>
                               <Edit className="h-4 w-4 mr-2" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleDuplicateBud(bud)}>
+                            <DropdownMenuItem onClick={() => handleDuplicateBud(bud as unknown as Bud)}>
                               <Copy className="h-4 w-4 mr-2" />
                               Duplicate
                             </DropdownMenuItem>

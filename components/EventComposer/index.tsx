@@ -17,7 +17,7 @@ interface EventComposerProps {
 }
 
 export function EventComposer({ 
-  conversation,
+  conversation: _conversation,
   onSendMessage,
   placeholder = 'Type your message...',
   disabled = false,

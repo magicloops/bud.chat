@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useEffect } from 'react';
+import React, { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -24,19 +24,21 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
         rehypePlugins={[rehypeHighlight]}
         components={{
         // Custom styling for different elements
-          code: ({ node, className, children, ...props }: any) => {
-            const inline = (props as any)?.inline;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code: (props: any) => {
+            const { node: _node, className, children, ...restProps } = props;
+            const inline = (props as { inline?: boolean })?.inline;
             const match = /language-(\w+)/.exec(className || '');
             return !inline && match ? (
               <pre className="bg-muted rounded-md p-1 overflow-x-auto my-2 w-0 min-w-full">
-                <code className={`${className} block whitespace-pre`} {...props}>
+                <code className={`${className} block whitespace-pre`} {...restProps}>
                   {children}
                 </code>
               </pre>
             ) : (
               <code
                 className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono break-words"
-                {...props}
+                {...restProps}
               >
                 {children}
               </code>
@@ -64,7 +66,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           ul: ({ children }) => (
             <ul className="list-disc list-outside ml-6 my-2 space-y-1">{children}</ul>
           ),
-          ol: ({ ordered, className, children, ...rest }) => (
+          ol: ({ className, children, ...rest }) => (
             // ordered is a boolean that React doesn't understand, so we drop it, 
             // but keep everything else - especially "start"
             <ol

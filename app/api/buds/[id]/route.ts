@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { BudConfig } from '@/lib/types';
+import { Database } from '@/lib/types/database';
 
 export interface UpdateBudRequest {
   name?: string
@@ -124,7 +125,7 @@ export async function PUT(
     }
 
     // Prepare update data
-    const updateData: any = {};
+    const updateData: Partial<Database['public']['Tables']['buds']['Update']> = {};
     
     if (body.name) {
       updateData.name = body.name;
@@ -137,11 +138,11 @@ export async function PUT(
       
       // Merge with existing config (excluding MCP config)
       const currentConfig = existingBud.default_json as BudConfig;
-      updateData.default_json = { ...currentConfig, ...budConfig };
+      updateData.default_json = { ...currentConfig, ...budConfig } as unknown as Database['public']['Tables']['buds']['Update']['default_json'];
       
       // Update MCP config separately if provided
       if (mcpConfig !== undefined) {
-        updateData.mcp_config = mcpConfig;
+        updateData.mcp_config = mcpConfig as unknown as Database['public']['Tables']['buds']['Update']['mcp_config'];
       }
     }
 

@@ -211,7 +211,7 @@ export function EventList({
       // 8. Replace optimistic conversation with real one
       const realConversation: Conversation = {
         id: realConvData.id,
-        events: insertedEvents.map((event: any) => ({
+        events: insertedEvents.map((event: Event) => ({
           id: event.id,
           role: event.role,
           segments: event.segments,

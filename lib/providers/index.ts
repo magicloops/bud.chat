@@ -14,28 +14,28 @@ export {
 } from './openai';
 
 import { Event } from '@/lib/types/events';
-import { eventsToAnthropicMessages, anthropicResponseToEvents } from './anthropic';
-import { eventsToOpenAIMessages, openaiResponseToEvents } from './openai';
+import { eventsToAnthropicMessages, anthropicResponseToEvents, AnthropicResponse } from './anthropic';
+import { eventsToOpenAIMessages, openaiResponseToEvents, OpenAIResponse } from './openai';
 
 export type Provider = 'anthropic' | 'openai';
 
-export function eventsToProviderMessages(events: Event[], provider: Provider): any[] {
+export function eventsToProviderMessages(events: Event[], provider: Provider): Record<string, unknown>[] {
   switch (provider) {
     case 'anthropic':
-      return eventsToAnthropicMessages(events).messages;
+      return eventsToAnthropicMessages(events).messages as unknown as Record<string, unknown>[];
     case 'openai':
-      return eventsToOpenAIMessages(events);
+      return eventsToOpenAIMessages(events) as unknown as Record<string, unknown>[];
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
 }
 
-export function providerResponseToEvents(response: any, provider: Provider): Event[] {
+export function providerResponseToEvents(response: unknown, provider: Provider): Event[] {
   switch (provider) {
     case 'anthropic':
-      return anthropicResponseToEvents(response);
+      return anthropicResponseToEvents(response as unknown as AnthropicResponse);
     case 'openai':
-      return openaiResponseToEvents(response);
+      return openaiResponseToEvents(response as unknown as OpenAIResponse);
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }

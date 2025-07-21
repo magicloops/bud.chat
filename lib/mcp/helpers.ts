@@ -68,7 +68,7 @@ export async function createMCPClientForBud(
 /**
  * Format tool call results for display
  */
-export function formatToolResult(result: any): string {
+export function formatToolResult(result: unknown): string {
   if (typeof result === 'string') {
     return result;
   }

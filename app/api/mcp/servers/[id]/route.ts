@@ -1,6 +1,7 @@
 // Individual MCP Server Management API
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { Database } from '@/lib/types/database';
 
 export async function GET(
   request: NextRequest,
@@ -46,7 +47,7 @@ export async function GET(
     }
 
     // Clean up the response (remove nested workspace data)
-    const { workspaces, ...cleanServer } = server;
+    const { workspaces: _workspaces, ...cleanServer } = server;
     
     return NextResponse.json({ data: cleanServer });
   } catch (error) {
@@ -126,7 +127,7 @@ export async function PATCH(
     }
 
     // Build update object with only provided fields
-    const updateData: any = {
+    const updateData: Partial<Database['public']['Tables']['mcp_servers']['Update']> = {
       updated_at: new Date().toISOString()
     };
     

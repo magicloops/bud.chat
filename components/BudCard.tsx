@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MoreHorizontal, MessageSquare } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud } from '@/lib/types';
 import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers';
 
 interface BudCardProps {
@@ -101,7 +101,7 @@ export function BudCard({ bud, onClick, onEdit, onDelete, showActions = false }:
         
         {config.greeting && (
           <p className="text-xs text-muted-foreground/80 italic line-clamp-2 mb-3">
-            "{config.greeting}"
+            &ldquo;{config.greeting}&rdquo;
           </p>
         )}
         
