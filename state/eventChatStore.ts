@@ -60,6 +60,7 @@ interface EventChatStore {
   // Conversation actions
   setConversation: (id: string, conversation: EventConversation) => void
   updateConversation: (id: string, updates: Partial<EventConversation>) => void
+  removeConversation: (id: string) => void
   
   // Event actions
   addEvent: (conversationId: string, event: Event) => void
@@ -100,13 +101,6 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
-          console.log('🏦 [STORE] Setting conversation', {
-            timestamp: Date.now(),
-            conversationId: id,
-            eventCount: conversation.events.length,
-            previousEventCount: state.conversations[id]?.events?.length || 0,
-            source: new Error().stack?.split('\n')[2]?.trim() // Capture caller
-          });
           state.conversations[id] = conversation;
         }),
         
@@ -117,6 +111,10 @@ export const useEventChatStore = create<EventChatStore>()(
               ...updates
             };
           }
+        }),
+        
+        removeConversation: (id) => set((state) => {
+          delete state.conversations[id];
         }),
         
         // Event actions

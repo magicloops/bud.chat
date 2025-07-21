@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useCallback } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore } from '@/state/eventChatStore';
@@ -7,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { getDefaultModel } from '@/lib/modelMapping';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
+import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
+import { OptimisticStateManager } from '@/lib/optimistic/stateTransition';
 
 interface EventStreamProps {
   // For local state (new conversations)
@@ -33,6 +36,10 @@ export function EventStream({
 }: EventStreamProps) {
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
+  
+  // Local streaming state for existing conversations during streaming (similar to new conversations)
+  const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);
+  const [isLocalStreaming, setIsLocalStreaming] = useState(false);
   
   // Load current bud data if conversation has a source_bud_id
   const currentBudData = useBud(conversation?.meta?.source_bud_id || '');
@@ -65,18 +72,6 @@ export function EventStream({
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
     
-    console.log('🚀 [STREAM] Starting message send', {
-      timestamp: Date.now(),
-      conversationId: conversationId || 'new',
-      localEventCount: conversation?.events.length || 0,
-      content: content.substring(0, 50) + (content.length > 50 ? '...' : '')
-    });
-    
-    console.log('🎯 Adding optimistic events:', { 
-      userEvent: userEvent.id, 
-      assistantPlaceholder: assistantPlaceholder.id,
-      currentEvents: conversation.events.length 
-    });
     
     // Add events optimistically to store
     const store = useEventChatStore.getState();
@@ -87,18 +82,10 @@ export function EventStream({
       streamingEventId: assistantPlaceholder.id
     };
     
-    console.log('📝 [STREAM] Updating conversation', {
-      timestamp: Date.now(),
-      conversationId,
-      action: 'setConversation',
-      eventCount: updatedConversation.events.length,
-      previousEventCount: conversation.events.length
-    });
     
     store.setConversation(conversationId, updatedConversation);
     
-    // For existing conversations, we need to send to the conversation-specific endpoint
-    // and handle the streaming response (same as new conversations)
+    // Use unified frontend event handler for existing conversations
     try {
       const response = await fetch(`/api/chat/${conversationId}`, {
         method: 'POST',
@@ -110,217 +97,52 @@ export function EventStream({
         })
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // Create unified event handler for existing conversations - use SAME approach as new conversations
+      const eventHandler = new FrontendEventHandler(
+        null, // No store updates during streaming - keep it local
+        null,
+        { debug: true }
+      );
       
-      // Handle streaming response with store updates
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error('No response body');
-      }
-
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              
-              switch (data.type) {
-                case 'token':
-                  console.log('🔄 Received token:', data.content);
-                  // Update streaming assistant event with new content
-                  const currentStore = useEventChatStore.getState();
-                  const currentConv = currentStore.conversations[conversationId];
-                  if (currentConv) {
-                    const placeholderEvent = currentConv.events.find(e => e.id === assistantPlaceholder.id);
-                    const hasToolCalls = placeholderEvent?.segments.some(s => s.type === 'tool_call');
-                    
-                    // Check if we need to create a new assistant event after tool calls
-                    if (currentConv.shouldCreateNewEvent && data.content.trim()) {
-                      // Create a new assistant event for the final response after tool calls
-                      const newAssistantEvent = {
-                        id: crypto.randomUUID(),
-                        role: 'assistant' as const,
-                        segments: [{ type: 'text' as const, text: data.content }],
-                        ts: Date.now()
-                      };
-                      
-                      // Add the new assistant event at the end and update streaming ID
-                      currentStore.setConversation(conversationId, {
-                        ...currentConv,
-                        events: [...currentConv.events, newAssistantEvent],
-                        streamingEventId: newAssistantEvent.id,
-                        shouldCreateNewEvent: false
-                      });
-                    } else {
-                      // Update the current streaming event (either original placeholder or new assistant event)
-                      const streamingId = currentConv.streamingEventId || assistantPlaceholder.id;
-                      const updatedEvents = currentConv.events.map(event => 
-                        event.id === streamingId 
-                          ? { 
-                            ...event, 
-                            segments: event.segments.map(s => 
-                              s.type === 'text' ? { ...s, text: s.text + data.content } : s
-                            ),
-                            ts: Date.now()
-                          }
-                          : event
-                      );
-                      currentStore.setConversation(conversationId, {
-                        ...currentConv,
-                        events: updatedEvents,
-                        shouldCreateNewEvent: false
-                      });
-                    }
-                    
-                    console.log('🔄 Updated streaming event, current text length:', 
-                      currentConv.events.find(e => e.id === (currentConv.streamingEventId || assistantPlaceholder.id))?.segments.find(s => s.type === 'text')?.text.length || 0);
-                  }
-                  break;
-                  
-                case 'tool_start':
-                  // Tool execution started - add tool call segment to streaming event
-                  console.log('🔧 Tool started:', data.tool_name, data.tool_id);
-                  const toolStartStore = useEventChatStore.getState();
-                  const toolStartConv = toolStartStore.conversations[conversationId];
-                  if (toolStartConv) {
-                    const streamingId = toolStartConv.streamingEventId || assistantPlaceholder.id;
-                    const updatedEventsToolStart = toolStartConv.events.map(event => 
-                      event.id === streamingId 
-                        ? { 
-                          ...event, 
-                          segments: [
-                            ...event.segments,
-                            {
-                              type: 'tool_call' as const,
-                              id: data.tool_id,
-                              name: data.tool_name,
-                              args: {} // Will be populated when tool completes
-                            }
-                          ],
-                          ts: Date.now()
-                        }
-                        : event
-                    );
-                    toolStartStore.setConversation(conversationId, {
-                      ...toolStartConv,
-                      events: updatedEventsToolStart
-                    });
-                  }
-                  break;
-                  
-                case 'tool_finalized':
-                  // Tool call finalized with complete arguments - update the tool call
-                  console.log('🔧 Tool finalized:', data.tool_name, data.tool_id, data.args);
-                  const toolFinalizedStore = useEventChatStore.getState();
-                  const toolFinalizedConv = toolFinalizedStore.conversations[conversationId];
-                  if (toolFinalizedConv) {
-                    const streamingId = toolFinalizedConv.streamingEventId || assistantPlaceholder.id;
-                    const updatedEventsFinalized = toolFinalizedConv.events.map(event => 
-                      event.id === streamingId 
-                        ? { 
-                          ...event, 
-                          segments: event.segments.map(segment => 
-                            segment.type === 'tool_call' && segment.id === data.tool_id
-                              ? { ...segment, args: data.args }
-                              : segment
-                          ),
-                          ts: Date.now()
-                        }
-                        : event
-                    );
-                    toolFinalizedStore.setConversation(conversationId, {
-                      ...toolFinalizedConv,
-                      events: updatedEventsFinalized
-                    });
-                  }
-                  break;
-                  
-                case 'tool_result':
-                  // Tool result received - add as a separate event
-                  console.log('📋 Tool result received:', data.tool_id, data.output);
-                  const toolResultStore = useEventChatStore.getState();
-                  const toolResultConv = toolResultStore.conversations[conversationId];
-                  if (toolResultConv) {
-                    const toolResultEvent = {
-                      id: crypto.randomUUID(),
-                      role: 'tool' as const,
-                      segments: [{
-                        type: 'tool_result' as const,
-                        id: data.tool_id,
-                        output: data.output
-                      }],
-                      ts: Date.now()
-                    };
-                    
-                    toolResultStore.setConversation(conversationId, {
-                      ...toolResultConv,
-                      events: [...toolResultConv.events, toolResultEvent]
-                    });
-                  }
-                  break;
-                  
-                case 'tool_complete':
-                  // Tool execution completed - mark that tools are complete
-                  // The next token event should create a new assistant message
-                  console.log('✅ Tool completed:', data.tool_id);
-                  
-                  const toolCompleteStore = useEventChatStore.getState();
-                  const toolCompleteConv = toolCompleteStore.conversations[conversationId];
-                  if (toolCompleteConv) {
-                    // Mark that we should create a new event on the next token
-                    toolCompleteStore.setConversation(conversationId, {
-                      ...toolCompleteConv,
-                      shouldCreateNewEvent: true
-                    });
-                  }
-                  break;
-                  
-                case 'complete':
-                  // Streaming completed successfully
-                  const finalStore = useEventChatStore.getState();
-                  const finalConv = finalStore.conversations[conversationId];
-                  if (finalConv) {
-                    finalStore.setConversation(conversationId, {
-                      ...finalConv,
-                      isStreaming: false,
-                      streamingEventId: undefined
-                    });
-                  }
-                  break;
-                  
-                case 'error':
-                  console.error('Streaming error:', data.error);
-                  // Remove optimistic updates on error
-                  const errorStore = useEventChatStore.getState();
-                  const errorConv = errorStore.conversations[conversationId];
-                  if (errorConv) {
-                    errorStore.setConversation(conversationId, {
-                      ...errorConv,
-                      events: errorConv.events.slice(0, -2), // Remove user + assistant events
-                      isStreaming: false,
-                      streamingEventId: undefined
-                    });
-                  }
-                  break;
-              }
-            } catch (e) {
-              console.error('Error parsing stream data:', e);
-            }
-          }
-        }
-      }
+      // Track final events for store update on completion
+      let finalEvents = [...conversation.events, userEvent, assistantPlaceholder];
+      
+      // Set local streaming state for real-time display
+      setLocalStreamingEvents(finalEvents);
+      setIsLocalStreaming(true);
+      
+      // Set up local state updater to track streaming events locally (NOT in store during streaming)
+      eventHandler.setLocalStateUpdater(
+        (updater) => {
+          // Update local tracking of events (not the store during streaming)
+          finalEvents = updater(finalEvents);
+          
+          // Update local streaming state for real-time UI display
+          setLocalStreamingEvents([...finalEvents]);
+        },
+        assistantPlaceholder
+      );
+      
+      // Process streaming response with unified handler
+      await eventHandler.processStreamingResponse(response);
+      
+      // After streaming completes, update store with final events
+      store.setConversation(conversationId, {
+        ...conversation,
+        events: finalEvents,
+        isStreaming: false,
+        streamingEventId: undefined
+      });
+      
+      // Clear local streaming state
+      setLocalStreamingEvents(null);
+      setIsLocalStreaming(false);
     } catch (error) {
       console.error('Error sending message:', error);
+      // Clear local streaming state on error
+      setLocalStreamingEvents(null);
+      setIsLocalStreaming(false);
+      
       // Remove optimistic updates on error
       const errorStore = useEventChatStore.getState();
       const errorConv = errorStore.conversations[conversationId];
@@ -363,7 +185,7 @@ export function EventStream({
           
           {/* Status indicators and space for settings toggle */}
           <div className="flex items-center gap-2 text-xs text-muted-foreground w-12 justify-end">
-            {isStreaming && (
+            {(isStreaming || isLocalStreaming) && (
               <div className="flex items-center gap-1">
                 <div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
                 <span className="text-xs">•••</span>
@@ -376,7 +198,7 @@ export function EventStream({
       {/* Events */}
       <div className="flex-1 min-h-0 h-full overflow-hidden">
         {events ? (
-          // Local state - render events directly
+          // Local state - render events directly (new conversations)
           <EventList 
             events={events}
             conversation={optimisticConversation}
@@ -384,8 +206,17 @@ export function EventStream({
             className="h-full"
             isStreaming={isStreaming}
           />
+        ) : localStreamingEvents ? (
+          // Local streaming state - render streaming events directly (existing conversations during streaming)
+          <EventList 
+            events={localStreamingEvents}
+            conversation={conversation}
+            autoScroll={true}
+            className="h-full"
+            isStreaming={isLocalStreaming}
+          />
         ) : conversationId ? (
-          // Server state - fetch from store
+          // Server state - fetch from store (existing conversations not streaming)
           <EventList 
             conversationId={conversationId}
             autoScroll={true}

@@ -61,7 +61,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
   const availableModels = [...new Set(buds.map(bud => bud.default_json.model))];
 
   const handleBudSelect = (budId: string) => {
-    router.push(`/new?bud=${budId}`);
+    router.push(`/chat/new?bud=${budId}`);
   };
 
   const handleCreateBud = async (config: BudConfig, name: string) => {

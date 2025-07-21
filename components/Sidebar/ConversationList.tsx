@@ -72,7 +72,36 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   }, [workspaceConversationIds, conversationsRecord]);
   
   // Extract current conversation ID from URL
-  const currentConversationId = pathname.split('/').pop();
+  // Listen for custom URL change events from replaceState calls
+  const [currentUrl, setCurrentUrl] = useState('');
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const updateUrl = () => {
+        const newUrl = window.location.pathname;
+        setCurrentUrl(newUrl);
+      };
+      
+      // Set initial URL
+      updateUrl();
+      
+      // Listen for custom URL change events
+      const handleUrlChange = (event: CustomEvent) => {
+        setCurrentUrl(event.detail.pathname);
+      };
+      
+      window.addEventListener('urlchange', handleUrlChange as EventListener);
+      
+      return () => {
+        window.removeEventListener('urlchange', handleUrlChange as EventListener);
+      };
+    }
+  }, []);
+  
+  const currentConversationId = useMemo(() => {
+    const urlToUse = currentUrl || pathname;
+    return urlToUse.split('/').pop();
+  }, [currentUrl, pathname]);
 
   // Load conversations for the workspace and add them to ChatStore
   useEffect(() => {
