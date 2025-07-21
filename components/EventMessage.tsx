@@ -159,7 +159,7 @@ const ToolCallSegment = memo(function ToolCallSegment({
   );
 });
 
-const ToolResultSegment = memo(function ToolResultSegment({ 
+const _ToolResultSegment = memo(function ToolResultSegment({ 
   segment 
 }: { 
   segment: { type: 'tool_result'; id: string; output: object }

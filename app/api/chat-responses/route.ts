@@ -1,6 +1,5 @@
 // New chat endpoint using OpenAI Responses API with native MCP support
 import { createClient } from '@/lib/supabase/server';
-import { Database } from '@/lib/types/database';
 import OpenAI from 'openai';
 
 // OpenAI Response API output types
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
       require_approval: string;
       allowed_tools?: string[];
     }> = [];
-    let budData: Database['public']['Tables']['buds']['Row'] | null = null;
+    // let budData: Database['public']['Tables']['buds']['Row'] | null = null; // Unused for now
 
     try {
       if (budId) {
@@ -83,7 +82,7 @@ export async function POST(request: NextRequest) {
           .single();
 
         if (bud && !budError) {
-          budData = bud;
+          // budData = bud; // Unused for now
           const mcpConfig = bud.mcp_config || {};
           
           if (mcpConfig.servers?.length > 0) {
@@ -96,15 +95,15 @@ export async function POST(request: NextRequest) {
 
             if (servers && !serversError) {
               mcpServers = servers.map(server => {
-                const metadata = server.metadata as any; // Type assertion for metadata
+                const metadata = server.metadata as Record<string, unknown> | null; // Type assertion for metadata
                 return {
                   type: 'mcp',
-                  server_label: metadata?.server_label || server.name.toLowerCase().replace(/\s+/g, '_'),
+                  server_label: (typeof metadata?.server_label === 'string' ? metadata.server_label : server.name.toLowerCase().replace(/\s+/g, '_')),
                   server_url: server.endpoint,
-                  require_approval: metadata?.require_approval || 'never',
-                  ...(metadata?.allowed_tools && {
+                  require_approval: (typeof metadata?.require_approval === 'string' ? metadata.require_approval : 'never'),
+                  ...(Array.isArray(metadata?.allowed_tools) ? {
                     allowed_tools: metadata.allowed_tools
-                  })
+                  } : {})
                 };
               });
               
@@ -129,7 +128,7 @@ export async function POST(request: NextRequest) {
     const responseRequest = {
       model,
       input,
-    } as any;
+    } as Record<string, unknown>;
 
     // Add MCP tools if available
     if (mcpServers.length > 0) {
@@ -145,7 +144,7 @@ export async function POST(request: NextRequest) {
         .map(msg => `${msg.role}: ${msg.content}`)
         .join('\n\n');
       
-      (responseRequest as any).input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`;
+      (responseRequest as Record<string, unknown>).input = `Previous conversation:\n${conversationContext}\n\nUser: ${input}`;
     }
 
     // Make the Responses API call
@@ -201,7 +200,7 @@ export async function POST(request: NextRequest) {
           break;
           
         default:
-          console.log('❓ Unknown output type:', (output as any).type);
+          console.log('❓ Unknown output type:', (output as Record<string, unknown>).type);
       }
     }
 

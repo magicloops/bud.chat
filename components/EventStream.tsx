@@ -60,7 +60,7 @@ export function EventStream({
     }
   } : null;
   
-  const handleEventSent = (_eventId: string) => {
+  const _handleEventSent = (_eventId: string) => {
     // For server-state conversations, the store handles updates
     // For local-state conversations, the parent component handles updates
   };
@@ -164,9 +164,9 @@ export function EventStream({
   
   // Get model from conversation -> current bud -> default (same hierarchy as backend)
   const model = conversation?.meta.model_config_overrides?.model ||
-                (budData?.default_json as any)?.model ||
+                (budData?.default_json && typeof budData.default_json === 'object' && 'model' in budData.default_json ? (budData.default_json as { model?: string }).model : null) ||
                 // For existing conversations, use current bud data from store
-                (currentBudData?.default_json as any)?.model ||
+                (currentBudData?.default_json && typeof currentBudData.default_json === 'object' && 'model' in currentBudData.default_json ? (currentBudData.default_json as { model?: string }).model : null) ||
                 getDefaultModel();
   
   return (
@@ -180,7 +180,7 @@ export function EventStream({
           {/* Centered title and model */}
           <div className="flex items-center gap-2 flex-1 justify-center min-w-0">
             <h1 className="text-sm font-medium truncate max-w-xs">{title}</h1>
-            <span className="text-xs text-muted-foreground whitespace-nowrap">• {model}</span>
+            <span className="text-xs text-muted-foreground whitespace-nowrap">• {typeof model === 'string' ? model : 'Unknown'}</span>
           </div>
           
           {/* Status indicators and space for settings toggle */}

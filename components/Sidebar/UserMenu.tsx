@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,8 +38,8 @@ export function UserMenu() {
   const bud = useBud(conversation?.meta.source_bud_id || '');
   
   // Check if there's a custom theme active (from bud default)
-  const budConfig = bud?.default_json as any;
-  const hasCustomTheme = budConfig?.customTheme;
+  const budConfig = bud?.default_json as Record<string, unknown> | undefined;
+  const hasCustomTheme = budConfig && typeof budConfig === 'object' && 'customTheme' in budConfig;
 
   const handleSignOut = async () => {
     try {

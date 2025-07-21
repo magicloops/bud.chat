@@ -47,7 +47,7 @@ export async function GET(
     }
 
     // Clean up the response (remove nested workspace data)
-    const { workspaces, ...cleanServer } = server;
+    const { workspaces: _workspaces, ...cleanServer } = server;
     
     return NextResponse.json({ data: cleanServer });
   } catch (error) {

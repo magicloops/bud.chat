@@ -3,6 +3,7 @@
 
 import { Event, createTextEvent, createMixedEvent } from '@/lib/types/events';
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
+import { BudConfig } from '@/lib/types';
 
 /**
  * Create a greeting event for new conversations
@@ -53,11 +54,11 @@ export function updateEventsConversationId(events: Event[], conversationId: stri
 /**
  * Create initial events for a bud configuration
  */
-export function createBudInitialEvents(bud: any): Event[] {
+export function createBudInitialEvents(bud: { default_json: BudConfig }): Event[] {
   const events: Event[] = [];
   
   try {
-    const budConfig = bud.default_json as any;
+    const budConfig = bud.default_json;
     
     // Add custom greeting if configured
     if (budConfig.greeting) {
@@ -67,13 +68,8 @@ export function createBudInitialEvents(bud: any): Event[] {
     }
     
     // Add system messages from bud configuration
-    if (budConfig.system_prompt) {
-      events.push(createTextEvent('system', budConfig.system_prompt));
-    }
-    
-    // Add any additional system messages
-    if (budConfig.additional_instructions) {
-      events.push(createTextEvent('system', budConfig.additional_instructions));
+    if (budConfig.systemPrompt) {
+      events.push(createTextEvent('system', budConfig.systemPrompt));
     }
     
     return events;
@@ -116,9 +112,9 @@ export function createOptimisticEventConversation(
   workspaceId: string,
   events: Event[],
   budId?: string,
-  budData?: any
+  budData?: { default_json: BudConfig }
 ): EventConversation {
-  const budConfig = budData?.default_json as any;
+  const budConfig = budData?.default_json;
   
   const meta: EventConversationMeta = {
     id: conversationId,
@@ -142,18 +138,20 @@ export function createOptimisticEventConversation(
 /**
  * Convert events to a format suitable for streaming API
  */
-export function eventsToStreamingFormat(events: Event[]): any[] {
-  return events.map(event => {
+export function eventsToStreamingFormat(events: Event[]): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+  
+  for (const event of events) {
     if (event.role === 'system') {
-      return {
+      results.push({
         role: 'system',
         content: event.segments.find(s => s.type === 'text')?.text || ''
-      };
+      });
     } else if (event.role === 'user') {
-      return {
+      results.push({
         role: 'user', 
         content: event.segments.find(s => s.type === 'text')?.text || ''
-      };
+      });
     } else if (event.role === 'assistant') {
       const textContent = event.segments
         .filter(s => s.type === 'text')
@@ -171,14 +169,16 @@ export function eventsToStreamingFormat(events: Event[]): any[] {
           }
         }));
       
-      return {
+      results.push({
         role: 'assistant',
         content: textContent,
         json_meta: toolCalls.length > 0 ? { tool_calls: toolCalls } : undefined
-      };
+      });
     }
-    return null;
-  }).filter(Boolean);
+    // Skip unknown event roles
+  }
+  
+  return results;
 }
 
 /**

@@ -21,7 +21,7 @@ export function WorkspaceSelector() {
   const setWorkspaces = useSetWorkspaces();
   const selectedWorkspaceId = useSelectedWorkspace();
   const setSelectedWorkspace = useSetSelectedWorkspace();
-  const conversationsRecord = useConversations();
+  const _conversationsRecord = useConversations();
   const [showNewWorkspaceModal, setShowNewWorkspaceModal] = useState(false);
 
   const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId);

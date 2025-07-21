@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 import { saveEvent } from '@/lib/db/events';
 import { createTextEvent } from '@/lib/types/events';
 import { generateKeyBetween } from 'fractional-indexing';
+import { Database } from '@/lib/types/database';
+import { BudConfig } from '@/lib/types';
 
 // Types for complex Supabase queries with joins
 interface ConversationWithBuds {
@@ -13,7 +15,7 @@ interface ConversationWithBuds {
   source_bud_id: string | null;
   buds: {
     id: string;
-    default_json: any;
+    default_json: Database['public']['Tables']['buds']['Row']['default_json'];
   } | null;
 }
 
@@ -79,12 +81,14 @@ export async function GET(request: NextRequest) {
       // If no custom name/avatar and there's a source bud, use bud defaults
       const budData = (conversation as unknown as ConversationWithBuds).buds;
       if ((!effectiveAssistantName || !effectiveAssistantAvatar) && budData) {
-        const budConfig = budData.default_json;
-        if (!effectiveAssistantName && budConfig.name) {
-          effectiveAssistantName = budConfig.name;
-        }
-        if (!effectiveAssistantAvatar && budConfig.avatar) {
-          effectiveAssistantAvatar = budConfig.avatar;
+        const budConfig = budData.default_json as BudConfig | null;
+        if (budConfig) {
+          if (!effectiveAssistantName && budConfig.name) {
+            effectiveAssistantName = budConfig.name;
+          }
+          if (!effectiveAssistantAvatar && budConfig.avatar) {
+            effectiveAssistantAvatar = budConfig.avatar;
+          }
         }
       }
 
@@ -114,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { workspaceId, title, systemPrompt, initialMessages } = body;
+    const { workspaceId, title: _title, systemPrompt, initialMessages } = body;
 
     if (!workspaceId) {
       return new Response('workspaceId is required', { status: 400 });
@@ -185,7 +189,7 @@ export async function POST(request: NextRequest) {
     }
 
     return Response.json(conversation);
-  } catch (error) {
+  } catch (_error) {
     return new Response('Internal server error', { status: 500 });
   }
 }

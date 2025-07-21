@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
     const supabase = await createClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -52,11 +52,14 @@ export async function GET(request: NextRequest) {
     });
     
     // Add member workspaces (skip if already owned)
-    memberWorkspaces?.forEach((member: any) => {
-      const workspace = member.workspaces;
-      if (!allWorkspaces.has(workspace.id)) {
-        allWorkspaces.set(workspace.id, workspace);
-      }
+    memberWorkspaces?.forEach((member: { workspaces: { id: string; name: string; owner_user_id: string; created_at: string } | { id: string; name: string; owner_user_id: string; created_at: string }[] }) => {
+      // Handle both single workspace and array cases (Supabase join can return either)
+      const workspaces = Array.isArray(member.workspaces) ? member.workspaces : [member.workspaces];
+      workspaces.forEach((workspace) => {
+        if (!allWorkspaces.has(workspace.id)) {
+          allWorkspaces.set(workspace.id, workspace);
+        }
+      });
     });
 
     const formattedWorkspaces = Array.from(allWorkspaces.values());

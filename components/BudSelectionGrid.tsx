@@ -19,7 +19,7 @@ import {
   useBudCreateLoading,
   useDeleteBud
 } from '@/state/budStore';
-import { BudConfig } from '@/lib/types';
+import { Bud, BudConfig } from '@/lib/types';
 
 interface BudSelectionGridProps {
   workspaceId: string
@@ -47,7 +47,9 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
 
   // Filter buds based on search and model
   const filteredBuds = buds.filter(bud => {
-    const config = bud.default_json;
+    const config = bud.default_json as BudConfig | null;
+    if (!config) return false;
+    
     const matchesSearch = !searchQuery || 
       config.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase());
@@ -58,7 +60,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
   });
 
   // Get unique models for filter
-  const availableModels = [...new Set(buds.map(bud => bud.default_json.model))];
+  const availableModels = [...new Set(buds.map(bud => (bud.default_json as BudConfig | null)?.model).filter(Boolean))];
 
   const handleBudSelect = (budId: string) => {
     router.push(`/chat/new?bud=${budId}`);
@@ -204,7 +206,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
             {filteredBuds.map((bud) => (
               <BudCard
                 key={bud.id}
-                bud={bud}
+                bud={bud as unknown as Bud}
                 onClick={() => handleBudSelect(bud.id)}
                 onDelete={() => handleDeleteBud(bud.id)}
                 showActions={true}

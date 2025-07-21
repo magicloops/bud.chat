@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
+import { Database } from '@/lib/types/database';
 import { useMemo } from 'react';
 import { Bud } from '@/lib/types';
 import { budManager, CreateBudArgs, UpdateBudArgs } from '@/lib/budHelpers';
@@ -12,8 +13,8 @@ interface BudForStore {
   owner_user_id: string | null;
   workspace_id: string | null;
   name: string;
-  default_json: any;
-  mcp_config: any;
+  default_json: Database['public']['Tables']['buds']['Row']['default_json'];
+  mcp_config: Database['public']['Tables']['buds']['Row']['mcp_config'];
   created_at: string;
 }
 
@@ -95,7 +96,7 @@ export const useBudStore = create<BudStore>()(
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud as BudForStore;
+                state.buds[bud.id] = bud;
               });
               
               // Store workspace -> bud ids mapping
@@ -131,7 +132,7 @@ export const useBudStore = create<BudStore>()(
             set((state) => {
               // Store buds by id
               buds.forEach(bud => {
-                state.buds[bud.id] = bud as BudForStore;
+                state.buds[bud.id] = bud;
               });
               
               // Store workspace -> bud ids mapping
@@ -161,7 +162,8 @@ export const useBudStore = create<BudStore>()(
             
             set((state) => {
               // Add to buds collection
-              state.buds[newBud.id] = newBud as BudForStore;
+              // @ts-expect-error - Complex type mapping between Bud and BudForStore with Json type
+              state.buds[newBud.id] = newBud;
               
               // Add to workspace buds list
               if (!state.workspaceBuds[args.workspaceId]) {
@@ -193,7 +195,7 @@ export const useBudStore = create<BudStore>()(
             const updatedBud = await budManager.updateBud(budId, updates);
             
             set((state) => {
-              state.buds[budId] = updatedBud as BudForStore;
+              state.buds[budId] = updatedBud as unknown as BudForStore;
               state.loading.update[budId] = false;
             });
             
@@ -247,14 +249,15 @@ export const useBudStore = create<BudStore>()(
         
         // Get single bud
         getBud: (budId: string) => {
-          return get().buds[budId];
+          const bud = get().buds[budId];
+          return bud ? (bud as unknown as Bud) : undefined;
         },
         
         // Get buds for workspace
         getWorkspaceBuds: (workspaceId: string) => {
           const budIds = get().workspaceBuds[workspaceId] || [];
           const buds = get().buds;
-          return budIds.map(id => buds[id]).filter(Boolean);
+          return budIds.map(id => buds[id]).filter(Boolean).map(bud => bud as unknown as Bud);
         },
         
         // Clear all errors
@@ -291,8 +294,10 @@ export const useBudStore = create<BudStore>()(
 );
 
 // Convenience hooks for specific data
-export const useBud = (budId: string) =>
-  useBudStore((state) => state.buds[budId]);
+export const useBud = (budId: string) => {
+  const bud = useBudStore((state) => state.buds[budId]);
+  return bud ? (bud as unknown as Bud) : undefined;
+};
 
 export const useWorkspaceBuds = (workspaceId: string) => {
   const budIds = useBudStore((state) => state.workspaceBuds[workspaceId]);
@@ -300,7 +305,7 @@ export const useWorkspaceBuds = (workspaceId: string) => {
   
   return useMemo(() => {
     if (!budIds) return [];
-    return budIds.map(id => buds[id]).filter(Boolean);
+    return budIds.map(id => buds[id]).filter(Boolean).map(bud => bud as unknown as Bud);
   }, [budIds, buds]);
 };
 

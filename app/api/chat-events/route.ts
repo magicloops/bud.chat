@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json() as {
-      messages: Array<{role: string; content: string; json_meta?: any}>;
+      messages: Array<{role: string; content: string; json_meta?: Record<string, unknown>}>;
       workspaceId: string;
       budId?: string;
       model?: string;
@@ -261,7 +261,7 @@ export async function POST(request: NextRequest) {
         if (message.content) {
           segments.push({ type: 'text' as const, text: message.content });
         }
-        if (message.json_meta?.tool_calls) {
+        if (message.json_meta?.tool_calls && Array.isArray(message.json_meta.tool_calls)) {
           for (const toolCall of message.json_meta.tool_calls) {
             segments.push({
               type: 'tool_call' as const,
@@ -501,7 +501,7 @@ export async function POST(request: NextRequest) {
                   for (const choice of chunk.choices) {
                     if (choice.finish_reason) {
                       // Finalize any pending tool calls
-                      for (const [index, toolCall] of activeToolCalls.entries()) {
+                      for (const [_index, toolCall] of activeToolCalls.entries()) {
                         if (toolCall.id && toolCall.name && toolCall.args) {
                           try {
                             const args = JSON.parse(toolCall.args);
@@ -514,7 +514,7 @@ export async function POST(request: NextRequest) {
                               tool_name: toolCall.name,
                               args: args
                             })}\n\n`));
-                          } catch (e) {
+                          } catch (_e) {
                             eventBuilder.addToolCall(toolCall.id, toolCall.name, {});
                           }
                         }
@@ -590,7 +590,7 @@ export async function POST(request: NextRequest) {
                           if (toolCallDelta.function?.arguments) {
                             toolCall.args = (toolCall.args || '') + toolCallDelta.function.arguments;
                           }
-                        } catch (toolError) {
+                        } catch (_toolError) {
                           // Don't let tool call errors break the entire stream
                           continue;
                         }
@@ -604,7 +604,7 @@ export async function POST(request: NextRequest) {
                   try {
                     const partialEvent = eventBuilder.finalize();
                     eventLog.addEvent(partialEvent);
-                  } catch (finalizeError) {
+                  } catch (_finalizeError) {
                     // Ignore finalization errors for partial content
                   }
                 }

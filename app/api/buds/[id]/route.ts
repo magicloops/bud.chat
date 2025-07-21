@@ -138,11 +138,11 @@ export async function PUT(
       
       // Merge with existing config (excluding MCP config)
       const currentConfig = existingBud.default_json as BudConfig;
-      updateData.default_json = { ...currentConfig, ...budConfig } as any;
+      updateData.default_json = { ...currentConfig, ...budConfig } as unknown as Database['public']['Tables']['buds']['Update']['default_json'];
       
       // Update MCP config separately if provided
       if (mcpConfig !== undefined) {
-        updateData.mcp_config = mcpConfig as any;
+        updateData.mcp_config = mcpConfig as unknown as Database['public']['Tables']['buds']['Update']['mcp_config'];
       }
     }
 

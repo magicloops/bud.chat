@@ -7,6 +7,14 @@ import type OpenAI from 'openai';
 type OpenAIMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type OpenAIToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
 
+// Interface for provider messages from EventLog
+interface ProviderMessage {
+  role: string;
+  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
+  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+  tool_call_id?: string;
+}
+
 export interface OpenAIResponse {
   id: string;
   object: 'chat.completion';
@@ -35,13 +43,13 @@ export function eventsToOpenAIMessages(events: Event[]): OpenAI.Chat.Completions
   const providerMessages = eventLog.toProviderMessages('openai');
   
   // Convert to proper SDK format
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = providerMessages.map((msg: any) => {
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = (providerMessages as ProviderMessage[]).map((msg: ProviderMessage) => {
     return {
       role: msg.role,
       content: msg.content,
       ...(msg.tool_calls && { tool_calls: msg.tool_calls }),
       ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id })
-    };
+    } as OpenAI.Chat.Completions.ChatCompletionMessageParam;
   });
   
   return messages;
@@ -95,7 +103,7 @@ export function openaiStreamDeltaToEvent(
   delta: OpenAIStreamDelta,
   currentEvent: Event | null,
   activeToolCalls: Map<number, { id?: string; name?: string; args?: string }> = new Map()
-): { event: Event | null; isComplete: boolean; toolCalls: Map<number, any> } {
+): { event: Event | null; isComplete: boolean; toolCalls: Map<number, { id?: string; name?: string; args?: string }> } {
   for (const choice of delta.choices) {
     if (choice.finish_reason) {
       // Message is complete
@@ -178,12 +186,12 @@ export function openaiStreamDeltaToEvent(
 /**
  * Convert legacy message format to events (for migration)
  */
-export function legacyMessageToEvents(message: any): Event[] {
+export function legacyMessageToEvents(message: Record<string, unknown>): Event[] {
   const events: Event[] = [];
   
-  if (message.role === 'system') {
+  if (message.role === 'system' && typeof message.content === 'string') {
     events.push(createTextEvent('system', message.content));
-  } else if (message.role === 'user') {
+  } else if (message.role === 'user' && typeof message.content === 'string') {
     events.push(createTextEvent('user', message.content));
   } else if (message.role === 'assistant') {
     const segments: Segment[] = [];
@@ -194,8 +202,9 @@ export function legacyMessageToEvents(message: any): Event[] {
     }
     
     // Add tool calls from json_meta
-    if (message.json_meta?.tool_calls) {
-      for (const toolCall of message.json_meta.tool_calls) {
+    const jsonMeta = message.json_meta as { tool_calls?: Array<{ id: string; function: { name: string; arguments?: string } }> } | null | undefined;
+    if (jsonMeta?.tool_calls) {
+      for (const toolCall of jsonMeta.tool_calls) {
         segments.push({
           type: 'tool_call',
           id: toolCall.id,
@@ -208,11 +217,12 @@ export function legacyMessageToEvents(message: any): Event[] {
     if (segments.length > 0) {
       events.push(createMixedEvent('assistant', segments));
     }
-  } else if (message.role === 'tool' || message.json_meta?.is_tool_result) {
+  } else if (message.role === 'tool') {
     // Tool result message
-    const toolCallId = message.json_meta?.tool_call_id;
-    if (toolCallId) {
-      events.push(createToolResultEvent(toolCallId, { content: message.content }));
+    const toolJsonMeta = message.json_meta as { tool_call_id?: string; is_tool_result?: boolean } | null | undefined;
+    const toolCallId = toolJsonMeta?.tool_call_id;
+    if (toolCallId && typeof toolCallId === 'string') {
+      events.push(createToolResultEvent(toolCallId, { content: message.content } as object));
     }
   }
   
@@ -222,7 +232,7 @@ export function legacyMessageToEvents(message: any): Event[] {
 /**
  * Convert tool result to OpenAI tool message format
  */
-export function toolResultToOpenAIMessage(toolCallId: string, result: any): OpenAIMessage {
+export function toolResultToOpenAIMessage(toolCallId: string, result: unknown): OpenAIMessage {
   return {
     role: 'tool',
     tool_call_id: toolCallId,

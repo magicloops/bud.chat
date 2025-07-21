@@ -36,7 +36,8 @@ export function eventsToAnthropicMessages(events: Event[]): {
   const system = eventLog.getSystemParameter();
   
   // Convert to proper SDK format
-  const messages: Anthropic.Messages.MessageParam[] = providerMessages.map((msg: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const messages: Anthropic.Messages.MessageParam[] = providerMessages.map((msg: any) => { // Provider messages from different chat APIs
     return {
       role: msg.role,
       content: msg.content
@@ -143,7 +144,8 @@ export function anthropicStreamDeltaToEvent(
           if (!segment.args) {
             segment.args = {};
           }
-          (segment.args as any)._partial_json = ((segment.args as any)._partial_json || '') + partialJson;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (segment.args as any)._partial_json = ((segment.args as any)._partial_json || '') + partialJson; // Anthropic streaming accumulates partial JSON
         } catch (e) {
           console.error('Failed to parse tool call JSON delta:', e);
         }
@@ -160,14 +162,14 @@ export function anthropicStreamDeltaToEvent(
       if (completedSegment?.type === 'tool_call') {
         // Parse the accumulated JSON
         try {
-          const partialJson = (completedSegment.args as any)._partial_json;
+          const partialJson = (completedSegment.args as Record<string, unknown>)._partial_json;
           console.log('🔧 Finalizing tool call JSON:', { 
             toolId: completedSegment.id, 
             toolName: completedSegment.name, 
-            partialJson: partialJson?.substring(0, 200) + (partialJson?.length > 200 ? '...' : ''),
+            partialJson: typeof partialJson === 'string' ? (partialJson.substring(0, 200) + (partialJson.length > 200 ? '...' : '')) : partialJson,
             hasPartialJson: !!partialJson
           });
-          if (partialJson) {
+          if (typeof partialJson === 'string' && partialJson) {
             completedSegment.args = JSON.parse(partialJson);
             console.log('✅ Parsed tool call args:', completedSegment.args);
           } else {
@@ -194,11 +196,11 @@ export function anthropicStreamDeltaToEvent(
  */
 export function createToolResultFromMCPResponse(
   toolCallId: string,
-  mcpResponse: any,
+  mcpResponse: unknown,
   error?: string
 ): Event {
   const output = error ? { error } : mcpResponse;
-  return createToolResultEvent(toolCallId, output);
+  return createToolResultEvent(toolCallId, output as object);
 }
 
 /**
@@ -216,12 +218,12 @@ export function extractPendingToolCalls(events: Event[]): Array<{
 /**
  * Convert legacy message format to events (for migration)
  */
-export function legacyMessageToEvents(message: any): Event[] {
+export function legacyMessageToEvents(message: Record<string, unknown>): Event[] {
   const events: Event[] = [];
   
-  if (message.role === 'system') {
+  if (message.role === 'system' && typeof message.content === 'string') {
     events.push(createTextEvent('system', message.content));
-  } else if (message.role === 'user') {
+  } else if (message.role === 'user' && typeof message.content === 'string') {
     events.push(createTextEvent('user', message.content));
   } else if (message.role === 'assistant') {
     const segments: Segment[] = [];
@@ -232,8 +234,9 @@ export function legacyMessageToEvents(message: any): Event[] {
     }
     
     // Add tool calls from json_meta
-    if (message.json_meta?.tool_calls) {
-      for (const toolCall of message.json_meta.tool_calls) {
+    const jsonMeta = message.json_meta as { tool_calls?: Array<{ id: string; function: { name: string; arguments?: string } }> } | null | undefined;
+    if (jsonMeta?.tool_calls) {
+      for (const toolCall of jsonMeta.tool_calls) {
         segments.push({
           type: 'tool_call',
           id: toolCall.id,
@@ -246,11 +249,12 @@ export function legacyMessageToEvents(message: any): Event[] {
     if (segments.length > 0) {
       events.push(createMixedEvent('assistant', segments));
     }
-  } else if (message.role === 'tool' || message.json_meta?.is_tool_result) {
+  } else if (message.role === 'tool') {
     // Tool result message
-    const toolCallId = message.json_meta?.tool_call_id;
-    if (toolCallId) {
-      events.push(createToolResultEvent(toolCallId, { content: message.content }));
+    const toolJsonMeta = message.json_meta as { tool_call_id?: string; is_tool_result?: boolean } | null | undefined;
+    const toolCallId = toolJsonMeta?.tool_call_id;
+    if (toolCallId && typeof toolCallId === 'string') {
+      events.push(createToolResultEvent(toolCallId, { content: message.content } as object));
     }
   }
   

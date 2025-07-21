@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 import { getConversationEvents } from '@/lib/db/events';
 import { Database } from '@/lib/types/database';
+import { BudConfig } from '@/lib/types';
 
 // Types for complex Supabase queries with joins
 interface ConversationWithJoins {
@@ -11,11 +12,11 @@ interface ConversationWithJoins {
   source_bud_id: string | null;
   assistant_name: string | null;
   assistant_avatar: string | null;
-  model_config_overrides: any;
-  mcp_config_overrides: any;
+  model_config_overrides: Database['public']['Tables']['conversations']['Row']['model_config_overrides'];
+  mcp_config_overrides: Database['public']['Tables']['conversations']['Row']['mcp_config_overrides'];
   buds: {
     id: string;
-    default_json: any;
+    default_json: Database['public']['Tables']['buds']['Row']['default_json'];
   } | null;
   workspace: {
     id: string;
@@ -90,12 +91,14 @@ export async function GET(
     // If no custom name/avatar and there's a source bud, use bud defaults
     const buds = (conversation as unknown as ConversationWithJoins).buds;
     if ((!effectiveAssistantName || !effectiveAssistantAvatar) && buds) {
-      const budConfig = buds.default_json;
-      if (!effectiveAssistantName && budConfig.name) {
-        effectiveAssistantName = budConfig.name;
-      }
-      if (!effectiveAssistantAvatar && budConfig.avatar) {
-        effectiveAssistantAvatar = budConfig.avatar;
+      const budConfig = buds.default_json as BudConfig | null;
+      if (budConfig) {
+        if (!effectiveAssistantName && budConfig.name) {
+          effectiveAssistantName = budConfig.name;
+        }
+        if (!effectiveAssistantAvatar && budConfig.avatar) {
+          effectiveAssistantAvatar = budConfig.avatar;
+        }
       }
     }
 

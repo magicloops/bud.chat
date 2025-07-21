@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client';
 import { Bud, BudConfig } from '@/lib/types';
+import { Database } from '@/lib/types/database';
 import { Event } from '@/state/eventChatStore';
 import { createTextEvent } from '@/lib/types/events';
 import { generateKeyBetween } from 'fractional-indexing';
@@ -190,9 +191,11 @@ export function getBudTemperature(bud: Bud): number {
 }
 
 // New helper functions for override-only conversation approach
-export function getEffectiveConversationConfig(conversation: any, sourceBud?: Bud) {
+export function getEffectiveConversationConfig(conversation: Database['public']['Tables']['conversations']['Row'], sourceBud?: Bud) {
   const budConfig = sourceBud ? getBudConfig(sourceBud) : null;
-  const overrides = conversation.model_config_overrides || {};
+  const overrides = (conversation.model_config_overrides && typeof conversation.model_config_overrides === 'object' && !Array.isArray(conversation.model_config_overrides)) 
+    ? conversation.model_config_overrides as Record<string, unknown>
+    : {};
   
   return {
     // Identity
@@ -200,20 +203,20 @@ export function getEffectiveConversationConfig(conversation: any, sourceBud?: Bu
     assistant_avatar: conversation.assistant_avatar || budConfig?.avatar || '🤖',
     
     // Model settings
-    model: overrides.model || budConfig?.model || 'gpt-4o',
-    temperature: overrides.temperature ?? budConfig?.temperature ?? 0.7,
-    max_tokens: overrides.max_tokens || budConfig?.maxTokens,
-    system_prompt: overrides.system_prompt || budConfig?.systemPrompt || 'You are a helpful assistant.',
-    greeting: overrides.greeting || budConfig?.greeting,
+    model: (typeof overrides.model === 'string' ? overrides.model : null) || budConfig?.model || 'gpt-4o',
+    temperature: (typeof overrides.temperature === 'number' ? overrides.temperature : null) ?? budConfig?.temperature ?? 0.7,
+    max_tokens: (typeof overrides.max_tokens === 'number' ? overrides.max_tokens : null) || budConfig?.maxTokens,
+    system_prompt: (typeof overrides.system_prompt === 'string' ? overrides.system_prompt : null) || budConfig?.systemPrompt || 'You are a helpful assistant.',
+    greeting: (typeof overrides.greeting === 'string' ? overrides.greeting : null) || budConfig?.greeting,
     
     // Model-specific settings
-    top_p: overrides.top_p,
-    presence_penalty: overrides.presence_penalty,
-    anthropic_version: overrides.anthropic_version
+    top_p: (typeof overrides.top_p === 'number' ? overrides.top_p : null),
+    presence_penalty: (typeof overrides.presence_penalty === 'number' ? overrides.presence_penalty : null),
+    anthropic_version: (typeof overrides.anthropic_version === 'string' ? overrides.anthropic_version : null)
   };
 }
 
-export function hasConversationOverrides(conversation: any): boolean {
+export function hasConversationOverrides(conversation: Database['public']['Tables']['conversations']['Row']): boolean {
   return !!(
     conversation.assistant_name ||
     conversation.assistant_avatar ||
@@ -221,12 +224,12 @@ export function hasConversationOverrides(conversation: any): boolean {
   );
 }
 
-export function getConversationDisplayName(conversation: any, sourceBud?: Bud): string {
+export function getConversationDisplayName(conversation: Database['public']['Tables']['conversations']['Row'], sourceBud?: Bud): string {
   const config = getEffectiveConversationConfig(conversation, sourceBud);
   return config.assistant_name;
 }
 
-export function getConversationAvatar(conversation: any, sourceBud?: Bud): string {
+export function getConversationAvatar(conversation: Database['public']['Tables']['conversations']['Row'], sourceBud?: Bud): string {
   const config = getEffectiveConversationConfig(conversation, sourceBud);
   return config.assistant_avatar;
 }

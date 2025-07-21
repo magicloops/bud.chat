@@ -24,19 +24,21 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
         rehypePlugins={[rehypeHighlight]}
         components={{
         // Custom styling for different elements
-          code: ({ node: _node, className, children, ...props }: any) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code: (props: any) => {
+            const { node: _node, className, children, ...restProps } = props;
             const inline = (props as { inline?: boolean })?.inline;
             const match = /language-(\w+)/.exec(className || '');
             return !inline && match ? (
               <pre className="bg-muted rounded-md p-1 overflow-x-auto my-2 w-0 min-w-full">
-                <code className={`${className} block whitespace-pre`} {...props}>
+                <code className={`${className} block whitespace-pre`} {...restProps}>
                   {children}
                 </code>
               </pre>
             ) : (
               <code
                 className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono break-words"
-                {...props}
+                {...restProps}
               >
                 {children}
               </code>

@@ -3,10 +3,13 @@ import { Database } from '@/lib/types/database';
 
 // MCP Client interface (based on @modelcontextprotocol/sdk)
 interface MCPClient {
-  connect(transport: any): Promise<void>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  connect(transport: any): Promise<void>; // MCP transport can be any transport type
   close(): Promise<void>;
-  callTool(params: { name: string; arguments: Record<string, unknown> }): Promise<any>;
-  listTools(): Promise<{ tools?: any[] }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  callTool(params: { name: string; arguments: Record<string, unknown> }): Promise<any>; // MCP tool results are untyped
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  listTools(): Promise<{ tools?: any[] }>; // MCP tool definitions are untyped
 }
 
 export interface ToolCall {
@@ -214,7 +217,8 @@ export class MCPToolExecutor {
   /**
    * Get available tools for a workspace and bud
    */
-  async getAvailableTools(workspaceId: string, budId?: string): Promise<any[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async getAvailableTools(workspaceId: string, budId?: string): Promise<any[]> { // MCP tool definitions are untyped
     if (!budId) {
       return [];
     }

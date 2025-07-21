@@ -220,7 +220,7 @@ export class EventLog {
       }
 
       let content = '';
-      const tool_calls: any[] = [];
+      const tool_calls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = [];
       
       // Handle empty or undefined segments
       const segments = event.segments || [];
@@ -248,7 +248,7 @@ export class EventLog {
         }
       }
 
-      const message: any = {
+      const message: Record<string, unknown> = {
         role: event.role,
         content: content || ''  // Use empty string instead of null
       };

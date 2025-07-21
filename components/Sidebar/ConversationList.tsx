@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { 
   useConversations,
@@ -11,11 +10,10 @@ import {
   useRemoveConversationFromWorkspace,
   useSetWorkspaceConversations,
   useSelectedWorkspace,
-  useConversation,
   Conversation,
-  ConversationMeta,
-  EventConversation
+  ConversationMeta
 } from '@/state/eventChatStore';
+import type { Conversation as DBConversation } from '@/lib/types';
 import { usePathname } from 'next/navigation';
 import { WorkspaceId, ConversationId } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -23,8 +21,7 @@ import {
   MessageSquare, 
   MoreHorizontal, 
   Trash2, 
-  GitBranch,
-  Loader2
+  GitBranch
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -49,12 +46,12 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const workspaceConversationIds = useWorkspaceConversations(workspaceId);
   
   const setConversation = useSetConversation();
-  const addConversationToWorkspace = useAddConversationToWorkspace();
+  const _addConversationToWorkspace = useAddConversationToWorkspace();
   const removeConversationFromWorkspace = useRemoveConversationFromWorkspace();
   const setWorkspaceConversations = useSetWorkspaceConversations();
-  const selectedWorkspace = useSelectedWorkspace();
+  const _selectedWorkspace = useSelectedWorkspace();
   const [isLoading, setIsLoading] = useState(false);
-  const realtimeSetupRef = useRef(false);
+  const _realtimeSetupRef = useRef(false);
   const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Get conversations for this workspace
@@ -126,12 +123,12 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
           // Store conversations using new simple store
           const conversationIds: string[] = [];
           
-          conversationsData.forEach((conv: any) => {
+          conversationsData.forEach((conv: DBConversation) => {
             const conversationMeta: ConversationMeta = {
               id: conv.id,
-              title: conv.title, // Don't set default title
+              title: conv.title || undefined, // Don't set default title
               workspace_id: conv.workspace_id,
-              source_bud_id: conv.bud_id, // Map database bud_id to source_bud_id
+              source_bud_id: conv.bud_id || undefined, // Map database bud_id to source_bud_id
               created_at: conv.created_at
             };
             
@@ -223,7 +220,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             
             setConversation(conversationId, updatedConversation);
           }
-        } catch (error) {
+        } catch (_error) {
           // Silently fail - this is just opportunistic preloading
         }
       }

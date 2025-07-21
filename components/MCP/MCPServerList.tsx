@@ -8,8 +8,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Wrench, 
   Server, 
-  CheckCircle, 
-  XCircle, 
   Loader2,
   Plus,
   Settings,
@@ -82,7 +80,7 @@ export function MCPServerList({
     if (workspaceId) {
       fetchServers();
     }
-  }, [workspaceId]);
+  }, [workspaceId, fetchServers]);
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
     onServerToggle?.(serverId, selected);

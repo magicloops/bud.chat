@@ -7,8 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { MCPServerList } from './MCPServerList';
-import { Wrench, Settings, Info } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Wrench, Info } from 'lucide-react';
 
 export interface MCPConfiguration {
   servers?: string[]
@@ -44,12 +43,12 @@ export function MCPConfigurationPanel({
   useEffect(() => {
     const newConfig: MCPConfiguration = {
       servers: selectedServers.length > 0 ? selectedServers : undefined,
-      tool_choice: toolChoice as any,
+      tool_choice: toolChoice as 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } },
       disabled_tools: disabledTools.length > 0 ? disabledTools : undefined
     };
     
     onChange?.(newConfig);
-  }, [selectedServers, toolChoice, disabledTools]);
+  }, [selectedServers, toolChoice, disabledTools, onChange]);
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
     setSelectedServers(prev => {

@@ -114,7 +114,7 @@ export const EventItem = memo(function EventItem({
     }
   }, [onBranch, event.id]);
 
-  const formatEventDuration = useCallback((event: Event, index: number) => {
+  const formatEventDuration = useCallback((event: Event, _index: number) => {
     const now = new Date();
     const eventDate = new Date(event.ts);
     const diffMs = now.getTime() - eventDate.getTime();

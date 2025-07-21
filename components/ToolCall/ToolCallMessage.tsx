@@ -124,7 +124,7 @@ const ToolCallMessage = memo(function ToolCallMessage({
 });
 
 const ToolResultMessage = memo(function ToolResultMessage({
-  toolCallId,
+  toolCallId: _toolCallId,
   toolName,
   result,
   error,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +8,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { ChevronDown, ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench } from 'lucide-react';
 import { useModel } from '@/contexts/model-context';
 import { useToast } from '@/hooks/use-toast';
 import { BudConfig } from '@/lib/types';
@@ -67,7 +67,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { toast } = useToast();
 
   // Get bud config and conversation overrides  
-  const budConfig = bud?.default_json as BudConfig | undefined;
+  const budConfig = bud?.default_json as unknown as BudConfig | undefined;
   const conversationOverrides = conversation?.meta.model_config_overrides as ConversationOverrides | undefined;
   const mcpOverrides = conversation?.meta.mcp_config_overrides as MCPConfiguration | undefined;
 
@@ -158,34 +158,34 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   ]);
 
   // Handle value changes - track for save confirmation in both modes
-  const handleFieldChange = (field: string, value: any) => {
+  const handleFieldChange = (field: string, value: string | number | boolean | object) => {
     setHasUnsavedChanges(true);
     
     switch (field) {
       case 'name':
-        setChatName(value);
+        setChatName(value as string);
         break;
       case 'assistantName':
-        setAssistantName(value);
+        setAssistantName(value as string);
         break;
       case 'model':
-        setAiModel(value);
-        setSelectedModel(value);
+        setAiModel(value as string);
+        setSelectedModel(value as string);
         break;
       case 'systemPrompt':
-        setSystemPrompt(value);
+        setSystemPrompt(value as string);
         break;
       case 'temperature':
-        setTemperature(value);
+        setTemperature(value as number);
         break;
       case 'maxTokens':
-        setMaxTokens(value);
+        setMaxTokens(value as number | undefined);
         break;
       case 'avatar':
-        setAvatar(value);
+        setAvatar(value as string);
         break;
       case 'mcpConfig':
-        setMcpConfig(value);
+        setMcpConfig(value as object);
         break;
     }
   };
@@ -241,7 +241,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       } else {
         throw new Error('Failed to generate theme');
       }
-    } catch (error) {
+    } catch (_error) {
       toast({
         title: 'Error',
         description: 'Failed to generate theme',
@@ -282,7 +282,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       if (!bud) return;
       
       try {
-        const currentConfig = bud.default_json as BudConfig;
+        const currentConfig = bud.default_json as unknown as BudConfig;
         const updatedConfig: BudConfig = {
           ...currentConfig,
           name: assistantName || currentConfig.name || 'Untitled Bud', // Use assistantName for bud name
@@ -698,7 +698,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                       onChange={(e) => {
                         const value = e.target.value ? parseInt(e.target.value) : undefined;
                         setMaxTokens(value);
-                        handleFieldChange('maxTokens', value);
+                        handleFieldChange('maxTokens', value || 0);
                       }}
                       className="w-full"
                     />
