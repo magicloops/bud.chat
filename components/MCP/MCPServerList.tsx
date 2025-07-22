@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -58,7 +58,7 @@ export function MCPServerList({
   const [showAddForm, setShowAddForm] = useState(false);
 
   // Fetch MCP servers for the workspace
-  const fetchServers = async () => {
+  const fetchServers = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/mcp/servers?workspaceId=${workspaceId}`);
@@ -74,7 +74,7 @@ export function MCPServerList({
     } finally {
       setLoading(false);
     }
-  };
+  }, [workspaceId]);
 
   useEffect(() => {
     if (workspaceId) {
