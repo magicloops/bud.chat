@@ -60,6 +60,7 @@ export function EventStream({
     }
   } : null;
   
+  
   const _handleEventSent = (_eventId: string) => {
     // For server-state conversations, the store handles updates
     // For local-state conversations, the parent component handles updates
@@ -244,10 +245,23 @@ export function EventStream({
       {/* Composer */}
       <div className="flex-shrink-0">
         {onSendMessage ? (
-          // Local state composer
-          <LocalEventComposer
-            onSendMessage={onSendMessage}
+          // Local state composer - use EventComposer for consistency
+          <EventComposer
+            conversation={optimisticConversation || { 
+              id: 'temp', 
+              events: events || [], 
+              isStreaming: false,
+              meta: {
+                id: 'temp',
+                title: 'New Chat',
+                workspace_id: 'temp',
+                assistant_name: budData?.default_json?.name || 'Assistant',
+                assistant_avatar: budData?.default_json?.avatar || '🤖',
+                created_at: new Date().toISOString()
+              }
+            }}
             placeholder={placeholder}
+            onSendMessage={onSendMessage}
             disabled={isStreaming}
           />
         ) : conversationId && conversation ? (
@@ -263,59 +277,5 @@ export function EventStream({
   );
 }
 
-// Simple composer for local state
-interface LocalEventComposerProps {
-  onSendMessage: (content: string) => void | Promise<void>
-  placeholder: string
-  disabled?: boolean
-}
-
-function LocalEventComposer({ onSendMessage, placeholder, disabled }: LocalEventComposerProps) {
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (disabled) return;
-    
-    const formData = new FormData(e.currentTarget);
-    const content = formData.get('message') as string;
-    
-    if (!content.trim()) return;
-    
-    try {
-      await onSendMessage(content.trim());
-      
-      // Clear the form only if successful and form still exists
-      if (e.currentTarget) {
-        e.currentTarget.reset();
-      }
-    } catch (error) {
-      console.error('Error sending message:', error);
-      // Don't clear form on error so user can retry
-    }
-  };
-
-  return (
-    <div className="border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <form onSubmit={handleSubmit} className="p-4">
-        <div className="flex gap-2">
-          <input
-            name="message"
-            type="text"
-            placeholder={placeholder}
-            disabled={disabled}
-            className="flex-1 px-3 py-2 border border-input bg-background rounded-md text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
-            autoComplete="off"
-          />
-          <button
-            type="submit"
-            disabled={disabled}
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 
 export default EventStream;
