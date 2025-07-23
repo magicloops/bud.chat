@@ -157,6 +157,8 @@ export default function ChatPage({ params }: ChatPageProps) {
         return;
       }
 
+      // Don't create any store conversation yet - let EventStream handle optimistic display
+      // until bud loads completely
       try {
         setBudLoading(true);
         const loadedBud = await budManager.getBud(budId);
@@ -421,11 +423,11 @@ export default function ChatPage({ params }: ChatPageProps) {
   
   return (
     <EventStream
-      conversationId={!isNewConversation ? workingConversationId : undefined}
-      events={shouldUseStreamingEvents ? streamingEvents : undefined}
+      conversationId={isNewConversation ? undefined : workingConversationId}
+      events={shouldUseStreamingEvents ? streamingEvents : isNewConversation && existingConversation?.events ? existingConversation.events : undefined}
       onSendMessage={isNewConversation ? handleSendMessage : undefined}
       placeholder={placeholder}
-      budData={isNewConversation ? (bud || undefined) : undefined}
+      budData={bud || undefined}
       isStreaming={shouldUseStreamingEvents ? isLocalStreaming : undefined}
     />
   );

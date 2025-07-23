@@ -82,6 +82,19 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [currentTheme, setCurrentTheme] = useState<{name: string, cssVariables: Record<string, string>} | undefined>(undefined);
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>({});
 
+  // Track original values for change detection
+  const [originalValues, setOriginalValues] = useState({
+    chatName: '',
+    assistantName: '',
+    aiModel: selectedModel || getDefaultModel(),
+    systemPrompt: '',
+    temperature: 1,
+    maxTokens: undefined as number | undefined,
+    avatar: '',
+    mcpConfig: {} as MCPConfiguration,
+    customTheme: undefined as {name: string, cssVariables: Record<string, string>} | undefined
+  });
+
   // Update form values when props change
   useEffect(() => {
     // Only update if we have meaningful data to work with
@@ -115,14 +128,35 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const validModel = availableModels.includes(budModel) ? budModel : getDefaultModel();
       console.log('🔧 Settings Panel - Bud mode model:', { budConfigModel: budConfig?.model, finalModel: budModel, validModel, availableModels: availableModels.slice(0, 3) });
       
-      setChatName(newChatName);
-      setAssistantName(newAssistantName);
+      const finalChatName = newChatName;
+      const finalAssistantName = newAssistantName;
+      const finalSystemPrompt = budConfig?.systemPrompt || '';
+      const finalTemperature = budConfig?.temperature || 1;
+      const finalMaxTokens = budConfig?.maxTokens || undefined;
+      const finalAvatar = budConfig?.avatar || '';
+      const finalMcpConfig = budConfig?.mcpConfig || {};
+      
+      setChatName(finalChatName);
+      setAssistantName(finalAssistantName);
       setAiModel(validModel);
-      setSystemPrompt(budConfig?.systemPrompt || '');
-      setTemperature(budConfig?.temperature || 1);
-      setMaxTokens(budConfig?.maxTokens || undefined);
-      setAvatar(budConfig?.avatar || '');
-      setMcpConfig(budConfig?.mcpConfig || {});
+      setSystemPrompt(finalSystemPrompt);
+      setTemperature(finalTemperature);
+      setMaxTokens(finalMaxTokens);
+      setAvatar(finalAvatar);
+      setMcpConfig(finalMcpConfig);
+      
+      // Set original values for bud mode
+      setOriginalValues({
+        chatName: finalChatName,
+        assistantName: finalAssistantName,
+        aiModel: validModel,
+        systemPrompt: finalSystemPrompt,
+        temperature: finalTemperature,
+        maxTokens: finalMaxTokens,
+        avatar: finalAvatar,
+        mcpConfig: finalMcpConfig,
+        customTheme: budConfig?.customTheme
+      });
     } else {
       // Chat mode: Use conversation overrides with bud fallbacks
       const newChatName = conversation?.meta.title || '';
@@ -133,14 +167,35 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const validModel = availableModels.includes(chatModel) ? chatModel : getDefaultModel();
       console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) });
       
-      setChatName(newChatName);
-      setAssistantName(newAssistantName);
+      const finalChatName = newChatName;
+      const finalAssistantName = newAssistantName;
+      const finalSystemPrompt = conversationOverrides?.systemPrompt || budConfig?.systemPrompt || '';
+      const finalTemperature = conversationOverrides?.temperature || budConfig?.temperature || 1;
+      const finalMaxTokens = conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined;
+      const finalAvatar = conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '';
+      const finalMcpConfig = mcpOverrides || budConfig?.mcpConfig || {};
+      
+      setChatName(finalChatName);
+      setAssistantName(finalAssistantName);
       setAiModel(validModel);
-      setSystemPrompt(conversationOverrides?.systemPrompt || budConfig?.systemPrompt || '');
-      setTemperature(conversationOverrides?.temperature || budConfig?.temperature || 1);
-      setMaxTokens(conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined);
-      setAvatar(conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '');
-      setMcpConfig(mcpOverrides || budConfig?.mcpConfig || {});
+      setSystemPrompt(finalSystemPrompt);
+      setTemperature(finalTemperature);
+      setMaxTokens(finalMaxTokens);
+      setAvatar(finalAvatar);
+      setMcpConfig(finalMcpConfig);
+      
+      // Set original values for chat mode
+      setOriginalValues({
+        chatName: finalChatName,
+        assistantName: finalAssistantName,
+        aiModel: validModel,
+        systemPrompt: finalSystemPrompt,
+        temperature: finalTemperature,
+        maxTokens: finalMaxTokens,
+        avatar: finalAvatar,
+        mcpConfig: finalMcpConfig,
+        customTheme: budConfig?.customTheme
+      });
     }
     
     setCurrentTheme(budConfig?.customTheme);
@@ -157,10 +212,61 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     budConfig ? JSON.stringify(budConfig) : 'undefined'
   ]);
 
+  // Helper function to normalize MCP config for comparison
+  const normalizeMcpConfig = (config: MCPConfiguration) => {
+    const normalized: MCPConfiguration = {};
+    
+    // Only include non-default, non-empty values
+    if (config.servers && config.servers.length > 0) {
+      normalized.servers = config.servers;
+    }
+    if (config.disabled_tools && config.disabled_tools.length > 0) {
+      normalized.disabled_tools = config.disabled_tools;
+    }
+    // Only include tool_choice if it's not the default 'auto'
+    if (config.tool_choice && config.tool_choice !== 'auto') {
+      normalized.tool_choice = config.tool_choice;
+    }
+    
+    return normalized;
+  };
+
+  // Effect to check for changes whenever form values change
+  useEffect(() => {
+    const currentValues = {
+      chatName,
+      assistantName,
+      aiModel,
+      systemPrompt,
+      temperature,
+      maxTokens,
+      avatar,
+      mcpConfig
+    };
+    
+    // Normalize MCP configs for comparison
+    const currentMcpNormalized = normalizeMcpConfig(currentValues.mcpConfig);
+    const originalMcpNormalized = normalizeMcpConfig(originalValues.mcpConfig);
+    const mcpConfigChanged = JSON.stringify(currentMcpNormalized) !== JSON.stringify(originalMcpNormalized);
+    
+    // Deep compare with original values
+    const hasChanges = 
+      currentValues.chatName !== originalValues.chatName ||
+      currentValues.assistantName !== originalValues.assistantName ||
+      currentValues.aiModel !== originalValues.aiModel ||
+      currentValues.systemPrompt !== originalValues.systemPrompt ||
+      currentValues.temperature !== originalValues.temperature ||
+      currentValues.maxTokens !== originalValues.maxTokens ||
+      currentValues.avatar !== originalValues.avatar ||
+      mcpConfigChanged ||
+      JSON.stringify(currentTheme) !== JSON.stringify(originalValues.customTheme);
+    
+    
+    setHasUnsavedChanges(hasChanges);
+  }, [chatName, assistantName, aiModel, systemPrompt, temperature, maxTokens, avatar, mcpConfig, currentTheme, originalValues]);
+
   // Handle value changes - track for save confirmation in both modes
   const handleFieldChange = (field: string, value: string | number | boolean | object) => {
-    setHasUnsavedChanges(true);
-    
     switch (field) {
       case 'name':
         setChatName(value as string);
@@ -193,7 +299,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   // Stable callback for MCP configuration changes
   const handleMcpConfigChange = useCallback((config: MCPConfiguration) => {
     setMcpConfig(config);
-    setHasUnsavedChanges(true);
+    // Change detection will be handled by the useEffect
   }, []);
 
 

@@ -38,9 +38,24 @@ export function MCPConfigurationPanel({
     typeof config.tool_choice === 'string' ? config.tool_choice : 'auto'
   );
   const [disabledTools, setDisabledTools] = useState<string[]>(config.disabled_tools || []);
+  const [hasInitialized, setHasInitialized] = useState(false);
 
-  // Update parent when configuration changes
+  // Track initial values to detect actual changes
+  const [initialConfig] = useState({
+    servers: config.servers || [],
+    tool_choice: typeof config.tool_choice === 'string' ? config.tool_choice : 'auto',
+    disabled_tools: config.disabled_tools || []
+  });
+
+  // Mark as initialized after mount
   useEffect(() => {
+    setHasInitialized(true);
+  }, []);
+
+  // Update parent when configuration changes (but not on initial mount)
+  useEffect(() => {
+    if (!hasInitialized) return; // Don't trigger on mount
+    
     const newConfig: MCPConfiguration = {
       servers: selectedServers.length > 0 ? selectedServers : undefined,
       tool_choice: toolChoice as 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } },
@@ -48,7 +63,7 @@ export function MCPConfigurationPanel({
     };
     
     onChange?.(newConfig);
-  }, [selectedServers, toolChoice, disabledTools, onChange]);
+  }, [selectedServers, toolChoice, disabledTools, onChange, hasInitialized]);
 
   const handleServerToggle = (serverId: string, selected: boolean) => {
     setSelectedServers(prev => {
