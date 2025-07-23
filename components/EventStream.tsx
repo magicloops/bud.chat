@@ -60,7 +60,6 @@ export function EventStream({
     }
   } : null;
   
-  
   const _handleEventSent = (_eventId: string) => {
     // For server-state conversations, the store handles updates
     // For local-state conversations, the parent component handles updates
@@ -276,6 +275,5 @@ export function EventStream({
     </div>
   );
 }
-
 
 export default EventStream;

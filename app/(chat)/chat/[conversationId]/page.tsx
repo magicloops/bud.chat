@@ -51,7 +51,6 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [bud, setBud] = useState<Bud | null>(null);
   const [budLoading, setBudLoading] = useState(!!budId && isNewConversation);
   
-  
   // Generate temporary ID for new conversations (stable)
   const tempConversationId = useMemo(() => 
     isNewConversation ? crypto.randomUUID() : conversationId, 
@@ -160,7 +159,6 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       // Don't create any store conversation yet - let EventStream handle optimistic display
       // until bud loads completely
-
       try {
         setBudLoading(true);
         const loadedBud = await budManager.getBud(budId);
