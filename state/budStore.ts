@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
-import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { Database } from '@/lib/types/database';
 import { useMemo } from 'react';
@@ -31,9 +30,6 @@ export interface BudStore {
     delete: Record<string, boolean>              // budId -> loading
   }
   
-  // Track which workspaces have been loaded
-  loadedWorkspaces: string[]
-  
   // Error states
   errors: {
     workspace: Record<string, string | null>     // workspaceId -> error
@@ -44,7 +40,6 @@ export interface BudStore {
   
   // Actions
   loadWorkspaceBuds: (workspaceId: string) => Promise<void>
-  forceLoadWorkspaceBuds: (workspaceId: string) => Promise<void>
   createBud: (args: CreateBudArgs) => Promise<Bud>
   updateBud: (budId: string, updates: UpdateBudArgs) => Promise<Bud>
   deleteBud: (budId: string) => Promise<void>
@@ -59,12 +54,10 @@ export interface BudStore {
 
 export const useBudStore = create<BudStore>()(
   subscribeWithSelector(
-    persist(
-      immer((set, get) => ({
+    immer((set, get) => ({
         // Initial state
         buds: {},
         workspaceBuds: {},
-        loadedWorkspaces: [],
         loading: {
           workspace: {},
           create: false,
@@ -78,10 +71,12 @@ export const useBudStore = create<BudStore>()(
           delete: {}
         },
         
-        // Load workspace buds
+        // Load workspace buds - always fetch fresh data
         loadWorkspaceBuds: async (workspaceId: string) => {
-          // Check if already loaded
-          if (get().loadedWorkspaces.includes(workspaceId)) {
+          const currentState = get();
+          
+          // Skip if already loading to prevent duplicate requests
+          if (currentState.loading.workspace[workspaceId]) {
             return;
           }
           
@@ -101,45 +96,6 @@ export const useBudStore = create<BudStore>()(
               
               // Store workspace -> bud ids mapping
               state.workspaceBuds[workspaceId] = buds.map(b => b.id);
-              if (!state.loadedWorkspaces.includes(workspaceId)) {
-                state.loadedWorkspaces.push(workspaceId);
-              }
-              state.loading.workspace[workspaceId] = false;
-            });
-          } catch (error) {
-            set((state) => {
-              state.loading.workspace[workspaceId] = false;
-              state.errors.workspace[workspaceId] = error instanceof Error ? error.message : 'Failed to load buds';
-            });
-          }
-        },
-        
-        // Force load workspace buds (ignores cache)
-        forceLoadWorkspaceBuds: async (workspaceId: string) => {
-          set((state) => {
-            // Remove from loaded workspaces to force reload
-            const index = state.loadedWorkspaces.indexOf(workspaceId);
-            if (index > -1) {
-              state.loadedWorkspaces.splice(index, 1);
-            }
-            state.loading.workspace[workspaceId] = true;
-            state.errors.workspace[workspaceId] = null;
-          });
-          
-          try {
-            const buds = await budManager.getWorkspaceBuds(workspaceId);
-            
-            set((state) => {
-              // Store buds by id
-              buds.forEach(bud => {
-                state.buds[bud.id] = bud;
-              });
-              
-              // Store workspace -> bud ids mapping
-              state.workspaceBuds[workspaceId] = buds.map(b => b.id);
-              if (!state.loadedWorkspaces.includes(workspaceId)) {
-                state.loadedWorkspaces.push(workspaceId);
-              }
               state.loading.workspace[workspaceId] = false;
             });
           } catch (error) {
@@ -279,17 +235,7 @@ export const useBudStore = create<BudStore>()(
         clearBudError: (budId: string, type: 'update' | 'delete') => set((state) => {
           state.errors[type][budId] = null;
         })
-      })),
-      {
-        name: 'bud-store',
-        partialize: (state) => ({
-          // Don't persist loading states or errors
-          buds: state.buds,
-          workspaceBuds: state.workspaceBuds,
-          loadedWorkspaces: state.loadedWorkspaces
-        }),
-      }
-    )
+      }))
   )
 );
 
@@ -333,9 +279,8 @@ export const useBudDeleteLoading = (budId: string) =>
 export const useBudDeleteError = (budId: string) =>
   useBudStore((state) => state.errors.delete[budId]);
 
-// Action hooks
+// Action hooks - use shallow equality to prevent unnecessary re-renders
 export const useLoadWorkspaceBuds = () => useBudStore((state) => state.loadWorkspaceBuds);
-export const useForceLoadWorkspaceBuds = () => useBudStore((state) => state.forceLoadWorkspaceBuds);
 export const useCreateBud = () => useBudStore((state) => state.createBud);
 export const useUpdateBud = () => useBudStore((state) => state.updateBud);
 export const useDeleteBud = () => useBudStore((state) => state.deleteBud);
