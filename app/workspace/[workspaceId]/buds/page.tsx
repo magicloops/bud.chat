@@ -97,7 +97,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
       config,
       workspaceId
     });
-    await loadWorkspaceBuds(workspaceId);
+    // No need to reload - store automatically updates
   };
 
   const handleEditBud = async (config: BudConfig, name: string) => {
@@ -107,7 +107,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
       name,
       config
     });
-    await loadWorkspaceBuds(workspaceId);
+    // No need to reload - store automatically updates
     setEditingBud(null);
   };
 
@@ -123,7 +123,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
       config: newConfig,
       workspaceId
     });
-    await loadWorkspaceBuds(workspaceId);
+    // No need to reload - store automatically updates
   };
 
   const handleDeleteBud = async (budId: string) => {

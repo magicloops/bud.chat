@@ -40,7 +40,7 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
   const createLoading = useBudCreateLoading();
   const deleteBud = useDeleteBud();
 
-  // Load buds on mount
+  // Load buds on mount - use normal cached loading for performance
   useEffect(() => {
     loadWorkspaceBuds(workspaceId);
   }, [workspaceId, loadWorkspaceBuds]);
@@ -51,8 +51,8 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
     if (!config) return false;
     
     const matchesSearch = !searchQuery || 
-      config.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      config.systemPrompt.toLowerCase().includes(searchQuery.toLowerCase());
+      config.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      config.systemPrompt?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesModel = !selectedModel || config.model === selectedModel;
     
