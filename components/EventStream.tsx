@@ -29,7 +29,7 @@ interface EventStreamProps {
 const EventStreamComponent = function EventStream({ 
   events, 
   isStreaming = false,
-  cachedConversation, 
+  cachedConversation: _cachedConversation, 
   onSendMessage,
   placeholder = 'Type your message...',
   budData,
@@ -39,24 +39,6 @@ const EventStreamComponent = function EventStream({
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
   
-  // Measure time from click to first EventStream render
-  const renderTime = performance.now();
-  const timeFromClick = window.conversationClickTime ? renderTime - window.conversationClickTime : null;
-  
-  console.log('🎬 [EVENT_STREAM] Rendering with:', {
-    renderTime: renderTime + 'ms',
-    timeFromClick: timeFromClick ? timeFromClick.toFixed(2) + 'ms' : 'N/A',
-    hasEvents: !!events,
-    eventCount: events?.length || 0,
-    hasCachedConversation: !!cachedConversation,
-    cachedEventCount: cachedConversation?.events.length || 0,
-    conversationId,
-    hasStoreConversation: !!conversation,
-    storeEventCount: conversation?.events.length || 0,
-    renderPath: events ? 'direct-events' : 
-                cachedConversation ? 'cached-conversation' : 
-                conversationId ? 'store-lookup' : 'welcome'
-  });
   
   // Local streaming state for existing conversations during streaming (similar to new conversations)
   const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);

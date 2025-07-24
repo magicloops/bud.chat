@@ -313,6 +313,17 @@ export const useEventChatStore = create<EventChatStore>()(
                         model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.model_config_overrides,
                         mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.mcp_config_overrides,
                       };
+                      
+                      // Auto-sync: update conversation summary with new title
+                      const updatedConversationObj = state.conversations[conversationId];
+                      const summary: ConversationSummary = {
+                        id: updatedConversationObj.id,
+                        title: updatedConversationObj.meta.title,
+                        created_at: updatedConversationObj.meta.created_at,
+                        workspace_id: updatedConversationObj.meta.workspace_id
+                      };
+                      state.conversationSummaries[conversationId] = summary;
+                      
                       console.log('✅ Conversation updated in store:', currentTitle, '→', title);
                     } else {
                       console.log('⚠️ Conversation not found in store, queuing update:', conversationId);
@@ -331,6 +342,17 @@ export const useEventChatStore = create<EventChatStore>()(
                               model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, unknown> : retryState.conversations[conversationId].meta.model_config_overrides,
                               mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, unknown> : retryState.conversations[conversationId].meta.mcp_config_overrides,
                             };
+                            
+                            // Auto-sync: update conversation summary with new title (delayed retry)
+                            const retryUpdatedConversation = retryState.conversations[conversationId];
+                            const retrySummary: ConversationSummary = {
+                              id: retryUpdatedConversation.id,
+                              title: retryUpdatedConversation.meta.title,
+                              created_at: retryUpdatedConversation.meta.created_at,
+                              workspace_id: retryUpdatedConversation.meta.workspace_id
+                            };
+                            retryState.conversationSummaries[conversationId] = retrySummary;
+                            
                             console.log('✅ Delayed update successful:', title);
                           });
                         } else {

@@ -81,12 +81,6 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const currentConversationId = useMemo(() => {
     const match = pathname.match(/\/chat\/([^\/]+)/);
     const conversationId = match ? match[1] : '';
-    
-    console.log('📍 [SIDEBAR] Pathname changed, extracted conversationId:', conversationId, 'at', performance.now() + 'ms', {
-      pathname,
-      clickTime: window.conversationClickTime
-    });
-    
     return conversationId;
   }, [pathname]);
 
@@ -179,8 +173,6 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   
   // Preload full conversation data on hover for faster page transitions
   const handleConversationHover = useCallback((conversationId: ConversationId) => {
-    console.log('🐭 [HOVER] Starting preload for:', conversationId);
-    
     // Clear any existing timeout
     if (preloadTimeoutRef.current) {
       clearTimeout(preloadTimeoutRef.current);
@@ -220,58 +212,26 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             
             // Store the full conversation for instant loading when clicked
             setConversation(conversationId, fullConversation);
-            
-            console.log('📦 [PRELOAD] Completed for:', conversationId, {
-              hasFullConversation: !!fullConversations[conversationId],
-              eventCount: fullConversation.events.length,
-              metadata: fullConversation.meta
-            });
           }
         } catch (_error) {
           // Silently fail - this is just opportunistic preloading
-          console.log('❌ [PRELOAD] Failed for:', conversationId);
         }
-      } else {
-        console.log('⏭️ [PRELOAD] Skipped for:', conversationId, {
-          hasFullConversation: !!existingFullConversation,
-          eventCount: existingFullConversation?.events.length || 0
-        });
       }
     }, 150); // 150ms debounce
   }, [fullConversations, setConversation]);
 
-  // Track conversation clicks with timing and use state-based switching
+  // Track conversation clicks and use instant state switching
   const handleConversationClick = useCallback((conversationId: ConversationId, e: React.MouseEvent) => {
     e.preventDefault(); // Prevent default Link navigation
     
-    const clickTime = performance.now();
-    const cachedConv = fullConversations[conversationId];
-    console.log('👆 [CLICK] Conversation clicked at', clickTime + 'ms:', conversationId, {
-      hasCachedData: !!cachedConv,
-      eventCount: cachedConv?.events.length || 0,
-      assistantName: cachedConv?.meta.assistant_name
-    });
-    
-    // Store click time for measuring time-to-render
-    window.conversationClickTime = clickTime;
-    
-    // Try direct state switching via custom event instead of route navigation
-    console.log('⚡ [STATE_SWITCH] Starting instant conversation switch to:', conversationId);
-    console.log('🔍 [DEV_DEBUG] Node env:', process.env.NODE_ENV, 'isDev:', process.env.NODE_ENV === 'development');
-    
+    // Direct state switching via custom event for instant navigation
     const switchEvent = new CustomEvent('switchConversation', { 
-      detail: { conversationId, clickTime } 
+      detail: { conversationId } 
     });
     window.dispatchEvent(switchEvent);
     
-    // Update URL without navigation (for browser history)
-    console.log('🔄 [URL_UPDATE] Starting router.replace at:', performance.now() + 'ms');
+    // Update URL for browser history
     router.replace(`/chat/${conversationId}`, { scroll: false });
-    
-    // Track when URL update completes (next tick)
-    setTimeout(() => {
-      console.log('✅ [URL_UPDATE] Router.replace completed at:', performance.now() + 'ms');
-    }, 0);
   }, [fullConversations, router]);
 
   if (isLoading) {
