@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
-import { Event, useConversation, useEventChatStore } from '@/state/eventChatStore';
+import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
 import { Bud } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { getDefaultModel } from '@/lib/modelMapping';
@@ -18,6 +18,7 @@ interface EventStreamProps {
   onSendMessage?: (content: string) => void | Promise<void>
   placeholder?: string
   budData?: Bud // Bud data for optimistic assistant identity
+  cachedConversation?: Conversation // Full conversation for cached data
   
   // For server state (existing conversations) 
   conversationId?: string
@@ -25,9 +26,10 @@ interface EventStreamProps {
   className?: string
 }
 
-export function EventStream({ 
+const EventStreamComponent = function EventStream({ 
   events, 
-  isStreaming = false, 
+  isStreaming = false,
+  cachedConversation, 
   onSendMessage,
   placeholder = 'Type your message...',
   budData,
@@ -36,6 +38,25 @@ export function EventStream({
 }: EventStreamProps) {
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
+  
+  // Measure time from click to first EventStream render
+  const renderTime = performance.now();
+  const timeFromClick = window.conversationClickTime ? renderTime - window.conversationClickTime : null;
+  
+  console.log('🎬 [EVENT_STREAM] Rendering with:', {
+    renderTime: renderTime + 'ms',
+    timeFromClick: timeFromClick ? timeFromClick.toFixed(2) + 'ms' : 'N/A',
+    hasEvents: !!events,
+    eventCount: events?.length || 0,
+    hasCachedConversation: !!cachedConversation,
+    cachedEventCount: cachedConversation?.events.length || 0,
+    conversationId,
+    hasStoreConversation: !!conversation,
+    storeEventCount: conversation?.events.length || 0,
+    renderPath: events ? 'direct-events' : 
+                cachedConversation ? 'cached-conversation' : 
+                conversationId ? 'store-lookup' : 'welcome'
+  });
   
   // Local streaming state for existing conversations during streaming (similar to new conversations)
   const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);
@@ -274,6 +295,9 @@ export function EventStream({
       </div>
     </div>
   );
-}
+};
+
+// Memoize EventStream to prevent unnecessary re-renders
+export const EventStream = memo(EventStreamComponent);
 
 export default EventStream;

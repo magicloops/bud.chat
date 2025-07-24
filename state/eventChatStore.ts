@@ -19,7 +19,15 @@ interface RealtimePayload {
   };
 }
 
-// Event-based conversation types
+// Minimal conversation summary for sidebar display
+export interface ConversationSummary {
+  id: string
+  title?: string
+  created_at: string
+  workspace_id: string
+}
+
+// Event-based conversation types (complete data for chat display)
 export interface EventConversationMeta {
   id: string
   title?: string
@@ -42,14 +50,20 @@ export interface EventConversation {
 }
 
 interface EventChatStore {
-  // Core data - event-based conversations
+  // Core data - complete conversations for chat display
   conversations: Record<string, EventConversation>
+  
+  // Minimal summaries for sidebar display
+  conversationSummaries: Record<string, ConversationSummary>
   
   // Workspace conversation management for sidebar
   workspaceConversations: Record<string, string[]> // workspaceId -> conversationIds[]
   
   // Realtime subscriptions
   realtimeChannels: Record<string, RealtimeChannel> // workspaceId -> channel
+  
+  // Optimistic UI state
+  activeTempConversation?: string // Prevents realtime from interfering with temp conversations
   
   // UI state
   ui: {
@@ -70,6 +84,11 @@ interface EventChatStore {
   startStreaming: (conversationId: string, eventId: string) => void
   updateStreamingEvent: (conversationId: string, event: Event) => void
   finishStreaming: (conversationId: string, finalEvent: Event) => void
+  
+  // Conversation summary actions
+  setConversationSummary: (id: string, summary: ConversationSummary) => void
+  setConversationSummaries: (summaries: ConversationSummary[]) => void
+  removeConversationSummary: (id: string) => void
   
   // Workspace actions
   addConversationToWorkspace: (workspaceId: string, conversationId: string) => void
@@ -92,8 +111,10 @@ export const useEventChatStore = create<EventChatStore>()(
       immer((set, get) => ({
         // Initial state
         conversations: {},
+        conversationSummaries: {},
         workspaceConversations: {},
         realtimeChannels: {},
+        activeTempConversation: undefined,
         ui: {
           selectedWorkspace: null,
         },
@@ -101,6 +122,15 @@ export const useEventChatStore = create<EventChatStore>()(
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
           state.conversations[id] = conversation;
+          
+          // Auto-sync: when setting a full conversation, also create/update the summary
+          const summary: ConversationSummary = {
+            id: conversation.id,
+            title: conversation.meta.title,
+            created_at: conversation.meta.created_at,
+            workspace_id: conversation.meta.workspace_id
+          };
+          state.conversationSummaries[id] = summary;
         }),
         
         updateConversation: (id, updates) => set((state) => {
@@ -109,11 +139,42 @@ export const useEventChatStore = create<EventChatStore>()(
               ...state.conversations[id],
               ...updates
             };
+            
+            // Auto-sync: update summary if conversation meta changed
+            if (updates.meta) {
+              const conversation = state.conversations[id];
+              const summary: ConversationSummary = {
+                id: conversation.id,
+                title: conversation.meta.title,
+                created_at: conversation.meta.created_at,
+                workspace_id: conversation.meta.workspace_id
+              };
+              state.conversationSummaries[id] = summary;
+            }
           }
         }),
         
         removeConversation: (id) => set((state) => {
           delete state.conversations[id];
+          // Auto-sync: also remove the summary
+          delete state.conversationSummaries[id];
+        }),
+        
+        // Conversation summary actions
+        setConversationSummary: (id, summary) => set((state) => {
+          state.conversationSummaries[id] = summary;
+        }),
+        
+        setConversationSummaries: (summaries) => set((state) => {
+          // Clear existing summaries and set new ones
+          state.conversationSummaries = {};
+          summaries.forEach(summary => {
+            state.conversationSummaries[summary.id] = summary;
+          });
+        }),
+        
+        removeConversationSummary: (id) => set((state) => {
+          delete state.conversationSummaries[id];
         }),
         
         // Event actions
@@ -181,7 +242,8 @@ export const useEventChatStore = create<EventChatStore>()(
             state.workspaceConversations[workspaceId] = [];
           }
           if (!state.workspaceConversations[workspaceId].includes(conversationId)) {
-            state.workspaceConversations[workspaceId].push(conversationId);
+            // Add new conversations to the front (most recent first)
+            state.workspaceConversations[workspaceId].unshift(conversationId);
           }
         }),
         
@@ -190,6 +252,8 @@ export const useEventChatStore = create<EventChatStore>()(
             state.workspaceConversations[workspaceId] = state.workspaceConversations[workspaceId]
               .filter(id => id !== conversationId);
           }
+          // Also remove the summary when conversation is removed from workspace
+          delete state.conversationSummaries[conversationId];
         }),
         
         setWorkspaceConversations: (workspaceId, conversationIds) => set((state) => {
@@ -283,6 +347,11 @@ export const useEventChatStore = create<EventChatStore>()(
                   const newConversation = payload.new;
                   
                   set((state) => {
+                    // Don't interfere if we have an active temp conversation
+                    if (state.activeTempConversation) {
+                      return;
+                    }
+                    
                     // 🔧 RACE CONDITION FIX: Don't overwrite existing conversations that have events
                     const conversationId = newConversation.id as string;
                     const existingConversation = state.conversations[conversationId];
@@ -302,12 +371,17 @@ export const useEventChatStore = create<EventChatStore>()(
                         mcp_config_overrides: 'mcp_config_overrides' in newConversation ? newConversation.mcp_config_overrides : existingConversation.meta.mcp_config_overrides,
                       };
                       
-                      // Add to workspace conversations if not already there
+                      // Add to workspace conversations if not already there (with duplicate prevention)
                       if (!state.workspaceConversations[workspaceId]) {
                         state.workspaceConversations[workspaceId] = [];
                       }
-                      if (!state.workspaceConversations[workspaceId].includes(conversationId)) {
-                        state.workspaceConversations[workspaceId].unshift(conversationId);
+                      const workspaceConvs = state.workspaceConversations[workspaceId];
+                      if (!workspaceConvs.includes(conversationId)) {
+                        // Remove any duplicates before adding (extra safety)
+                        state.workspaceConversations[workspaceId] = [
+                          ...workspaceConvs.filter(id => id !== conversationId),
+                          conversationId
+                        ];
                       }
                       return; // Exit early
                     }
@@ -340,12 +414,17 @@ export const useEventChatStore = create<EventChatStore>()(
                     // Store the full conversation
                     state.conversations[conversationMeta.id] = conversation;
 
-                    // Add to workspace conversations if not already there
+                    // Add to workspace conversations if not already there (with duplicate prevention)
                     if (!state.workspaceConversations[workspaceId]) {
                       state.workspaceConversations[workspaceId] = [];
                     }
-                    if (!state.workspaceConversations[workspaceId].includes(conversationMeta.id)) {
-                      state.workspaceConversations[workspaceId].unshift(conversationMeta.id);
+                    const workspaceConvs = state.workspaceConversations[workspaceId];
+                    if (!workspaceConvs.includes(conversationMeta.id)) {
+                      // Remove any duplicates before adding (extra safety)
+                      state.workspaceConversations[workspaceId] = [
+                        conversationMeta.id,
+                        ...workspaceConvs.filter(id => id !== conversationMeta.id)
+                      ];
                     }
                   });
                 } else if (payload.eventType === 'DELETE') {
@@ -522,6 +601,22 @@ export const useEventRemoveConversationFromWorkspace = () =>
 export const useEventSetWorkspaceConversations = () => 
   useEventChatStore((state) => state.setWorkspaceConversations);
 
+// Conversation summary hooks
+export const useConversationSummary = (conversationId: string) =>
+  useEventChatStore((state) => state.conversationSummaries[conversationId]);
+
+export const useConversationSummaries = (): Record<string, ConversationSummary> =>
+  useEventChatStore((state) => state.conversationSummaries);
+
+export const useSetConversationSummary = () => 
+  useEventChatStore((state) => state.setConversationSummary);
+
+export const useSetConversationSummaries = () => 
+  useEventChatStore((state) => state.setConversationSummaries);
+
+export const useRemoveConversationSummary = () => 
+  useEventChatStore((state) => state.removeConversationSummary);
+
 // Realtime hooks
 export const useEventSubscribeToWorkspace = () => 
   useEventChatStore((state) => state.subscribeToWorkspace);
@@ -550,3 +645,4 @@ export const useCleanup = useEventCleanup;
 // Type exports for compatibility
 export type { EventConversation as Conversation, EventConversationMeta as ConversationMeta };
 export type { Event };
+// ConversationSummary is already exported above

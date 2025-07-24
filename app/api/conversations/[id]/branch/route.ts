@@ -100,6 +100,11 @@ export async function POST(
       .insert({
         workspace_id: originalConversation.workspace_id,
         title: title || `🌱 ${originalConversation.title}`,
+        source_bud_id: originalConversation.source_bud_id,
+        assistant_name: originalConversation.assistant_name,
+        assistant_avatar: originalConversation.assistant_avatar,
+        model_config_overrides: originalConversation.model_config_overrides,
+        mcp_config_overrides: originalConversation.mcp_config_overrides,
         metadata: originalConversation.metadata || {}
       })
       .select()
@@ -179,8 +184,9 @@ export async function POST(
       try {
         for (const event of relevantEvents) {
           // Convert DatabaseEvent back to Event (remove database-specific fields)
+          // Generate new ID for the copied event to avoid duplicate key constraint
           const eventToSave = {
-            id: event.id,
+            id: crypto.randomUUID(),
             role: event.role,
             segments: event.segments,
             ts: event.ts
