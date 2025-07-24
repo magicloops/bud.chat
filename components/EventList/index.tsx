@@ -164,42 +164,33 @@ export function EventList({
     const branchEvent = currentConversation.events[branchIndex];
     const branchPosition = branchIndex; // 0-based position in conversation
     
-    // 4. Create optimistic new conversation
-    const tempConversationId = `temp-branch-${Date.now()}`;
-    const branchedConversation: Conversation = {
-      id: tempConversationId,
+    // 4. Apply optimistic UI immediately - update current conversation in-place
+    setConversationRef.current(conversationId, {
+      ...currentConversation,
       events: branchedEvents,
-      isStreaming: false,
       meta: {
-        id: tempConversationId,
-        title: `🌱 ${currentConversation.meta.title || 'Branched Chat'}`,
-        workspace_id: currentConversation.meta.workspace_id,
-        source_bud_id: currentConversation.meta.source_bud_id,
-        created_at: new Date().toISOString()
+        ...currentConversation.meta,
+        title: `🌱 ${currentConversation.meta.title || 'Branched Chat'}`
       }
-    };
+    });
     
-    // 5. Add to store optimistically
-    setConversationRef.current(tempConversationId, branchedConversation);
-    addConversationToWorkspaceRef.current(currentConversation.meta.workspace_id, tempConversationId);
-    
-    // 6. Navigate immediately for responsive UX
-    router.push(`/chat/${tempConversationId}`);
+    // Add a flag to prevent realtime from interfering
+    useEventChatStore.setState((state) => {
+      state.activeTempConversation = conversationId;
+    });
     
     try {
-      // 7. API call to create real conversation using position instead of ID
+      // 5. API call to create real conversation
       const response = await fetch(`/api/conversations/${conversationId}/branch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           branchPosition: branchPosition,
-          branchEvent: {
+          branchMessage: {
             role: branchEvent.role,
-            // Get text content for identification
-            content: branchEvent.segments.filter(s => s.type === 'text').map(s => s.text).join('').substring(0, 100),
-            order_key: branchEvent.ts.toString()
+            content: branchEvent.segments.filter(s => s.type === 'text').map(s => s.text).join('').substring(0, 100)
           },
-          title: branchedConversation.meta.title
+          title: `🌱 ${currentConversation.meta.title || 'Branched Chat'}`
         })
       });
       
@@ -223,25 +214,36 @@ export function EventList({
           title: realConvData.title,
           workspace_id: realConvData.workspace_id,
           source_bud_id: realConvData.source_bud_id,
+          assistant_name: realConvData.assistant_name,
+          assistant_avatar: realConvData.assistant_avatar,
+          model_config_overrides: realConvData.model_config_overrides,
+          mcp_config_overrides: realConvData.mcp_config_overrides,
           created_at: realConvData.created_at
         }
       };
       
-      // 9. Update store with real conversation
+      // 6. Store the real conversation and navigate to it
       setConversationRef.current(realConvData.id, realConversation);
-      removeConversationFromWorkspaceRef.current(currentConversation.meta.workspace_id, tempConversationId);
       addConversationToWorkspaceRef.current(realConvData.workspace_id, realConvData.id);
       
-      // 10. Update URL to real conversation ID
-      router.replace(`/chat/${realConvData.id}`);
+      // Clear the optimistic flag
+      useEventChatStore.setState((state) => {
+        state.activeTempConversation = undefined;
+      });
+      
+      // Navigate to the real conversation
+      router.push(`/chat/${realConvData.id}`);
       
     } catch (error) {
       console.error('Branch creation failed:', error);
       
-      // 11. Rollback optimistic updates on error
-      removeConversationFromWorkspaceRef.current(currentConversation.meta.workspace_id, tempConversationId);
-      // Navigate back to original conversation
-      router.replace(`/chat/${conversationId}`);
+      // Rollback optimistic updates on error - restore original conversation
+      useEventChatStore.setState((state) => {
+        state.activeTempConversation = undefined;
+      });
+      
+      // Restore the original conversation with all events
+      setConversationRef.current(conversationId, currentConversation);
       
       // TODO: Show error toast notification
     }

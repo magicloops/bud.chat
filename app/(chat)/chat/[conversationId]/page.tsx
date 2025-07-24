@@ -39,12 +39,33 @@ export default function ChatPage({ params }: ChatPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   
+  
   // Track the current conversation ID (may change from 'new' to real ID during streaming)
   const [currentConversationId, setCurrentConversationId] = useState(initialConversationId);
+  
+  // Update conversation ID when route changes
+  useEffect(() => {
+    setCurrentConversationId(initialConversationId);
+  }, [initialConversationId]);
+  
+  // Listen for instant conversation switching events
+  useEffect(() => {
+    const handleConversationSwitch = (event: CustomEvent) => {
+      const { conversationId: newConversationId } = event.detail;
+      setCurrentConversationId(newConversationId);
+    };
+    
+    window.addEventListener('switchConversation', handleConversationSwitch as EventListener);
+    
+    return () => {
+      window.removeEventListener('switchConversation', handleConversationSwitch as EventListener);
+    };
+  }, []);
   
   // Use current conversation ID for all logic
   const conversationId = currentConversationId;
   const isNewConversation = conversationId === 'new';
+  const isTempConversation = conversationId.startsWith('temp-branch-');
   
   // State for new conversations only
   const budId = searchParams.get('bud');
@@ -68,6 +89,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   // Check if conversation is already in store
   const existingConversation = useConversation(workingConversationId);
 
+
   // Fetch conversation from server if not in store
   const { data: conversationData, isLoading, error } = useQuery({
     queryKey: ['conversation', conversationId],
@@ -80,10 +102,11 @@ export default function ChatPage({ params }: ChatPageProps) {
       const data = await response.json();
       return data;
     },
-    enabled: !isNewConversation && !!conversationId && !existingConversation,
-    staleTime: Infinity, // Don't refetch unless manually invalidated
+    enabled: !isNewConversation && !isTempConversation && !!conversationId && !existingConversation,
+    staleTime: 5 * 60 * 1000, // 5 minutes - allow periodic refresh for title updates
     gcTime: Infinity,
   });
+
 
   // Load conversation data into store when received from server
   useEffect(() => {
@@ -367,7 +390,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       setIsLocalStreaming(false);
       setStreamingEvents(null);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, router]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud?.id, router]);
 
   // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {
@@ -378,8 +401,8 @@ export default function ChatPage({ params }: ChatPageProps) {
     );
   }
 
-  // Show error state (only for existing conversations)
-  if (!isNewConversation && error) {
+  // Show error state (only for existing conversations, not temp conversations)
+  if (!isNewConversation && !isTempConversation && error) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center text-muted-foreground">
@@ -401,9 +424,9 @@ export default function ChatPage({ params }: ChatPageProps) {
     );
   }
 
-  // Show loading state while conversation loads (existing only)
-  // BUT: if we have local streaming state, continue showing that instead of welcome screen
-  if (!isNewConversation && !existingConversation && !conversationData && !streamingEvents) {
+  // Show loading state only if neither cached conversation nor fresh data is available
+  // In cache-first approach, we always try to show something
+  if (!isNewConversation && !isTempConversation && !existingConversation && !conversationData && !streamingEvents && isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin" />

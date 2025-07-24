@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/button';
 import { 
   useConversations,
   useSetConversation,
+  useConversationSummaries,
+  useSetConversationSummaries,
   useWorkspaceConversations,
   useAddConversationToWorkspace,
   useRemoveConversationFromWorkspace,
   useSetWorkspaceConversations,
   useSelectedWorkspace,
+  ConversationSummary,
   Conversation,
   ConversationMeta
 } from '@/state/eventChatStore';
@@ -42,9 +45,14 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const router = useRouter();
   const pathname = usePathname();
   
-  const conversationsRecord = useConversations();
+  // Use conversation summaries for sidebar display
+  const conversationSummaries = useConversationSummaries();
   const workspaceConversationIds = useWorkspaceConversations(workspaceId);
   
+  // Also access full conversations for preloading
+  const fullConversations = useConversations();
+  
+  const setConversationSummaries = useSetConversationSummaries();
   const setConversation = useSetConversation();
   const _addConversationToWorkspace = useAddConversationToWorkspace();
   const removeConversationFromWorkspace = useRemoveConversationFromWorkspace();
@@ -54,19 +62,20 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const _realtimeSetupRef = useRef(false);
   const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Get conversations for this workspace
+  // Get conversation summaries for this workspace
   const workspaceConversations = useMemo(() => {
     const conversationIds = workspaceConversationIds || [];
     
-    const result = conversationIds
-      .map(conversationId => conversationsRecord[conversationId])
-      .filter(Boolean) // Remove any undefined conversations
-      .map(conversation => conversation.meta) // Extract metadata for list display
+    // Remove duplicates as final safety net
+    const uniqueConversationIds = [...new Set(conversationIds)];
+    
+    const result = uniqueConversationIds
+      .map(conversationId => conversationSummaries[conversationId])
+      .filter(Boolean) // Remove any undefined summaries
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Sort by newest first
     
-    
     return result;
-  }, [workspaceConversationIds, conversationsRecord]);
+  }, [workspaceConversationIds, conversationSummaries]);
   
   // Extract current conversation ID from pathname
   const currentConversationId = useMemo(() => {
@@ -95,31 +104,24 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         if (response.ok) {
           const conversationsData = await response.json();
           
-          // Store conversations using new simple store
+          // Create minimal conversation summaries for sidebar display
+          const summaries: ConversationSummary[] = [];
           const conversationIds: string[] = [];
           
           conversationsData.forEach((conv: DBConversation) => {
-            const conversationMeta: ConversationMeta = {
+            const summary: ConversationSummary = {
               id: conv.id,
               title: conv.title || undefined, // Don't set default title
               workspace_id: conv.workspace_id,
-              source_bud_id: conv.bud_id || undefined, // Map database bud_id to source_bud_id
               created_at: conv.created_at
             };
             
-            const conversation: Conversation = {
-              id: conv.id,
-              events: [], // Events will be loaded when conversation is opened
-              isStreaming: false,
-              meta: conversationMeta
-            };
-            
-            // Store conversation in the new store
-            setConversation(conv.id, conversation);
+            summaries.push(summary);
             conversationIds.push(conv.id);
           });
           
-          // Set all conversation IDs for this workspace at once
+          // Store summaries and workspace conversation IDs
+          setConversationSummaries(summaries);
           setWorkspaceConversations(workspaceId, conversationIds);
         } else {
           console.error('Failed to load conversations:', response.status, response.statusText);
@@ -169,7 +171,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     // TODO: Implement conversation branching
   }, []);
   
-  // Preload conversation messages on hover (debounced)
+  // Preload full conversation data on hover for faster page transitions
   const handleConversationHover = useCallback((conversationId: ConversationId) => {
     // Clear any existing timeout
     if (preloadTimeoutRef.current) {
@@ -178,29 +180,59 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     
     // Set up a new timeout for preloading
     preloadTimeoutRef.current = setTimeout(async () => {
-      const existingConversation = conversationsRecord[conversationId];
+      const existingFullConversation = fullConversations[conversationId];
       
-      // Only preload if conversation exists but has no events
-      if (existingConversation && existingConversation.events.length === 0) {
+      // Only preload if full conversation doesn't exist or has no events
+      if (!existingFullConversation || existingFullConversation.events.length === 0) {
         try {
           const response = await fetch(`/api/conversations/${conversationId}?include_events=true`);
           if (response.ok) {
             const conversationData = await response.json();
             
-            // Update the existing conversation with events
-            const updatedConversation: Conversation = {
-              ...existingConversation,
-              events: conversationData.events || []
+            // Create full conversation with complete metadata and events
+            const conversationMeta: ConversationMeta = {
+              id: conversationData.id,
+              title: conversationData.title || 'Chat',
+              workspace_id: conversationData.workspace_id,
+              source_bud_id: conversationData.source_bud_id,
+              // Use the effective identity computed by the server, with fallbacks
+              assistant_name: conversationData.effective_assistant_name || 'Assistant',
+              assistant_avatar: conversationData.effective_assistant_avatar || '🤖',
+              model_config_overrides: conversationData.model_config_overrides,
+              mcp_config_overrides: conversationData.mcp_config_overrides,
+              created_at: conversationData.created_at
             };
             
-            setConversation(conversationId, updatedConversation);
+            const fullConversation: Conversation = {
+              id: conversationData.id,
+              events: conversationData.events || [],
+              isStreaming: false,
+              meta: conversationMeta
+            };
+            
+            // Store the full conversation for instant loading when clicked
+            setConversation(conversationId, fullConversation);
           }
         } catch (_error) {
           // Silently fail - this is just opportunistic preloading
         }
       }
     }, 150); // 150ms debounce
-  }, [conversationsRecord, setConversation]);
+  }, [fullConversations, setConversation]);
+
+  // Track conversation clicks and use instant state switching
+  const handleConversationClick = useCallback((conversationId: ConversationId, e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent default Link navigation
+    
+    // Direct state switching via custom event for instant navigation
+    const switchEvent = new CustomEvent('switchConversation', { 
+      detail: { conversationId } 
+    });
+    window.dispatchEvent(switchEvent);
+    
+    // Update URL for browser history
+    router.replace(`/chat/${conversationId}`, { scroll: false });
+  }, [fullConversations, router]);
 
   if (isLoading) {
     return (
@@ -235,6 +267,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         const createdAt = new Date(conversationMeta.created_at);
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true });
         
+        
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
           return conversationMeta.title || 'Untitled';
@@ -242,10 +275,11 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         
         return (
           <Link
-            key={`${conversationMeta.id}-${conversationMeta.title || 'untitled'}`}
+            key={conversationMeta.id}
             href={`/chat/${conversationMeta.id}`}
-            prefetch={false}
+            prefetch={true}
             onMouseEnter={() => handleConversationHover(conversationMeta.id)}
+            onClick={(e) => handleConversationClick(conversationMeta.id, e)}
             className={cn(
               'group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden block',
               isSelected && 'bg-muted'
