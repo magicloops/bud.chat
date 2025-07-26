@@ -154,17 +154,20 @@ export function EventList({
     const currentConversation = getCurrentConversation();
     if (!currentConversation) return;
     
-    // 2. Find branch point and create truncated event list
+    // 2. CRITICAL: Preserve original conversation state before any modifications
+    const originalConversationBackup = JSON.parse(JSON.stringify(currentConversation));
+    
+    // 3. Find branch point and create truncated event list
     const branchIndex = currentConversation.events.findIndex(e => e.id === eventId);
     if (branchIndex === -1) return;
     
     const branchedEvents = currentConversation.events.slice(0, branchIndex + 1);
     
-    // 3. Find the corresponding event in the database by position (more reliable than ID)
+    // 4. Find the corresponding event in the database by position (more reliable than ID)
     const branchEvent = currentConversation.events[branchIndex];
     const branchPosition = branchIndex; // 0-based position in conversation
     
-    // 4. Create temporary branched conversation with unique ID
+    // 5. Create temporary branched conversation with unique ID
     const tempBranchId = `temp-branch-${crypto.randomUUID()}`;
     const tempBranchedConversation: Conversation = {
       ...currentConversation,
@@ -195,8 +198,30 @@ export function EventList({
       state.activeTempConversation = tempBranchId;
     });
     
+    // 8. CRITICAL: Ensure original conversation is preserved in React Query cache
+    const originalCacheData = {
+      id: originalConversationBackup.id,
+      title: originalConversationBackup.meta.title,
+      workspace_id: originalConversationBackup.meta.workspace_id,
+      source_bud_id: originalConversationBackup.meta.source_bud_id,
+      assistant_name: originalConversationBackup.meta.assistant_name,
+      assistant_avatar: originalConversationBackup.meta.assistant_avatar,
+      model_config_overrides: originalConversationBackup.meta.model_config_overrides,
+      mcp_config_overrides: originalConversationBackup.meta.mcp_config_overrides,
+      created_at: originalConversationBackup.meta.created_at,
+      events: originalConversationBackup.events,
+      // Add effective identity for consistency
+      effective_assistant_name: originalConversationBackup.meta.assistant_name,
+      effective_assistant_avatar: originalConversationBackup.meta.assistant_avatar
+    };
+    
+    queryClient.setQueryData(['conversation', originalConversationBackup.id], originalCacheData);
+    
+    // Also ensure original conversation is preserved in Zustand store
+    setConversationRef.current(originalConversationBackup.id, originalConversationBackup);
+    
     try {
-      // 8. API call to create real conversation (async in background)
+      // 9. API call to create real conversation (async in background)
       const response = await fetch(`/api/conversations/${conversationId}/branch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -215,7 +240,7 @@ export function EventList({
       const result = await response.json();
       const { branchedConversation: realConvData, insertedEvents } = result;
       
-      // 9. Create real conversation object with server IDs
+      // 10. Create real conversation object with server IDs
       const realConversation: Conversation = {
         id: realConvData.id,
         events: insertedEvents.map((event: Event) => ({
@@ -238,7 +263,7 @@ export function EventList({
         }
       };
       
-      // 10. Pre-populate React Query cache for seamless transition
+      // 11. Pre-populate React Query cache for seamless transition
       const cacheData = {
         id: realConvData.id,
         title: realConvData.title,
@@ -257,7 +282,7 @@ export function EventList({
       
       queryClient.setQueryData(['conversation', realConvData.id], cacheData);
       
-      // 11. Lazy update: Replace temp conversation with real one in-place
+      // 12. Lazy update: Replace temp conversation with real one in-place
       useEventChatStore.setState((state) => {
         // Store the real conversation
         state.conversations[realConvData.id] = realConversation;
@@ -287,13 +312,13 @@ export function EventList({
         state.activeTempConversation = undefined;
       });
       
-      // 12. Switch to real conversation using client-side navigation
+      // 13. Switch to real conversation using client-side navigation
       const realSwitchEvent = new CustomEvent('switchConversation', { 
         detail: { conversationId: realConvData.id } 
       });
       window.dispatchEvent(realSwitchEvent);
       
-      // 13. Update URL to real conversation ID (replace temp URL in history)
+      // 14. Update URL to real conversation ID (replace temp URL in history)
       window.history.replaceState(null, '', `/chat/${realConvData.id}`);
       
     } catch (error) {
@@ -311,6 +336,10 @@ export function EventList({
             state.workspaceConversations[currentConversation.meta.workspace_id].filter(id => id !== tempBranchId);
         }
       });
+      
+      // Restore original conversation to both React Query cache and Zustand store
+      queryClient.setQueryData(['conversation', originalConversationBackup.id], originalCacheData);
+      setConversationRef.current(originalConversationBackup.id, originalConversationBackup);
       
       // Switch back to original conversation
       const rollbackEvent = new CustomEvent('switchConversation', { 
