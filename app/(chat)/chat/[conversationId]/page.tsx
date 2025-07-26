@@ -61,6 +61,27 @@ export default function ChatPage({ params }: ChatPageProps) {
       window.removeEventListener('switchConversation', handleConversationSwitch as EventListener);
     };
   }, []);
+
+  // Listen for browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      // Extract conversation ID from current URL
+      const currentPath = window.location.pathname;
+      const match = currentPath.match(/\/chat\/([^\/]+)/);
+      const urlConversationId = match ? match[1] : '';
+      
+      if (urlConversationId && urlConversationId !== currentConversationId) {
+        console.log('🔙 Browser navigation detected:', currentConversationId, '→', urlConversationId);
+        setCurrentConversationId(urlConversationId);
+      }
+    };
+    
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [currentConversationId]);
   
   // Use current conversation ID for all logic
   const conversationId = currentConversationId;
