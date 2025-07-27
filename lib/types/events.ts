@@ -34,14 +34,6 @@ export interface ReasoningData {
   // Streaming state
   is_streaming?: boolean;
   streaming_part_index?: number; // Which part is currently streaming
-  
-  // Debug info
-  raw_events: Array<{
-    type: string;
-    data: unknown;
-    sequence_number: number;
-    timestamp: number;
-  }>;
 }
 
 export interface Event {

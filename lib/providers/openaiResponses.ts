@@ -13,10 +13,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
-  // Only log reasoning events for debugging
-  if (event.type.includes('reasoning')) {
-    console.log('🧠 REASONING EVENT:', event.type, event);
-  }
 
   switch (event.type) {
     case 'response.reasoning_summary_part.added':

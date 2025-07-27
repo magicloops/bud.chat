@@ -152,12 +152,6 @@ async function createConversationInBackground(
       }
       seenIds.add(event.id);
       
-      console.log('💾 Preparing to save event:', { 
-        id: event.id, 
-        role: event.role, 
-        orderKey,
-        hasReasoning: !!event.reasoning
-      })
       
       eventInserts.push({
         id: event.id,
@@ -669,21 +663,12 @@ export async function POST(request: NextRequest) {
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
                 }
                 
-                // Debug: Log only reasoning events and completion
-                if (event.type.includes('reasoning') || event.type === 'finalize_only') {
-                  console.log('📡 Processing event:', { 
-                    type: event.type, 
-                    hasItemId: !!(event as any).item_id,
-                    fullEvent: event.type.includes('reasoning') ? event : 'finalize_only'
-                  });
-                }
                 
                 // Build events for database storage
                 if (event.type === 'token' && event.content) {
                   eventBuilder.addTextChunk(event.content);
                 } else if (event.type.includes('reasoning_summary')) {
                   // Collect reasoning events for database storage
-                  console.log('🧠 REASONING EVENT DETECTED:', event.type, event);
                   const { item_id } = event as any;
                   if (item_id) {
                     if (!reasoningCollector.has(item_id)) {
@@ -691,18 +676,11 @@ export async function POST(request: NextRequest) {
                         item_id,
                         output_index: (event as any).output_index || 0,
                         parts: {},
-                        raw_events: [],
                         is_streaming: true
                       });
                     }
                     
                     const reasoningData = reasoningCollector.get(item_id);
-                    reasoningData.raw_events.push({
-                      type: event.type,
-                      data: event,
-                      sequence_number: (event as any).sequence_number || 0,
-                      timestamp: Date.now()
-                    });
                     
                     // Handle specific reasoning events
                     if (event.type === 'reasoning_summary_text_done') {
@@ -724,45 +702,20 @@ export async function POST(request: NextRequest) {
                         .join('\n\n');
                       reasoningData.is_streaming = false;
                       
-                      console.log('💭 Collected reasoning data for database:', {
-                        item_id,
-                        parts_count: Object.keys(reasoningData.parts).length,
-                        combined_text_length: reasoningData.combined_text?.length
-                      });
                     }
                   }
                 } else if (event.type === 'finalize_only' && !eventFinalized) {
-                  // Debug: Show what reasoning data we collected
-                  console.log('🔍 Finalization - reasoning collector contents:', {
-                    collectorSize: reasoningCollector.size,
-                    collectorKeys: Array.from(reasoningCollector.keys()),
-                    collectedData: Array.from(reasoningCollector.values()).map(data => ({
-                      item_id: data.item_id,
-                      parts_count: Object.keys(data.parts).length,
-                      has_combined_text: !!data.combined_text,
-                      is_streaming: data.is_streaming
-                    }))
-                  });
-                  
                   // Attach reasoning data to event builder before finalization
                   const reasoningEntries = Array.from(reasoningCollector.values());
                   if (reasoningEntries.length > 0) {
                     // Use the first (and typically only) reasoning data
                     const reasoningData = reasoningEntries[0];
-                    console.log('🔗 Attaching reasoning to event builder:', reasoningData);
                     eventBuilder.setReasoningData(reasoningData);
-                  } else {
-                    console.log('❌ NO REASONING DATA to attach to event builder');
                   }
                   
                   // Finalize the current event only once (from OpenAI response.completed)
                   const builtEvent = eventBuilder.finalize();
                   if (builtEvent) {
-                    console.log('🏁 Finalizing event (from OpenAI response.completed):', { 
-                      eventId: builtEvent.id, 
-                      role: builtEvent.role,
-                      hasReasoning: !!builtEvent.reasoning
-                    });
                     eventLog.addEvent(builtEvent);
                     eventFinalized = true; // Mark as finalized to prevent duplicates
                   }
@@ -789,19 +742,6 @@ export async function POST(request: NextRequest) {
           if (!conversationId) {
             const allEvents = eventLog.getEvents()
             
-            // Debug: Check if reasoning is preserved in eventLog
-            console.log('📋 Events being sent to createConversationInBackground:', 
-              allEvents.map(e => ({
-                id: e.id,
-                role: e.role,
-                hasReasoning: !!e.reasoning,
-                reasoningData: e.reasoning ? {
-                  item_id: e.reasoning.item_id,
-                  has_combined_text: !!e.reasoning.combined_text,
-                  is_streaming: e.reasoning.is_streaming
-                } : null
-              }))
-            );
             
             const conversationResult = await createConversationInBackground(
               allEvents,

@@ -145,8 +145,10 @@ export const EventItem = memo(function EventItem({
   
   // Reasoning logic
   const hasReasoning = !!event.reasoning;
-  const isReasoningStreaming = event.reasoning?.is_streaming;
+  // Default is_streaming to false if undefined - only show spinner if explicitly true
+  const isReasoningStreaming = event.reasoning?.is_streaming === true;
   const shouldShowReasoning = showReasoning || isReasoningStreaming;
+  
   
   // Determine if this should be a continuation (compact view)
   const shouldShowAsContinuation = isAssistant && previousEvent && 
@@ -313,18 +315,6 @@ export const EventItem = memo(function EventItem({
                           </div>
                         )}
                       </div>
-                      
-                      {/* Debug info in development */}
-                      {process.env.NODE_ENV === 'development' && event.reasoning && (
-                        <details className="mt-3">
-                          <summary className="text-xs text-muted-foreground cursor-pointer">
-                            Debug: Raw Reasoning Events ({event.reasoning.raw_events?.length || 0})
-                          </summary>
-                          <pre className="text-xs mt-2 p-2 bg-background rounded overflow-auto max-h-32">
-                            {JSON.stringify(event.reasoning.raw_events, null, 2)}
-                          </pre>
-                        </details>
-                      )}
                     </div>
                   )}
                 </div>
@@ -611,18 +601,6 @@ export const EventItem = memo(function EventItem({
                         </div>
                       )}
                     </div>
-                    
-                    {/* Debug info in development */}
-                    {process.env.NODE_ENV === 'development' && event.reasoning && (
-                      <details className="mt-3">
-                        <summary className="text-xs text-muted-foreground cursor-pointer">
-                          Debug: Raw Reasoning Events ({event.reasoning.raw_events?.length || 0})
-                        </summary>
-                        <pre className="text-xs mt-2 p-2 bg-background rounded overflow-auto max-h-32">
-                          {JSON.stringify(event.reasoning.raw_events, null, 2)}
-                        </pre>
-                      </details>
-                    )}
                   </div>
                 )}
               </div>

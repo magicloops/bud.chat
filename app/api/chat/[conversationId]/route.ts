@@ -506,21 +506,12 @@ export async function POST(
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
                 }
                 
-                // Debug: Log only reasoning events and completion
-                if (event.type.includes('reasoning') || event.type === 'finalize_only') {
-                  console.log('📡 Processing event:', { 
-                    type: event.type, 
-                    hasItemId: !!(event as any).item_id,
-                    fullEvent: event.type.includes('reasoning') ? event : 'finalize_only'
-                  });
-                }
                 
                 // Build events for database storage
                 if (event.type === 'token' && event.content) {
                   eventBuilder.addTextChunk(event.content);
                 } else if (event.type.includes('reasoning_summary')) {
                   // Collect reasoning events for database storage
-                  console.log('🧠 REASONING EVENT DETECTED:', event.type, event);
                   const { item_id } = event as any;
                   if (item_id) {
                     if (!reasoningCollector.has(item_id)) {
@@ -528,18 +519,11 @@ export async function POST(
                         item_id,
                         output_index: (event as any).output_index || 0,
                         parts: {},
-                        raw_events: [],
                         is_streaming: true
                       });
                     }
                     
                     const reasoningData = reasoningCollector.get(item_id);
-                    reasoningData.raw_events.push({
-                      type: event.type,
-                      data: event,
-                      sequence_number: (event as any).sequence_number || 0,
-                      timestamp: Date.now()
-                    });
                     
                     // Handle specific reasoning events
                     if (event.type === 'reasoning_summary_text_done') {

@@ -153,6 +153,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         meta: conversationMeta
       };
       
+      
       setConversation(conversationData.id, conversation);
       
       // Apply bud theme if available
