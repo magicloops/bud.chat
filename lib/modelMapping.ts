@@ -11,21 +11,36 @@ export interface ModelInfo {
 
 // Mapping of friendly model names to actual API models
 export const MODEL_MAPPING: Record<string, ModelInfo> = {
-  // OpenAI Models (Latest)
+  // OpenAI Models (Latest - Reasoning Models)
   'o3': {
     apiName: 'o3',
     provider: 'openai',
-    displayName: 'OpenAI o3'
+    displayName: 'OpenAI o3',
+    description: 'Advanced reasoning model'
+  },
+  'o3-mini': {
+    apiName: 'o3-mini',
+    provider: 'openai',
+    displayName: 'OpenAI o3-mini',
+    description: 'Efficient reasoning model'
+  },
+  'o4-mini': {
+    apiName: 'o4-mini',
+    provider: 'openai',
+    displayName: 'OpenAI o4-mini',
+    description: 'Latest efficient reasoning model'
   },
   'o1': {
     apiName: 'o1',
     provider: 'openai', 
-    displayName: 'OpenAI o1'
+    displayName: 'OpenAI o1',
+    description: 'Original reasoning model'
   },
   'o1-mini': {
     apiName: 'o1-mini',
     provider: 'openai',
-    displayName: 'OpenAI o1-mini'
+    displayName: 'OpenAI o1-mini',
+    description: 'Efficient version of o1'
   },
   
   // OpenAI Models (GPT-4 Series)
@@ -191,6 +206,36 @@ export function getModelsGroupedForUI() {
     openai: models.filter(m => m.provider === 'openai'),
     anthropic: models.filter(m => m.provider === 'anthropic')
   };
+}
+
+/**
+ * Check if a model is an o-series reasoning model that should use the Responses API
+ * @param friendlyName - The friendly model name
+ * @returns true if it's an o-series model (o1, o3, o3-mini, o4-mini)
+ */
+export function isReasoningModel(friendlyName: string): boolean {
+  const reasoningModels = ['o1', 'o1-mini', 'o3', 'o3-mini', 'o4-mini'];
+  return reasoningModels.includes(friendlyName);
+}
+
+/**
+ * Check if a model supports reasoning effort parameter
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports reasoning effort levels
+ */
+export function supportsReasoningEffort(friendlyName: string): boolean {
+  // Currently only o1 supports reasoning effort parameter
+  return friendlyName === 'o1';
+}
+
+/**
+ * Check if a model supports temperature parameter
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports temperature
+ */
+export function supportsTemperature(friendlyName: string): boolean {
+  // O-series reasoning models don't support temperature
+  return !isReasoningModel(friendlyName);
 }
 
 /**

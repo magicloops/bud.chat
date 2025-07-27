@@ -9,7 +9,8 @@ import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor'
 import { EventLog, createTextEvent, createToolResultEvent, Event } from '@/lib/types/events'
 import { eventsToAnthropicMessages } from '@/lib/providers/anthropic'
 import { eventsToOpenAIMessages } from '@/lib/providers/openai'
-import { getApiModelName, isClaudeModel } from '@/lib/modelMapping'
+import { createResponsesAPIRequest, processResponsesAPIStream } from '@/lib/providers/openaiResponses'
+import { getApiModelName, isClaudeModel, isReasoningModel, supportsReasoningEffort } from '@/lib/modelMapping'
 import { Database } from '@/lib/types/database'
 import { generateKeyBetween } from 'fractional-indexing'
 import OpenAI from 'openai'
@@ -89,6 +90,8 @@ async function createConversationInBackground(
   
   try {
     console.log('💾 Creating conversation in background...')
+    console.log('📋 Events received for saving:', events.length)
+    console.log('📋 Event IDs being saved:', events.map(e => ({ id: e.id, role: e.role })))
     
     // Fetch bud if budId is provided
     let bud = null
@@ -136,11 +139,20 @@ async function createConversationInBackground(
 
     // Save all events to database
     const eventInserts = []
+    const seenIds = new Set<string>();
     let previousOrderKey: string | null = null
     
     for (const event of events) {
       const orderKey = generateKeyBetween(previousOrderKey, null)
       previousOrderKey = orderKey
+      
+      // Check for duplicate IDs within this batch
+      if (seenIds.has(event.id)) {
+        console.error('🚨 DUPLICATE ID DETECTED within batch:', event.id);
+      }
+      seenIds.add(event.id);
+      
+      console.log('💾 Preparing to save event:', { id: event.id, role: event.role, orderKey })
       
       eventInserts.push({
         id: event.id,
@@ -154,14 +166,34 @@ async function createConversationInBackground(
     }
 
     if (eventInserts.length > 0) {
+      console.log('💾 About to insert events:', eventInserts.length)
+      console.log('💾 Event insert details:', eventInserts.map(e => ({ id: e.id, role: e.role, order_key: e.order_key })))
+      
+      // Check if any of these event IDs already exist in the database
+      const eventIds = eventInserts.map(e => e.id);
+      const { data: existingEvents } = await supabase
+        .from('events')
+        .select('id')
+        .in('id', eventIds);
+      
+      if (existingEvents && existingEvents.length > 0) {
+        console.error('🚨 FOUND EXISTING EVENTS in database:', existingEvents.map(e => e.id));
+        console.error('🚨 Trying to insert:', eventIds);
+        console.error('🚨 Conflicts:', existingEvents.map(e => e.id));
+      }
+      
       const { error: eventsError } = await supabase
         .from('events')
         .insert(eventInserts)
 
       if (eventsError) {
         console.error('❌ Error saving events:', eventsError)
+        console.error('❌ Failed event IDs:', eventInserts.map(e => e.id))
+        console.error('❌ Full error details:', JSON.stringify(eventsError, null, 2))
         throw new Error('Failed to save events')
       }
+      
+      console.log('✅ Successfully saved events to database')
     }
 
     console.log('✅ Conversation and events created:', conversation.id)
@@ -238,51 +270,33 @@ export async function POST(request: NextRequest) {
     
     console.log('🔄 Converting messages to events...')
     
-    // Add existing messages as events
-    for (const message of messages) {
-      console.log('📝 Processing message:', { role: message.role, content: message.content?.substring(0, 100) })
+    // Add existing events (messages are now always in event format)
+    for (const event of messages) {
+      console.log('📝 Processing event:', { id: event.id, role: event.role, segments: event.segments?.length })
       
-      // Handle both legacy message format (content) and event format (segments)
-      if (message.segments) {
-        // Event format - add directly to event log
-        eventLog.addEvent(message)
-      } else {
-        // Legacy message format - convert to events
-        if (message.role === 'system') {
-          eventLog.addEvent(createTextEvent('system', message.content))
-        } else if (message.role === 'user') {
-          eventLog.addEvent(createTextEvent('user', message.content))
-        } else if (message.role === 'assistant') {
-          // Handle assistant messages with potential tool calls
-          const segments: Array<{type: 'text', text: string} | {type: 'tool_call', id: string, name: string, args: object}> = []
-          if (message.content) {
-            segments.push({ type: 'text' as const, text: message.content })
-          }
-          if (message.json_meta?.tool_calls) {
-            for (const toolCall of message.json_meta.tool_calls) {
-              segments.push({
-                type: 'tool_call' as const,
-                id: toolCall.id,
-                name: toolCall.function.name,
-                args: JSON.parse(toolCall.function.arguments || '{}')
-              })
-            }
-          }
-          if (segments.length > 0) {
-            eventLog.addEvent({
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              segments,
-              ts: Date.now()
-            })
-          }
-        }
-      }
+      // Keep original IDs for optimistic UI rendering
+      eventLog.addEvent({
+        id: event.id, // Keep original ID for optimistic UI updates
+        role: event.role,
+        segments: event.segments,
+        ts: event.ts || Date.now(),
+        reasoning: event.reasoning
+      })
     }
 
-    // Determine provider based on model
+    // Determine provider and API type based on model
     const isClaudeModelDetected = isClaudeModel(model)
-    const provider = isClaudeModelDetected ? 'anthropic' : 'openai'
+    const isReasoningModelDetected = isReasoningModel(model)
+    
+    let provider: 'anthropic' | 'openai' | 'openai-responses';
+    if (isClaudeModelDetected) {
+      provider = 'anthropic';
+    } else if (isReasoningModelDetected) {
+      provider = 'openai-responses';
+    } else {
+      provider = 'openai';
+    }
+    
     const apiModelName = getApiModelName(model)
     
     console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`)
@@ -294,6 +308,7 @@ export async function POST(request: NextRequest) {
         try {
           const eventBuilder = new EventStreamBuilder('assistant')
           let createdConversationId: string | null = null
+          let eventFinalized = false // Track if current event has been finalized
           
           // Main conversation loop - handles tool calls automatically
           const maxIterations = 10 // Prevent infinite loops
@@ -434,8 +449,8 @@ export async function POST(request: NextRequest) {
                 shouldContinue = false;
               }
               
-            } else {
-              // Use OpenAI
+            } else if (provider === 'openai') {
+              // Use OpenAI Chat Completions API
               const openaiMessages = eventsToOpenAIMessages(events)
               
               // Get available tools if budId is provided
@@ -519,10 +534,159 @@ export async function POST(request: NextRequest) {
               if (toolCallSegments.length === 0) {
                 shouldContinue = false;
               }
+              
+            } else if (provider === 'openai-responses') {
+              // Use OpenAI Responses API for o-series reasoning models
+              const openaiMessages = eventsToOpenAIMessages(events)
+              
+              // Get available tools if budId is provided
+              let tools: OpenAI.ChatCompletionTool[] = []
+              if (budId) {
+                try {
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', budId)
+                    .single()
+                  
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId)
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint))
+                      const mcpClient = new Client({
+                        name: "bud-chat-tools-client",
+                        version: "1.0.0"
+                      }, { capabilities: { tools: {} } })
+                      
+                      await mcpClient.connect(transport)
+                      const { tools: mcpTools } = await mcpClient.listTools()
+                      
+                      // Convert to OpenAI tool format
+                      tools = mcpTools.map(tool => ({
+                        type: 'function',
+                        function: {
+                          name: tool.name,
+                          description: tool.description,
+                          parameters: tool.inputSchema
+                        }
+                      }))
+                      
+                      await mcpClient.close()
+                    }
+                  }
+                } catch (error) {
+                  console.warn('Failed to get OpenAI Responses API tools:', error)
+                }
+              }
+              
+              // Determine reasoning effort based on model and bud config
+              let reasoningEffort: 'low' | 'medium' | 'high' | undefined;
+              if (supportsReasoningEffort(model)) {
+                // Check if bud has reasoning effort configured
+                if (budId) {
+                  try {
+                    const { data: bud } = await supabase
+                      .from('buds')
+                      .select('default_json')
+                      .eq('id', budId)
+                      .single()
+                    
+                    const budConfig = bud?.default_json as { reasoning_effort?: 'low' | 'medium' | 'high' };
+                    reasoningEffort = budConfig?.reasoning_effort || 'medium';
+                  } catch (error) {
+                    console.warn('Failed to get bud reasoning effort:', error);
+                    reasoningEffort = 'medium';
+                  }
+                } else {
+                  reasoningEffort = 'medium'; // Default
+                }
+              }
+              
+              const request = createResponsesAPIRequest(openaiMessages, apiModelName, {
+                temperature: 0.7,
+                tools,
+                reasoning_effort: reasoningEffort
+              });
+              
+              console.log('🔄 Sending request to OpenAI Responses API:', JSON.stringify(request, null, 2));
+              
+              // Use OpenAI Responses API for o-series models  
+              // Note: o-series models don't support temperature parameter
+              const responsesRequest = {
+                model: apiModelName,
+                input: openaiMessages.map(msg => {
+                  if (typeof msg.content === 'string') {
+                    return msg.content;
+                  }
+                  return JSON.stringify(msg.content);
+                }).join('\n'),
+                stream: true as const,
+                // TODO: Convert tools to Responses API format when needed
+                // ...(tools.length > 0 && { tools }),
+                ...(reasoningEffort && { 
+                  reasoning: { 
+                    effort: reasoningEffort 
+                  }
+                })
+              };
+              
+              const stream = await openai.responses.create(responsesRequest);
+              
+              console.log('📡 OpenAI Responses API stream created, starting to process...');
+              
+              // Process the Responses API stream with reasoning events
+              const responsesStream = processResponsesAPIStream(stream);
+              
+              // Handle both reasoning and regular events
+              for await (const event of responsesStream) {
+                if (event.type === 'error') {
+                  console.error('❌ OpenAI Responses API error:', event.error);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                  break;
+                }
+                
+                // Send event to frontend (but not internal-only events)
+                if (event.type !== 'finalize_only') {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                }
+                
+                // Build events for database storage
+                if (event.type === 'token' && event.content) {
+                  eventBuilder.addTextChunk(event.content);
+                } else if (event.type === 'finalize_only' && !eventFinalized) {
+                  // Finalize the current event only once (from OpenAI response.completed)
+                  const builtEvent = eventBuilder.finalize();
+                  if (builtEvent) {
+                    console.log('🏁 Finalizing event (from OpenAI response.completed):', { eventId: builtEvent.id, role: builtEvent.role });
+                    eventLog.addEvent(builtEvent);
+                    eventFinalized = true; // Mark as finalized to prevent duplicates
+                  }
+                  // NOTE: This does NOT send a complete event to frontend - that happens after conversation creation
+                }
+              }
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
+              }
             }
             
             // Reset builder for next iteration
             eventBuilder.reset('assistant');
+            eventFinalized = false; // Reset finalization flag for next iteration
           }
           
           // Create conversation in background (only if not an existing conversation)
@@ -536,14 +700,17 @@ export async function POST(request: NextRequest) {
             
             createdConversationId = conversationResult.conversationId
             
-            // Send conversation created event
+            // Send conversation created event BEFORE complete event
+            console.log('📤 Sending conversationCreated event:', { conversationId: createdConversationId });
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: "conversationCreated",
               conversationId: createdConversationId
             })}\n\n`))
+            console.log('✅ conversationCreated event sent successfully');
           }
           
-          // Send completion event
+          // Send completion event AFTER conversationCreated (so frontend has realConversationId)
+          console.log('📤 Sending complete event to frontend');
           const finalContent = eventLog.getEvents()
             .filter(e => e.role === 'assistant')
             .flatMap(e => e.segments)
@@ -555,6 +722,7 @@ export async function POST(request: NextRequest) {
             type: "complete",
             content: finalContent
           })}\n\n`))
+          console.log('✅ Complete event sent to frontend');
           
           controller.close();
           

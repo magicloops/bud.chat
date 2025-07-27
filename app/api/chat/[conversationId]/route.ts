@@ -10,8 +10,8 @@ import { EventLog, createTextEvent, createToolResultEvent } from '@/lib/types/ev
 import { saveEvent, getConversationEvents } from '@/lib/db/events';
 import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
 import { eventsToOpenAIMessages } from '@/lib/providers/openai';
-import { getApiModelName, isClaudeModel } from '@/lib/modelMapping';
-;
+import { processResponsesAPIStream } from '@/lib/providers/openaiResponses';
+import { getApiModelName, isClaudeModel, isReasoningModel, supportsReasoningEffort } from '@/lib/modelMapping';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -133,9 +133,19 @@ export async function POST(
     await saveEvent(userEvent, { conversationId });
     console.log('💾 User event saved to database');
 
-    // Determine provider based on model
+    // Determine provider and API type based on model
     const isClaudeModelDetected = isClaudeModel(model);
-    const provider = isClaudeModelDetected ? 'anthropic' : 'openai';
+    const isReasoningModelDetected = isReasoningModel(model);
+    
+    let provider: 'anthropic' | 'openai' | 'openai-responses';
+    if (isClaudeModelDetected) {
+      provider = 'anthropic';
+    } else if (isReasoningModelDetected) {
+      provider = 'openai-responses';
+    } else {
+      provider = 'openai';
+    }
+    
     const apiModelName = getApiModelName(model);
     
     console.log(`🔄 Using ${provider} provider for model: ${model} → ${apiModelName}`);
@@ -284,44 +294,234 @@ export async function POST(
                 shouldContinue = false;
               }
               
-            } else {
-              // Use OpenAI (same logic as chat-new)
+            } else if (provider === 'openai') {
+              // Use OpenAI Chat Completions API
               const openaiMessages = eventsToOpenAIMessages(events);
               
-              const stream = await openai.chat.completions.create({
+              // Get available tools if budId is provided
+              let tools: OpenAI.ChatCompletionTool[] = [];
+              if (conversation.source_bud_id) {
+                try {
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', conversation.source_bud_id)
+                    .single();
+                  
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId);
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
+                      const mcpClient = new Client({
+                        name: 'bud-chat-tools-client',
+                        version: '1.0.0'
+                      }, { capabilities: { tools: {} } });
+                      
+                      await mcpClient.connect(transport);
+                      const { tools: mcpTools } = await mcpClient.listTools();
+                      
+                      // Convert to OpenAI tool format
+                      tools = mcpTools.map(tool => ({
+                        type: 'function',
+                        function: {
+                          name: tool.name,
+                          description: tool.description,
+                          parameters: tool.inputSchema
+                        }
+                      }));
+                      
+                      await mcpClient.close();
+                    }
+                  }
+                } catch (error) {
+                  console.warn('Failed to get OpenAI tools:', error);
+                }
+              }
+              
+              const request = {
                 model: apiModelName,
                 messages: openaiMessages,
                 temperature: 0.7,
-                stream: true
-              });
+                stream: true,
+                ...(tools.length > 0 && { tools })
+              };
               
-              for await (const chunk of stream) {
-                const delta = chunk.choices[0]?.delta;
-                const content = delta?.content;
-                
-                if (content) {
-                  eventBuilder.addTextChunk(content);
+              console.log('🔄 Sending request to OpenAI:', JSON.stringify(request, null, 2));
+              
+              const stream = await openai.chat.completions.create(request) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+              
+              console.log('📡 OpenAI stream created, starting to process...');
+              
+              // Use unified ChatStreamHandler
+              const streamHandler = new ChatStreamHandler(
+                eventBuilder,
+                eventLog,
+                controller,
+                { debug: true, conversationId }
+              );
+              
+              await streamHandler.handleOpenAIStream(stream);
+              
+              // Save the finalized event to database
+              const finalEvent = eventLog.getLastEvent();
+              if (finalEvent) {
+                await saveEvent(finalEvent, { conversationId });
+              }
+              
+              // Check if we have tool calls to execute
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
+              }
+              
+            } else if (provider === 'openai-responses') {
+              // Use OpenAI Responses API for o-series reasoning models
+              const openaiMessages = eventsToOpenAIMessages(events);
+              
+              // Get available tools if budId is provided
+              let tools: OpenAI.ChatCompletionTool[] = [];
+              if (conversation.source_bud_id) {
+                try {
+                  const { data: bud } = await supabase
+                    .from('buds')
+                    .select('*, mcp_config')
+                    .eq('id', conversation.source_bud_id)
+                    .single();
                   
-                  // Stream text content
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                    type: 'token',
-                    content: content
-                  })}\n\n`));
-                }
-                
-                if (chunk.choices[0]?.finish_reason) {
-                  const finalEvent = eventBuilder.finalize();
-                  eventLog.addEvent(finalEvent);
-                  
-                  // Save assistant event to database
-                  await saveEvent(finalEvent, { conversationId });
-                  
-                  // If no tool calls, we're done
-                  if (finalEvent.segments.every(s => s.type !== 'tool_call')) {
-                    shouldContinue = false;
+                  if (bud?.mcp_config?.servers?.length) {
+                    const { data: servers } = await supabase
+                      .from('mcp_servers')
+                      .select('*')
+                      .in('id', bud.mcp_config.servers)
+                      .eq('workspace_id', workspaceId);
+                    
+                    if (servers?.length) {
+                      // Connect to get tools
+                      const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+                      const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+                      
+                      const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
+                      const mcpClient = new Client({
+                        name: 'bud-chat-tools-client',
+                        version: '1.0.0'
+                      }, { capabilities: { tools: {} } });
+                      
+                      await mcpClient.connect(transport);
+                      const { tools: mcpTools } = await mcpClient.listTools();
+                      
+                      // Convert to OpenAI tool format
+                      tools = mcpTools.map(tool => ({
+                        type: 'function',
+                        function: {
+                          name: tool.name,
+                          description: tool.description,
+                          parameters: tool.inputSchema
+                        }
+                      }));
+                      
+                      await mcpClient.close();
+                    }
                   }
+                } catch (error) {
+                  console.warn('Failed to get OpenAI Responses API tools:', error);
+                }
+              }
+              
+              // Determine reasoning effort based on model and bud config
+              let reasoningEffort: 'low' | 'medium' | 'high' | undefined;
+              if (supportsReasoningEffort(model)) {
+                // Check if bud has reasoning effort configured
+                if (conversation.source_bud_id) {
+                  try {
+                    const { data: bud } = await supabase
+                      .from('buds')
+                      .select('default_json')
+                      .eq('id', conversation.source_bud_id)
+                      .single();
+                    
+                    const budConfig = bud?.default_json as { reasoning_effort?: 'low' | 'medium' | 'high' };
+                    reasoningEffort = budConfig?.reasoning_effort || 'medium';
+                  } catch (error) {
+                    console.warn('Failed to get bud reasoning effort:', error);
+                    reasoningEffort = 'medium';
+                  }
+                } else {
+                  reasoningEffort = 'medium'; // Default
+                }
+              }
+              
+              // Use OpenAI Responses API for o-series models  
+              // Note: o-series models don't support temperature parameter
+              const responsesRequest = {
+                model: apiModelName,
+                input: openaiMessages.map(msg => {
+                  if (typeof msg.content === 'string') {
+                    return msg.content;
+                  }
+                  return JSON.stringify(msg.content);
+                }).join('\n'),
+                stream: true as const,
+                // TODO: Convert tools to Responses API format when needed
+                // ...(tools.length > 0 && { tools }),
+                ...(reasoningEffort && { 
+                  reasoning: { 
+                    effort: reasoningEffort 
+                  }
+                })
+              };
+              
+              console.log('🔄 Sending request to OpenAI Responses API:', JSON.stringify(responsesRequest, null, 2));
+              
+              const stream = await openai.responses.create(responsesRequest);
+              
+              console.log('📡 OpenAI Responses API stream created, starting to process...');
+              
+              // Process the Responses API stream with reasoning events
+              const responsesStream = processResponsesAPIStream(stream);
+              
+              // Handle both reasoning and regular events
+              for await (const event of responsesStream) {
+                if (event.type === 'error') {
+                  console.error('❌ OpenAI Responses API error:', event.error);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
                   break;
                 }
+                
+                // Send event to frontend
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                
+                // Build events for database storage
+                if (event.type === 'token' && event.content) {
+                  eventBuilder.addTextChunk(event.content);
+                } else if (event.type === 'complete') {
+                  // Finalize the current event
+                  const builtEvent = eventBuilder.finalize();
+                  if (builtEvent) {
+                    eventLog.addEvent(builtEvent);
+                    // Save assistant event to database
+                    await saveEvent(builtEvent, { conversationId });
+                  }
+                }
+              }
+              
+              // Check if we have tool calls to execute
+              const finalEvent = eventLog.getLastEvent();
+              const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
+              
+              // If no tool calls, we're done
+              if (toolCallSegments.length === 0) {
+                shouldContinue = false;
               }
             }
             

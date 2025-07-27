@@ -1,13 +1,33 @@
 import { Event, useEventChatStore, EventConversation } from '@/state/eventChatStore';
+import { ReasoningData, ReasoningPart } from '@/lib/types/events';
+import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error';
+  type: 'token' | 'tool_start' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+    // New reasoning types
+    | 'reasoning_summary_part_added' | 'reasoning_summary_part_done'
+    | 'reasoning_summary_text_delta' | 'reasoning_summary_text_done'
+    | 'reasoning_summary_delta' | 'reasoning_summary_done';
+  
+  // Existing fields
   content?: string;
   tool_id?: string;
   tool_name?: string;
   args?: object;
   output?: object;
   error?: string;
+  
+  // New reasoning fields
+  item_id?: string;
+  output_index?: number;
+  summary_index?: number;
+  part?: {
+    type: string;
+    text: string;
+  };
+  delta?: string | { text: string };
+  text?: string;
+  sequence_number?: number;
 }
 
 export interface LocalStateUpdater {
@@ -26,6 +46,9 @@ export class FrontendEventHandler {
   // For local state updates (optimistic flow)
   private localStateUpdater: LocalStateUpdater | null = null;
   private assistantPlaceholder: Event | null = null;
+  
+  // Reasoning data tracking
+  private currentReasoningData: Map<string, ReasoningData> = new Map();
 
   /**
    * Set local state updater for optimistic flows
@@ -95,6 +118,26 @@ export class FrontendEventHandler {
         break;
       case 'tool_complete':
         await this.handleToolCompleteEvent(data);
+        break;
+      case 'reasoning_summary_part_added':
+        await this.handleReasoningSummaryPartAdded(data);
+        break;
+      case 'reasoning_summary_part_done':
+        await this.handleReasoningSummaryPartDone(data);
+        break;
+      case 'reasoning_summary_text_delta':
+        await this.handleReasoningSummaryTextDelta(data);
+        break;
+      case 'reasoning_summary_text_done':
+        // Text done events might not need special handling beyond logging
+        await this.logReasoningEvent(data);
+        break;
+      case 'reasoning_summary_delta':
+        // Handle general reasoning summary deltas (similar to text delta)
+        await this.handleReasoningSummaryTextDelta(data);
+        break;
+      case 'reasoning_summary_done':
+        await this.handleReasoningSummaryDone(data);
         break;
       case 'complete':
         await this.handleCompleteEvent(data);
@@ -184,6 +227,242 @@ export class FrontendEventHandler {
     } else {
       this.updateStoreStateError(data);
     }
+  }
+
+  /**
+   * REASONING EVENT HANDLERS
+   */
+
+  private async handleReasoningSummaryPartAdded(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, summary_index, part, sequence_number } = data;
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id || !part || summary_index === undefined) return;
+    
+    // Initialize or get existing reasoning data
+    let reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) {
+      reasoningData = {
+        item_id,
+        output_index: output_index || 0,
+        parts: {},
+        raw_events: [],
+        is_streaming: true
+      };
+      this.currentReasoningData.set(item_id, reasoningData);
+    }
+    
+    // Create or update the reasoning part
+    reasoningData.parts[summary_index] = {
+      summary_index,
+      type: part.type as 'summary_text',
+      text: part.text,
+      sequence_number: sequence_number || 0,
+      is_complete: false,
+      created_at: Date.now()
+    };
+    
+    // Update streaming state
+    reasoningData.streaming_part_index = summary_index;
+    
+    // Log raw event for debugging
+    reasoningData.raw_events.push({
+      type: 'reasoning_summary_part_added',
+      data: { ...data },
+      sequence_number: sequence_number || 0,
+      timestamp: Date.now()
+    });
+    
+    // Update UI state
+    this.updateReasoningInState(item_id, reasoningData);
+  }
+
+  private async handleReasoningSummaryTextDelta(data: StreamEvent): Promise<void> {
+    const { item_id, delta, summary_index, sequence_number } = data;
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id || !delta || summary_index === undefined) return;
+    
+    const reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) return;
+    
+    // Find the reasoning part to update by index
+    let reasoningPart = reasoningData.parts[summary_index];
+    if (!reasoningPart) {
+      // Create part if it doesn't exist (defensive programming)
+      reasoningPart = {
+        summary_index,
+        type: 'summary_text',
+        text: '',
+        sequence_number: sequence_number || 0,
+        is_complete: false,
+        created_at: Date.now()
+      };
+      reasoningData.parts[summary_index] = reasoningPart;
+    }
+    
+    // Append delta text
+    const deltaText = typeof delta === 'string' ? delta : delta.text || '';
+    reasoningPart.text += deltaText;
+    
+    // Update streaming state
+    reasoningData.streaming_part_index = summary_index;
+    
+    // Log raw event
+    reasoningData.raw_events.push({
+      type: 'reasoning_summary_text_delta',
+      data: { ...data },
+      sequence_number: sequence_number || 0,
+      timestamp: Date.now()
+    });
+    
+    // Update UI state
+    this.updateReasoningInState(item_id, reasoningData);
+  }
+
+  private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
+    const { item_id, summary_index, sequence_number } = data;
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id || summary_index === undefined) return;
+    
+    const reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData || !reasoningData.parts[summary_index]) return;
+    
+    // Mark this specific part as complete
+    reasoningData.parts[summary_index].is_complete = true;
+    
+    // Log raw event
+    reasoningData.raw_events.push({
+      type: 'reasoning_summary_part_done',
+      data: { ...data },
+      sequence_number: sequence_number || 0,
+      timestamp: Date.now()
+    });
+    
+    // Update UI state
+    this.updateReasoningInState(item_id, reasoningData);
+  }
+
+  private async handleReasoningSummaryDone(data: StreamEvent): Promise<void> {
+    const { item_id, text, sequence_number } = data;
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    const reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) return;
+    
+    // Finalize all reasoning - combine all parts
+    const sortedParts = Object.values(reasoningData.parts)
+      .sort((a, b) => a.summary_index - b.summary_index);
+    
+    reasoningData.combined_text = text || sortedParts
+      .map(part => part.text)
+      .join('\n\n');
+    
+    // Mark all streaming as complete
+    reasoningData.is_streaming = false;
+    reasoningData.streaming_part_index = undefined;
+    
+    // Mark all parts as complete
+    Object.values(reasoningData.parts).forEach(part => {
+      part.is_complete = true;
+    });
+    
+    // Log raw event
+    reasoningData.raw_events.push({
+      type: 'reasoning_summary_done',
+      data: { ...data },
+      sequence_number: sequence_number || 0,
+      timestamp: Date.now()
+    });
+    
+    // Update UI state and mark as complete
+    this.updateReasoningInState(item_id, reasoningData, true);
+    
+    // Clean up after completion
+    this.currentReasoningData.delete(item_id);
+  }
+
+  // Helper method for logging reasoning events that don't need special handling
+  private async logReasoningEvent(data: StreamEvent): Promise<void> {
+    const { item_id, sequence_number } = data;
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    const reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) return;
+    
+    // Just log the event for debugging
+    reasoningData.raw_events.push({
+      type: data.type,
+      data: { ...data },
+      sequence_number: sequence_number || 0,
+      timestamp: Date.now()
+    });
+  }
+
+  private updateReasoningInState(item_id: string, reasoningData: ReasoningData, isComplete = false): void {
+    if (this.isLocalState()) {
+      this.updateLocalStateReasoning(item_id, reasoningData, isComplete);
+    } else {
+      this.updateStoreStateReasoning(item_id, reasoningData, isComplete);
+    }
+  }
+
+  private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, isComplete: boolean): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              reasoning: reasoningData,
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  private updateStoreStateReasoning(item_id: string, reasoningData: ReasoningData, isComplete: boolean): void {
+    if (!this.conversationId || !this.storeInstance) return;
+
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation) return;
+
+    // Find the assistant event being streamed
+    const streamingEventId = conversation.streamingEventId;
+    if (!streamingEventId) return;
+
+    const updatedEvents = conversation.events.map(event =>
+      event.id === streamingEventId
+        ? {
+            ...event,
+            reasoning: reasoningData,
+            ts: Date.now()
+          }
+        : event
+    );
+
+    store.setConversation(this.conversationId, {
+      ...conversation,
+      events: updatedEvents
+    });
   }
 
   /**

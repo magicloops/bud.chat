@@ -7,11 +7,49 @@ export type Segment =
   | { type: 'tool_call'; id: string; name: string; args: object }
   | { type: 'tool_result'; id: string; output: object; error?: string };
 
+// Reasoning data types for OpenAI o-series models
+export interface ReasoningPart {
+  summary_index: number; // Index of this reasoning part
+  type: 'summary_text';
+  text: string;
+  sequence_number: number;
+  is_complete: boolean; // Whether this part is done streaming
+  created_at: number; // Timestamp when part was created
+}
+
+export interface ReasoningData {
+  item_id: string;
+  output_index: number;
+  
+  // Parts are indexed and can stream independently
+  parts: Record<number, ReasoningPart>; // Keyed by summary_index
+  
+  // Combined text for display (computed from parts)
+  combined_text?: string;
+  
+  // Metadata
+  effort_level?: 'low' | 'medium' | 'high';
+  reasoning_tokens?: number;
+  
+  // Streaming state
+  is_streaming?: boolean;
+  streaming_part_index?: number; // Which part is currently streaming
+  
+  // Debug info
+  raw_events: Array<{
+    type: string;
+    data: unknown;
+    sequence_number: number;
+    timestamp: number;
+  }>;
+}
+
 export interface Event {
   id: string;           // uuid
   role: Role;
   segments: Segment[];  // ordered – may contain 1-N segments
   ts: number;          // unix millis
+  reasoning?: ReasoningData; // Optional reasoning data for o-series models
 }
 
 export interface DatabaseEvent extends Event {
@@ -40,6 +78,18 @@ export class EventLog {
   }
 
   addEvent(event: Event): void {
+    // Check for duplicate event IDs
+    const existingEvent = this.events.find(e => e.id === event.id);
+    if (existingEvent) {
+      console.error('🚨 DUPLICATE EVENT ID being added to EventLog:', {
+        id: event.id,
+        role: event.role,
+        existingRole: existingEvent.role,
+        stackTrace: new Error().stack
+      });
+    }
+    
+    console.log('📝 Adding event to EventLog:', { id: event.id, role: event.role, totalEvents: this.events.length + 1 });
     this.events.push(event);
   }
 
