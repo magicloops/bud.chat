@@ -39,7 +39,8 @@ export async function saveEvent(
     role: event.role,
     segments: event.segments,
     ts: event.ts,
-    order_key: orderKey
+    order_key: orderKey,
+    reasoning: event.reasoning || null
   };
   
   const { data, error } = await supabase
@@ -120,7 +121,8 @@ export async function getLatestEvent(conversationId: string): Promise<Event | nu
     id: data.id,
     role: data.role,
     segments: data.segments,
-    ts: data.ts
+    ts: data.ts,
+    reasoning: data.reasoning || undefined
   };
 }
 
@@ -164,7 +166,8 @@ export async function getEventsByRole(
     id: dbEvent.id,
     role: dbEvent.role,
     segments: dbEvent.segments,
-    ts: dbEvent.ts
+    ts: dbEvent.ts,
+    reasoning: dbEvent.reasoning || undefined
   }));
 }
 
@@ -245,7 +248,8 @@ export async function saveEvents(
       role: event.role,
       segments: event.segments,
       ts: event.ts,
-      order_key: orderKey
+      order_key: orderKey,
+      reasoning: event.reasoning || null
     };
   });
   
@@ -305,6 +309,7 @@ export async function getEventsByTimeRange(
     id: dbEvent.id,
     role: dbEvent.role,
     segments: dbEvent.segments,
-    ts: dbEvent.ts
+    ts: dbEvent.ts,
+    reasoning: dbEvent.reasoning || undefined
   }));
 }

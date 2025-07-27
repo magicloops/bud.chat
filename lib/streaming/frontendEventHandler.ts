@@ -373,6 +373,13 @@ export class FrontendEventHandler {
     reasoningData.is_streaming = false;
     reasoningData.streaming_part_index = undefined;
     
+    console.log('🏁 REASONING COMPLETION:', {
+      item_id,
+      is_streaming: reasoningData.is_streaming,
+      combined_text_length: reasoningData.combined_text?.length,
+      parts_count: Object.keys(reasoningData.parts).length
+    });
+    
     // Mark all parts as complete
     Object.values(reasoningData.parts).forEach(part => {
       part.is_complete = true;
@@ -387,6 +394,7 @@ export class FrontendEventHandler {
     });
     
     // Update UI state and mark as complete
+    console.log('📤 Updating UI state with final reasoning data (is_streaming: false)');
     this.updateReasoningInState(item_id, reasoningData, true);
     
     // Clean up after completion
@@ -425,6 +433,13 @@ export class FrontendEventHandler {
   private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, isComplete: boolean): void {
     if (!this.localStateUpdater || !this.assistantPlaceholder) return;
 
+    console.log('🔄 Updating LOCAL state reasoning:', {
+      item_id,
+      is_streaming: reasoningData.is_streaming,
+      isComplete,
+      assistantPlaceholderId: this.assistantPlaceholder.id
+    });
+
     this.localStateUpdater(events => {
       return events.map(event => 
         event.id === this.assistantPlaceholder!.id
@@ -448,6 +463,14 @@ export class FrontendEventHandler {
     // Find the assistant event being streamed
     const streamingEventId = conversation.streamingEventId;
     if (!streamingEventId) return;
+
+    console.log('🔄 Updating STORE state reasoning:', {
+      item_id,
+      is_streaming: reasoningData.is_streaming,
+      isComplete,
+      conversationId: this.conversationId,
+      streamingEventId
+    });
 
     const updatedEvents = conversation.events.map(event =>
       event.id === streamingEventId
