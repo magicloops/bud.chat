@@ -13,7 +13,10 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
-  console.log('📡 OpenAI Responses API event:', event.type);
+  // Only log reasoning events for debugging
+  if (event.type.includes('reasoning')) {
+    console.log('🧠 REASONING EVENT:', event.type, event);
+  }
 
   switch (event.type) {
     case 'response.reasoning_summary_part.added':
@@ -87,9 +90,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return null; // Don't emit anything special, just continue
 
     case 'response.completed':
-      // Response is fully complete - event should already be finalized by content_part.done
-      console.log('🎯 OpenAI Responses API: response.completed - response fully done (event already finalized)');
-      return null; // Event already finalized, just ignore this
+      // Response is fully complete - now we can finalize the event
+      console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
+      return {
+        type: 'finalize_only' // Finalize event but don't send complete to frontend yet
+      };
 
     // Handle response lifecycle events (informational only)
     case 'response.created':
@@ -112,15 +117,19 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       break;
 
     case 'response.content_part.done':
-      // Content part is done - finalize the event but don't send complete to frontend
-      console.log('📝 OpenAI Responses API: response.content_part.done - finalizing event internally');
-      return {
-        type: 'finalize_only' // Finalize event but don't send complete to frontend
-      };
+      // Content part is done - but this is just a lifecycle event, not final completion
+      console.log('📝 OpenAI Responses API: response.content_part.done - lifecycle event, ignoring');
+      return null; // Just a lifecycle event, don't do anything
 
     default:
-      // Log unknown events for debugging
-      console.log('🚨 Unknown OpenAI Responses API event:', event.type, event);
+      // Log unknown events for debugging with full details
+      console.log('🚨 UNHANDLED OpenAI Responses API event:', {
+        type: event.type,
+        allKeys: Object.keys(event),
+        fullEvent: event,
+        timestamp: Date.now(),
+        note: 'This event type is not being processed by our transformer'
+      });
       return null;
   }
 

@@ -155,7 +155,8 @@ export async function POST(
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const eventBuilder = new EventStreamBuilder('assistant');
+          const eventBuilder = new EventStreamBuilder('assistant')
+          let eventFinalized = false // Track if current event has been finalized
           
           // Main conversation loop - handles tool calls automatically
           const maxIterations = 10;
@@ -474,11 +475,10 @@ export async function POST(
                 stream: true as const,
                 // TODO: Convert tools to Responses API format when needed
                 // ...(tools.length > 0 && { tools }),
-                ...(reasoningEffort && { 
-                  reasoning: { 
-                    effort: reasoningEffort 
-                  }
-                })
+                reasoning: { 
+                  effort: reasoningEffort || 'medium',
+                  summary: 'auto'  // Enable reasoning summaries
+                }
               };
               
               console.log('🔄 Sending request to OpenAI Responses API:', JSON.stringify(responsesRequest, null, 2));
@@ -498,20 +498,25 @@ export async function POST(
                   break;
                 }
                 
-                // Send event to frontend
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                // Send event to frontend (but not internal-only events)
+                if (event.type !== 'finalize_only') {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+                }
                 
                 // Build events for database storage
                 if (event.type === 'token' && event.content) {
                   eventBuilder.addTextChunk(event.content);
-                } else if (event.type === 'complete') {
-                  // Finalize the current event
+                } else if (event.type === 'finalize_only' && !eventFinalized) {
+                  // Finalize the current event only once (from OpenAI response.completed)
                   const builtEvent = eventBuilder.finalize();
                   if (builtEvent) {
+                    console.log('🏁 Finalizing event (from OpenAI response.completed):', { eventId: builtEvent.id, role: builtEvent.role });
                     eventLog.addEvent(builtEvent);
                     // Save assistant event to database
                     await saveEvent(builtEvent, { conversationId });
+                    eventFinalized = true; // Mark as finalized to prevent duplicates
                   }
+                  // NOTE: This does NOT send a complete event to frontend - that happens after conversation creation
                 }
               }
               
@@ -527,6 +532,7 @@ export async function POST(
             
             // Reset builder for next iteration
             eventBuilder.reset('assistant');
+            eventFinalized = false; // Reset finalization flag for next iteration
           }
           
           // Send completion event

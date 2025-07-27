@@ -632,11 +632,10 @@ export async function POST(request: NextRequest) {
                 stream: true as const,
                 // TODO: Convert tools to Responses API format when needed
                 // ...(tools.length > 0 && { tools }),
-                ...(reasoningEffort && { 
-                  reasoning: { 
-                    effort: reasoningEffort 
-                  }
-                })
+                reasoning: { 
+                  effort: reasoningEffort || 'medium',
+                  summary: 'auto'  // Enable reasoning summaries
+                }
               };
               
               const stream = await openai.responses.create(responsesRequest);
