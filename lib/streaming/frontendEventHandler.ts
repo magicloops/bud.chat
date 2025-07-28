@@ -7,7 +7,9 @@ export interface StreamEvent {
     // New reasoning types
     | 'reasoning_summary_part_added' | 'reasoning_summary_part_done'
     | 'reasoning_summary_text_delta' | 'reasoning_summary_text_done'
-    | 'reasoning_summary_delta' | 'reasoning_summary_done';
+    | 'reasoning_summary_delta' | 'reasoning_summary_done'
+    // Internal-only event types
+    | 'finalize_only';
   
   // Existing fields
   content?: string;
