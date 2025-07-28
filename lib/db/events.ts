@@ -40,7 +40,7 @@ export async function saveEvent(
     segments: event.segments,
     ts: event.ts,
     order_key: orderKey,
-    reasoning: event.reasoning || null
+    reasoning: event.reasoning
   };
   
   const { data, error } = await supabase
@@ -249,7 +249,7 @@ export async function saveEvents(
       segments: event.segments,
       ts: event.ts,
       order_key: orderKey,
-      reasoning: event.reasoning || null
+      reasoning: event.reasoning
     };
   });
   
