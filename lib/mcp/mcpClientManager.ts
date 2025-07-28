@@ -6,7 +6,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
 import type {
   MCPServerConfig,
-  MCPToolCall,
+  // MCPToolCall, // Currently unused
   MCPToolResult,
   OpenAITool,
   OpenAIToolCall,
@@ -109,7 +109,7 @@ export class MCPClientManager {
       let parameters: Record<string, unknown> = {};
       try {
         parameters = JSON.parse(toolCall.function.arguments || '{}');
-      } catch (parseError) {
+      } catch (_parseError) {
         return {
           tool_name: toolName,
           result: null,

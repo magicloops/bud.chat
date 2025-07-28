@@ -3,7 +3,7 @@ import { Bud, BudConfig } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 import { Event } from '@/state/eventChatStore';
 import { createTextEvent } from '@/lib/types/events';
-import { generateKeyBetween } from 'fractional-indexing';
+// import { generateKeyBetween } from 'fractional-indexing'; // Currently unused
 import { getDefaultModel } from './modelMapping';
 
 export interface CreateBudArgs {
@@ -100,13 +100,13 @@ export function getBudConfig(bud: Bud): BudConfig {
   return bud.default_json as BudConfig;
 }
 
-export function createBudSystemEvent(bud: Bud, conversationId: string = 'temp'): Event {
+export function createBudSystemEvent(bud: Bud, _conversationId: string = 'temp'): Event {
   const config = getBudConfig(bud);
   
   return createTextEvent('system', config.systemPrompt);
 }
 
-export function createBudGreetingEvent(bud: Bud, conversationId: string = 'temp'): Event | null {
+export function createBudGreetingEvent(bud: Bud, _conversationId: string = 'temp'): Event | null {
   const config = getBudConfig(bud);
   
   if (!config.greeting) return null;

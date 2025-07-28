@@ -1,6 +1,7 @@
 // Type definitions for the Chat Engine and adapters
 
 import { Event } from '@/lib/types/events';
+import type { User } from '@supabase/supabase-js';
 
 export interface ChatRequest {
   messages?: Event[];
@@ -12,7 +13,7 @@ export interface ChatRequest {
 }
 
 export interface ValidatedChatRequest {
-  user: any; // User from Supabase auth
+  user: User; // User from Supabase auth
   workspaceId: string;
   messages: Event[];
   model: string;

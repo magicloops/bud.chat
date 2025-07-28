@@ -1,5 +1,6 @@
-import { Event, useEventChatStore, EventConversation } from '@/state/eventChatStore';
-import { ReasoningData, ReasoningPart } from '@/lib/types/events';
+import { Event, useEventChatStore } from '@/state/eventChatStore';
+import { ReasoningData } from '@/lib/types/events';
+// EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 
 export interface StreamEvent {
@@ -310,7 +311,7 @@ export class FrontendEventHandler {
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
-    const { item_id, summary_index, sequence_number } = data;
+    const { item_id, summary_index } = data;
     
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
@@ -329,7 +330,7 @@ export class FrontendEventHandler {
   }
 
   private async handleReasoningSummaryDone(data: StreamEvent): Promise<void> {
-    const { item_id, text, sequence_number } = data;
+    const { item_id, text } = data;
     
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
@@ -364,7 +365,7 @@ export class FrontendEventHandler {
 
   // Helper method for logging reasoning events that don't need special handling
   private async logReasoningEvent(data: StreamEvent): Promise<void> {
-    const { item_id, sequence_number } = data;
+    const { item_id } = data;
     
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
@@ -384,7 +385,7 @@ export class FrontendEventHandler {
     }
   }
 
-  private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, isComplete: boolean): void {
+  private updateLocalStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.localStateUpdater || !this.assistantPlaceholder) return;
 
 
@@ -401,7 +402,7 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateStoreStateReasoning(item_id: string, reasoningData: ReasoningData, isComplete: boolean): void {
+  private updateStoreStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.conversationId || !this.storeInstance) return;
 
     const store = this.storeInstance.getState();
@@ -519,7 +520,7 @@ export class FrontendEventHandler {
     this.localStateUpdater(events => [...events, toolResultEvent]);
   }
 
-  private updateLocalStateToolComplete(data: StreamEvent): void {
+  private updateLocalStateToolComplete(_data: StreamEvent): void {
     // Create a new assistant placeholder for the next streaming response
     if (!this.localStateUpdater) return;
     
@@ -538,12 +539,12 @@ export class FrontendEventHandler {
     this.assistantPlaceholder = newAssistantPlaceholder;
   }
 
-  private updateLocalStateComplete(data: StreamEvent): void {
+  private updateLocalStateComplete(_data: StreamEvent): void {
     // Mark streaming as complete in local state
     // This is typically handled by the parent component
   }
 
-  private updateLocalStateError(data: StreamEvent): void {
+  private updateLocalStateError(_data: StreamEvent): void {
     // Handle error in local state - typically remove optimistic events
     if (!this.localStateUpdater) return;
     
@@ -594,7 +595,7 @@ export class FrontendEventHandler {
     }
   }
 
-  private updateStoreStateComplete(data: StreamEvent): void {
+  private updateStoreStateComplete(_data: StreamEvent): void {
     if (!this.conversationId || !this.storeInstance) return;
 
     const store = this.storeInstance.getState();
@@ -609,7 +610,7 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateStoreStateError(data: StreamEvent): void {
+  private updateStoreStateError(_data: StreamEvent): void {
     if (!this.conversationId || !this.storeInstance) return;
 
     const store = this.storeInstance.getState();

@@ -12,7 +12,7 @@ export class NewChatAdapter {
     return {
       eventLoader: undefined, // No existing events to load
       eventSaver: undefined,  // No individual saving during streaming
-      batchEventSaver: async (events: Event[], conversationId: string) => {
+      batchEventSaver: async (_events: Event[], _conversationId: string) => {
         // This gets called after conversation creation
         // Events are already saved in createConversationInBackground
         console.log('✅ NewChatAdapter: Events already saved during conversation creation');
