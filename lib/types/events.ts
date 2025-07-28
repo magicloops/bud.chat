@@ -31,8 +31,7 @@ export interface ReasoningData {
   effort_level?: 'low' | 'medium' | 'high';
   reasoning_tokens?: number;
   
-  // Streaming state
-  is_streaming?: boolean;
+  // Client-side streaming state (not persisted to database)
   streaming_part_index?: number; // Which part is currently streaming
 }
 

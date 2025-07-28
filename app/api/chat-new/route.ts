@@ -675,8 +675,7 @@ export async function POST(request: NextRequest) {
                       reasoningCollector.set(item_id, {
                         item_id,
                         output_index: (event as any).output_index || 0,
-                        parts: {},
-                        is_streaming: true
+                        parts: {}
                       });
                     }
                     
@@ -694,14 +693,12 @@ export async function POST(request: NextRequest) {
                         created_at: Date.now()
                       };
                     } else if (event.type === 'reasoning_summary_done') {
-                      // Finalize reasoning
+                      // Finalize reasoning - just set the combined text, no is_streaming needed
                       const { text } = event as any;
                       reasoningData.combined_text = text || Object.values(reasoningData.parts)
                         .sort((a: any, b: any) => a.summary_index - b.summary_index)
                         .map((part: any) => part.text)
                         .join('\n\n');
-                      reasoningData.is_streaming = false;
-                      
                     }
                   }
                 } else if (event.type === 'finalize_only' && !eventFinalized) {

@@ -13,6 +13,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
+  
 
   switch (event.type) {
     case 'response.reasoning_summary_part.added':

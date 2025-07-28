@@ -17,12 +17,20 @@ export class ReasoningEventLogger {
     this.loggedEvents.add(eventId);
     
     const knownTypes = [
+      // Raw OpenAI API event types
       'response.reasoning_summary_part.added',
       'response.reasoning_summary_part.done',
       'response.reasoning_summary_text.delta',
       'response.reasoning_summary_text.done',
       'response.reasoning_summary.delta',
-      'response.reasoning_summary.done'
+      'response.reasoning_summary.done',
+      // Transformed event types (what we actually use)
+      'reasoning_summary_part_added',
+      'reasoning_summary_part_done',
+      'reasoning_summary_text_delta',
+      'reasoning_summary_text_done',
+      'reasoning_summary_delta',
+      'reasoning_summary_done'
     ];
     
     if (!knownTypes.includes(eventData.type || '')) {
@@ -32,13 +40,8 @@ export class ReasoningEventLogger {
         timestamp: Date.now()
       });
       console.warn('🚨 Unknown reasoning event type:', eventData.type, event);
-    } else {
-      console.log('✅ Processed reasoning event:', eventData.type, {
-        item_id: eventData.item_id,
-        sequence_number: eventData.sequence_number,
-        summary_index: (eventData as { summary_index?: number }).summary_index
-      });
     }
+    // Removed verbose logging of every reasoning event to reduce noise
   }
   
   static getUnknownEvents(): Array<{ type: string, data: unknown, timestamp: number }> {

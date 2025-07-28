@@ -247,8 +247,7 @@ export class FrontendEventHandler {
       reasoningData = {
         item_id,
         output_index: output_index || 0,
-        parts: {},
-        is_streaming: true
+        parts: {}
       };
       this.currentReasoningData.set(item_id, reasoningData);
     }
@@ -346,19 +345,15 @@ export class FrontendEventHandler {
       .map(part => part.text)
       .join('\n\n');
     
-    // Mark all streaming as complete
-    reasoningData.is_streaming = false;
+    // Clear streaming part index
     reasoningData.streaming_part_index = undefined;
-    
     
     // Mark all parts as complete
     Object.values(reasoningData.parts).forEach(part => {
       part.is_complete = true;
     });
     
-    
-    // Update UI state and mark as complete - this should stop the loading spinner
-    console.log('🔄 Setting reasoning is_streaming to false - spinner should stop');
+    // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
     
     // Clean up after completion
@@ -396,8 +391,8 @@ export class FrontendEventHandler {
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
-              reasoning: reasoningData,
-              ts: Date.now()
+              reasoning: reasoningData
+              // Don't update ts during reasoning streaming to prevent infinite re-renders
             }
           : event
       );
@@ -420,8 +415,8 @@ export class FrontendEventHandler {
       event.id === streamingEventId
         ? {
             ...event,
-            reasoning: reasoningData,
-            ts: Date.now()
+            reasoning: reasoningData
+            // Don't update ts during reasoning streaming to prevent infinite re-renders
           }
         : event
     );
@@ -453,8 +448,8 @@ export class FrontendEventHandler {
               ...event,
               segments: event.segments.map(s => 
                 s.type === 'text' ? { ...s, text: s.text + data.content } : s
-              ),
-              ts: Date.now()
+              )
+              // Don't update ts on every token to prevent infinite re-renders
             }
           : event
       );

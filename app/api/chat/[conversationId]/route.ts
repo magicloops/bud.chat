@@ -543,7 +543,7 @@ export async function POST(
                         .sort((a: any, b: any) => a.summary_index - b.summary_index)
                         .map((part: any) => part.text)
                         .join('\n\n');
-                      reasoningData.is_streaming = false;
+                      // Don't store is_streaming - it's computed on frontend
                       
                       console.log('💭 Collected reasoning data for database:', {
                         item_id,

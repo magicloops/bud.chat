@@ -143,11 +143,16 @@ export const EventItem = memo(function EventItem({
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
   
-  // Reasoning logic
+  // Reasoning logic - frontend-only approach
   const hasReasoning = !!event.reasoning;
-  // Default is_streaming to false if undefined - only show spinner if explicitly true
-  const isReasoningStreaming = event.reasoning?.is_streaming === true;
-  const shouldShowReasoning = showReasoning || isReasoningStreaming;
+  // Reasoning is streaming if:
+  // 1. Event has reasoning data AND
+  // 2. Event has no text content yet (reasoning happens before assistant response)
+  const hasTextContent = textContent.length > 0;
+  const isReasoningStreaming = hasReasoning && !hasTextContent;
+  // Show reasoning automatically while streaming, or manually when user toggles
+  const shouldShowReasoning = isReasoningStreaming || showReasoning;
+  
   
   
   // Determine if this should be a continuation (compact view)
