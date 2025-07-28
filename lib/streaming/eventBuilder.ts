@@ -1,6 +1,6 @@
 // EventStreamBuilder for building events during streaming
 
-import { Event, Segment, Role, createMixedEvent } from '@/lib/types/events';
+import { Event, Segment, Role, ReasoningData, createMixedEvent } from '@/lib/types/events';
 
 export class EventStreamBuilder {
   private eventId: string;
@@ -9,6 +9,7 @@ export class EventStreamBuilder {
   private currentTextSegment: { type: 'text'; text: string } | null = null;
   private pendingToolCalls: Map<string, { id: string; name: string; args: string }> = new Map();
   private ts: number;
+  private reasoningData: ReasoningData | null = null;
 
   constructor(role: Role = 'assistant', eventId?: string) {
     this.role = role;
@@ -123,6 +124,20 @@ export class EventStreamBuilder {
   }
 
   /**
+   * Set reasoning data for the current event
+   */
+  setReasoningData(reasoning: ReasoningData): void {
+    this.reasoningData = reasoning;
+  }
+
+  /**
+   * Get current reasoning data
+   */
+  getReasoningData(): ReasoningData | null {
+    return this.reasoningData;
+  }
+
+  /**
    * Get current segments (for real-time updates)
    */
   getCurrentSegments(): Segment[] {
@@ -137,7 +152,8 @@ export class EventStreamBuilder {
       id: this.eventId,
       role: this.role,
       segments: this.getCurrentSegments(),
-      ts: this.ts
+      ts: this.ts,
+      ...(this.reasoningData && { reasoning: this.reasoningData })
     };
   }
 
@@ -169,7 +185,8 @@ export class EventStreamBuilder {
       id: this.eventId,
       role: this.role,
       segments: this.segments,
-      ts: this.ts
+      ts: this.ts,
+      ...(this.reasoningData && { reasoning: this.reasoningData })
     };
   }
 
@@ -182,6 +199,7 @@ export class EventStreamBuilder {
     this.segments = [];
     this.currentTextSegment = null;
     this.pendingToolCalls.clear();
+    this.reasoningData = null;
     this.ts = Date.now();
   }
 
@@ -193,6 +211,7 @@ export class EventStreamBuilder {
     clone.segments = JSON.parse(JSON.stringify(this.segments));
     clone.currentTextSegment = this.currentTextSegment ? { ...this.currentTextSegment } : null;
     clone.pendingToolCalls = new Map(this.pendingToolCalls);
+    clone.reasoningData = this.reasoningData ? JSON.parse(JSON.stringify(this.reasoningData)) : null;
     clone.ts = this.ts;
     return clone;
   }

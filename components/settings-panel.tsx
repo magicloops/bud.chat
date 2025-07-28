@@ -16,7 +16,7 @@ import { BudConfig } from '@/lib/types';
 import { useConversation, useSetConversation } from '@/state/eventChatStore';
 import { useBud, useUpdateBud } from '@/state/budStore';
 import { EmojiPicker } from '@/components/EmojiPicker';
-import { getModelsForUI, getDefaultModel } from '@/lib/modelMapping';
+import { getModelsForUI, getDefaultModel, supportsTemperature } from '@/lib/modelMapping';
 import { MCPConfigurationPanel } from '@/components/MCP/MCPConfigurationPanel';
 import type { MCPConfiguration } from '@/components/MCP/MCPConfigurationPanel';
 
@@ -763,32 +763,41 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                 </CollapsibleTrigger>
                 <CollapsibleContent className="pt-4 space-y-6">
                   {/* Temperature */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-1">
-                      <label className="text-sm font-medium">Temperature: {temperature}</label>
-                      <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                  {supportsTemperature(aiModel) && (
                     <div className="space-y-2">
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="2" 
-                        step="0.1" 
-                        value={temperature}
-                        onChange={(e) => {
-                          const value = parseFloat(e.target.value);
-                          setTemperature(value);
-                          handleFieldChange('temperature', value);
-                        }}
-                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                      />
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>0 (Focused)</span>
-                        <span>1 (Balanced)</span>
-                        <span>2 (Creative)</span>
+                      <div className="flex items-center gap-1">
+                        <label className="text-sm font-medium">Temperature: {temperature}</label>
+                        <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="space-y-2">
+                        <input 
+                          type="range" 
+                          min="0" 
+                          max="2" 
+                          step="0.1" 
+                          value={temperature}
+                          onChange={(e) => {
+                            const value = parseFloat(e.target.value);
+                            setTemperature(value);
+                            handleFieldChange('temperature', value);
+                          }}
+                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>0 (Focused)</span>
+                          <span>1 (Balanced)</span>
+                          <span>2 (Creative)</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
+                  {!supportsTemperature(aiModel) && (
+                    <div className="p-3 bg-muted/50 rounded border">
+                      <p className="text-sm text-muted-foreground">
+                        <strong>Note:</strong> Temperature settings are not supported by {aiModel}. This model uses fixed parameters optimized for reasoning.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Max Tokens */}
                   <div className="space-y-2">

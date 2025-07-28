@@ -2,6 +2,7 @@
 
 import { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event, Conversation } from '@/state/eventChatStore';
@@ -17,7 +18,9 @@ import {
   ChevronDown,
   ChevronRight,
   CheckCircle,
-  XCircle
+  XCircle,
+  Brain,
+  Loader2
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -67,6 +70,7 @@ export const EventItem = memo(function EventItem({
   const [editingContent, setEditingContent] = useState('');
   const [localTextContent, setLocalTextContent] = useState(textContent);
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
+  const [showReasoning, setShowReasoning] = useState(false);
   // Error handling - check if any segments have errors
   const error = useMemo(() => {
     const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: string; output: object; error: string } => 
@@ -138,6 +142,18 @@ export const EventItem = memo(function EventItem({
   const canEdit = isUser && !isPending;
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
+  
+  // Reasoning logic - frontend-only approach
+  const hasReasoning = !!event.reasoning;
+  // Reasoning is streaming if:
+  // 1. Event has reasoning data AND
+  // 2. Event has no text content yet (reasoning happens before assistant response)
+  const hasTextContent = textContent.length > 0;
+  const isReasoningStreaming = hasReasoning && !hasTextContent;
+  // Show reasoning automatically while streaming, or manually when user toggles
+  const shouldShowReasoning = isReasoningStreaming || showReasoning;
+  
+  
   
   // Determine if this should be a continuation (compact view)
   const shouldShowAsContinuation = isAssistant && previousEvent && 
@@ -242,7 +258,74 @@ export const EventItem = memo(function EventItem({
                 <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
               )}
             
-              {/* Regular Content First */}
+              {/* Reasoning Section - Moved to top */}
+              {hasReasoning && (
+                <div className="reasoning-section mb-3">
+                  {/* Only show toggle button when not streaming */}
+                  {!isReasoningStreaming && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowReasoning(!showReasoning)}
+                      className="reasoning-toggle text-xs px-2 py-1 h-auto"
+                    >
+                      <Brain className="h-3 w-3 mr-1" />
+                      {showReasoning ? 'Hide' : 'Show'} Reasoning
+                      <ChevronDown className={cn(
+                        "h-3 w-3 ml-1 transition-transform",
+                        showReasoning && "rotate-180"
+                      )} />
+                    </Button>
+                  )}
+                  
+                  {shouldShowReasoning && (
+                    <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
+                      <div className="reasoning-header mb-2 flex items-center gap-2">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Model Reasoning
+                          {isReasoningStreaming && (
+                            <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
+                          )}
+                        </span>
+                        {event.reasoning?.effort_level && (
+                          <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
+                            {event.reasoning.effort_level} effort
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
+                        {event.reasoning?.combined_text && (
+                          <MarkdownRenderer content={event.reasoning.combined_text} />
+                        )}
+                        
+                        {/* Show individual parts during streaming if combined_text not ready */}
+                        {!event.reasoning?.combined_text && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
+                          <div className="reasoning-parts space-y-2">
+                            {Object.values(event.reasoning.parts)
+                              .sort((a, b) => a.summary_index - b.summary_index)
+                              .map((part) => (
+                                <div key={part.summary_index} className="reasoning-part">
+                                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                    <span>Part {part.summary_index + 1}</span>
+                                    {!part.is_complete && (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    )}
+                                  </div>
+                                  <div className="text-xs">
+                                    <MarkdownRenderer content={part.text} />
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            
+              {/* Regular Content - Now comes after reasoning */}
               {textContent && (
                 <MarkdownRenderer content={textContent} />
               )}
@@ -461,7 +544,74 @@ export const EventItem = memo(function EventItem({
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
             )}
             
-            {/* Regular Content First */}
+            {/* Reasoning Section - Moved to top */}
+            {hasReasoning && (
+              <div className="reasoning-section mb-3">
+                {/* Only show toggle button when not streaming */}
+                {!isReasoningStreaming && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowReasoning(!showReasoning)}
+                    className="reasoning-toggle text-xs px-2 py-1 h-auto"
+                  >
+                    <Brain className="h-3 w-3 mr-1" />
+                    {showReasoning ? 'Hide' : 'Show'} Reasoning
+                    <ChevronDown className={cn(
+                      "h-3 w-3 ml-1 transition-transform",
+                      showReasoning && "rotate-180"
+                    )} />
+                  </Button>
+                )}
+                
+                {shouldShowReasoning && (
+                  <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
+                    <div className="reasoning-header mb-2 flex items-center gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        Model Reasoning
+                        {isReasoningStreaming && (
+                          <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
+                        )}
+                      </span>
+                      {event.reasoning?.effort_level && (
+                        <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
+                          {event.reasoning.effort_level} effort
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
+                      {event.reasoning?.combined_text && (
+                        <MarkdownRenderer content={event.reasoning.combined_text} />
+                      )}
+                      
+                      {/* Show individual parts during streaming if combined_text not ready */}
+                      {!event.reasoning?.combined_text && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
+                        <div className="reasoning-parts space-y-2">
+                          {Object.values(event.reasoning.parts)
+                            .sort((a, b) => a.summary_index - b.summary_index)
+                            .map((part) => (
+                              <div key={part.summary_index} className="reasoning-part">
+                                <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                  <span>Part {part.summary_index + 1}</span>
+                                  {!part.is_complete && (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  )}
+                                </div>
+                                <div className="text-xs">
+                                  <MarkdownRenderer content={part.text} />
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Regular Content - Now comes after reasoning */}
             {textContent && (
               <MarkdownRenderer content={textContent} />
             )}

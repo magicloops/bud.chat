@@ -14,7 +14,7 @@ import { EmojiPicker } from '@/components/EmojiPicker';
 import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP';
 import { Bud, BudConfig } from '@/lib/types';
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers';
-import { getModelsForUI } from '@/lib/modelMapping';
+import { getModelsForUI, supportsTemperature } from '@/lib/modelMapping';
 
 interface BudFormProps {
   bud?: Bud
@@ -215,24 +215,36 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
                 </div>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Temperature: {config.temperature || 0.7}
-                </label>
-                <Slider 
-                  value={[config.temperature || 0.7]} 
-                  onValueChange={([temp]) => setConfig({...config, temperature: temp})}
-                  min={0} 
-                  max={1} 
-                  step={0.1}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                  <span>Focused</span>
-                  <span>Balanced</span>
-                  <span>Creative</span>
+              {supportsTemperature(config.model) && (
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Temperature: {config.temperature || 0.7}
+                  </label>
+                  <Slider 
+                    value={[config.temperature || 0.7]} 
+                    onValueChange={([temp]) => setConfig({...config, temperature: temp})}
+                    min={0} 
+                    max={1} 
+                    step={0.1}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                    <span>Focused</span>
+                    <span>Balanced</span>
+                    <span>Creative</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Controls response creativity and randomness.
+                  </p>
                 </div>
-              </div>
+              )}
+              {!supportsTemperature(config.model) && (
+                <div className="p-3 bg-muted/50 rounded border">
+                  <p className="text-sm text-muted-foreground">
+                    <strong>Note:</strong> Temperature settings are not supported by {config.model}. This model uses fixed parameters optimized for reasoning.
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
           

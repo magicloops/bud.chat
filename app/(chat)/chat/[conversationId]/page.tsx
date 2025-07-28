@@ -153,6 +153,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         meta: conversationMeta
       };
       
+      
       setConversation(conversationData.id, conversation);
       
       // Apply bud theme if available
@@ -365,6 +366,7 @@ export default function ChatPage({ params }: ChatPageProps) {
               } else if (data.type === 'complete') {
                 setIsLocalStreaming(false);
                 
+                
                 if (realConversationId && finalStreamingEvents) {
                   // Create final conversation with completed streaming events
                   const tempConv = store.conversations[tempConversationId];
@@ -395,6 +397,13 @@ export default function ChatPage({ params }: ChatPageProps) {
                     console.error('No temp conversation found for transition');
                   }
                 } else {
+                  console.error('🚨 ERROR CONDITION:', {
+                    realConversationId: realConversationId,
+                    finalStreamingEvents: finalStreamingEvents,
+                    finalStreamingEventsCount: finalStreamingEvents?.length,
+                    dataType: data.type,
+                    dataKeys: Object.keys(data)
+                  });
                   console.error('Missing realConversationId or finalStreamingEvents');
                 }
               } else {
