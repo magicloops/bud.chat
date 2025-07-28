@@ -1,10 +1,11 @@
 // Anthropic provider mapper for event-based messages
 
-import { Event, Segment, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import { Event, Segment, EventLog, createTextEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
 import type Anthropic from '@anthropic-ai/sdk';
+// createToolCallEvent currently unused
 
 // Use the actual SDK types instead of custom interfaces
-type AnthropicMessage = Anthropic.Messages.MessageParam;
+// AnthropicMessage currently unused
 type AnthropicContent = Anthropic.Messages.ContentBlock;
 
 export interface AnthropicResponse {

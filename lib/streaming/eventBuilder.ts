@@ -1,6 +1,7 @@
 // EventStreamBuilder for building events during streaming
 
-import { Event, Segment, Role, ReasoningData, createMixedEvent } from '@/lib/types/events';
+import { Event, Segment, Role, ReasoningData } from '@/lib/types/events';
+// createMixedEvent currently unused
 
 export class EventStreamBuilder {
   private eventId: string;
@@ -169,7 +170,7 @@ export class EventStreamBuilder {
    */
   finalize(): Event {
     // Complete any pending tool calls
-    for (const [id, pendingCall] of this.pendingToolCalls.entries()) {
+    for (const [id, _pendingCall] of this.pendingToolCalls.entries()) {
       this.completeToolCall(id);
     }
 
@@ -274,7 +275,7 @@ export class StreamingEventManager {
    */
   finalizeAll(): Event[] {
     const events: Event[] = [];
-    for (const [eventId, builder] of this.builders.entries()) {
+    for (const [_eventId, builder] of this.builders.entries()) {
       events.push(builder.finalize());
     }
     this.builders.clear();

@@ -3,6 +3,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
+import { Event, Segment } from '@/lib/types/events';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -12,7 +13,7 @@ const openai = new OpenAI({
 // Helper function to generate a conversation title (async, non-blocking)
 export async function generateConversationTitleInBackground(
   conversationId: string, 
-  events: any[], 
+  events: Event[], 
   supabase: Awaited<ReturnType<typeof createClient>>
 ) {
   try {
@@ -27,8 +28,8 @@ export async function generateConversationTitleInBackground(
       .slice(0, 4) // Use first few events
       .map(event => {
         const textContent = event.segments
-          .filter((s: any) => s.type === 'text')
-          .map((s: any) => s.type === 'text' ? s.text : '')
+          .filter((s: Segment) => s.type === 'text')
+          .map((s: Segment) => s.type === 'text' ? (s as { type: 'text'; text: string }).text : '')
           .join('');
         return `${event.role}: ${textContent}`;
       })

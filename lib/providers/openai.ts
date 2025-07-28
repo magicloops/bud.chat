@@ -1,11 +1,12 @@
 // OpenAI provider mapper for event-based messages
 
-import { Event, Segment, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import { Event, Segment, EventLog, createTextEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
 import type OpenAI from 'openai';
+// createToolCallEvent currently unused
 
 // Use the actual SDK types instead of custom interfaces
 type OpenAIMessage = OpenAI.Chat.Completions.ChatCompletionMessageParam;
-type OpenAIToolCall = OpenAI.Chat.Completions.ChatCompletionMessageToolCall;
+// OpenAIToolCall currently unused
 
 // Interface for provider messages from EventLog
 interface ProviderMessage {
@@ -109,7 +110,7 @@ export function openaiStreamDeltaToEvent(
       // Message is complete
       if (currentEvent) {
         // Finalize any pending tool calls
-        for (const [index, toolCall] of activeToolCalls.entries()) {
+        for (const [_index, toolCall] of activeToolCalls.entries()) {
           if (toolCall.id && toolCall.name) {
             try {
               const args = JSON.parse(toolCall.args || '{}');

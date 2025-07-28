@@ -1,7 +1,8 @@
 // Event-based message helpers for optimistic UI
 // These maintain compatibility with existing patterns while using events
 
-import { Event, createTextEvent, createMixedEvent } from '@/lib/types/events';
+import { Event, createTextEvent } from '@/lib/types/events';
+// createMixedEvent currently unused
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
 import { BudConfig } from '@/lib/types';
 
