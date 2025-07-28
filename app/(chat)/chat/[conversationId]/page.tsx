@@ -330,17 +330,11 @@ export default function ChatPage({ params }: ChatPageProps) {
       
       // Set up local state updater for streaming and track final events
       let finalStreamingEvents: Event[] = newEvents; // Track events outside React state
-      console.log('🎬 Initial finalStreamingEvents:', { count: newEvents.length, events: newEvents.map(e => ({ id: e.id, role: e.role })) });
       
       eventHandler.setLocalStateUpdater((updater) => {
         setStreamingEvents(prevEvents => {
           if (!prevEvents) return prevEvents;
           const updated = updater(prevEvents);
-          console.log('📝 Local state updated:', { 
-            prevCount: prevEvents.length, 
-            updatedCount: updated.length,
-            lastEvent: updated[updated.length - 1] ? { id: updated[updated.length - 1].id, role: updated[updated.length - 1].role } : null
-          });
           finalStreamingEvents = updated; // Keep sync'd copy for transition
           return updated;
         });
@@ -363,10 +357,8 @@ export default function ChatPage({ params }: ChatPageProps) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              console.log('📥 Frontend received stream event:', { type: data.type, hasConversationId: !!data.conversationId });
               
               if (data.type === 'conversationCreated') {
-                console.log('🎯 Received conversationCreated event:', { conversationId: data.conversationId });
                 realConversationId = data.conversationId;
                 if (selectedWorkspace && realConversationId) {
                   addConversationToWorkspace(selectedWorkspace, realConversationId);
@@ -374,11 +366,6 @@ export default function ChatPage({ params }: ChatPageProps) {
               } else if (data.type === 'complete') {
                 setIsLocalStreaming(false);
                 
-                console.log('🏁 Stream complete. Checking state:', {
-                  realConversationId: realConversationId,
-                  finalStreamingEventsCount: finalStreamingEvents?.length,
-                  finalStreamingEventsPreview: finalStreamingEvents?.map(e => ({ id: e.id, role: e.role }))
-                });
                 
                 if (realConversationId && finalStreamingEvents) {
                   // Create final conversation with completed streaming events

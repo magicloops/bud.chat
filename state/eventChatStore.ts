@@ -286,14 +286,6 @@ export const useEventChatStore = create<EventChatStore>()(
                 filter: `workspace_id=eq.${workspaceId}`
               },
               (payload) => {
-                console.log('📡 [REALTIME] Conversation update received', {
-                  timestamp: Date.now(),
-                  eventType: payload.eventType,
-                  conversationId: (payload.new && 'id' in payload.new ? payload.new.id : null) || 
-                                 (payload.old && 'id' in payload.old ? payload.old.id : null),
-                  currentLocalEvents: get().conversations[(payload.new && 'id' in payload.new ? payload.new.id : null) || 
-                                                        (payload.old && 'id' in payload.old ? payload.old.id : null)]?.events?.length || 0
-                });
                 
                 if (payload.eventType === 'UPDATE' && payload.new && 'id' in payload.new) {
                   const updatedConversation = payload.new;
@@ -408,10 +400,6 @@ export const useEventChatStore = create<EventChatStore>()(
                       return; // Exit early
                     }
                     
-                    console.log('📝 [REALTIME] Creating new conversation from INSERT:', {
-                      conversationId,
-                      hasExistingConversation: !!existingConversation
-                    });
                     
                     // Create the full conversation object with metadata
                     const conversationMeta: EventConversationMeta = {
