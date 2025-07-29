@@ -48,7 +48,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   }, [content]);
 
   return (
-    <div className={`prose prose-gray max-w-none ${className}`}>
+    <div className={`prose prose-gray dark:prose-invert max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}

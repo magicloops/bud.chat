@@ -129,9 +129,12 @@ export class ChatEngine {
       // Existing chat route - single message string
       // Load existing events if we have conversationId
       if (request.conversationId && this.config.eventLoader) {
+        // For existing conversations, the user message is already saved to database
+        // by the API route, so just load all existing events (including the new one)
         const existingEvents = await this.config.eventLoader(request.conversationId);
-        messages = [...existingEvents, createTextEvent('user', request.message)];
+        messages = existingEvents;
       } else {
+        // For new conversations or conversations without eventLoader, create the message
         messages = [createTextEvent('user', request.message)];
       }
     } else {
@@ -444,7 +447,21 @@ export class ChatEngine {
         // This includes both explicit remote_servers and application-managed servers converted to MCP
         const remoteMCPTools = await this.getRemoteMCPTools(validatedRequest.budId, validatedRequest.workspaceId);
         console.log(`🔧 Found ${remoteMCPTools.length} remote MCP tools:`, remoteMCPTools.map(t => t.server_label));
-        responsesApiTools.push(...remoteMCPTools);
+        
+        // Add MCP tools with validation
+        if (remoteMCPTools.length > 0) {
+          console.log('🔧 [DEBUG] Adding MCP tools to request:', remoteMCPTools);
+          // Validate each MCP tool before adding
+          for (const tool of remoteMCPTools) {
+            try {
+              new URL(tool.server_url); // Validate URL format
+              console.log('✅ MCP tool URL is valid:', tool.server_label, tool.server_url);
+              responsesApiTools.push(tool);
+            } catch (urlError) {
+              console.error('❌ Invalid MCP tool URL:', tool.server_label, tool.server_url, urlError);
+            }
+          }
+        }
       } else {
         // For other models, use application-managed servers as function calls
         const localMCPTools = await this.getOpenAITools(validatedRequest.budId, validatedRequest.workspaceId);
@@ -483,7 +500,11 @@ export class ChatEngine {
       }
     };
     
-    console.log('🔄 Sending request to OpenAI Responses API:', JSON.stringify(responsesRequest, null, 2));
+    console.log('🔄 Sending request to OpenAI Responses API:');
+    console.log('Model:', responsesRequest.model);
+    console.log('Tools count:', responsesApiTools.length);
+    console.log('Tools config:', JSON.stringify(responsesApiTools, null, 2));
+    console.log('Full request:', JSON.stringify(responsesRequest, null, 2));
     
     const stream = await this.openai.responses.create(responsesRequest);
     
@@ -501,6 +522,19 @@ export class ChatEngine {
       accumulated_args: string;
       is_complete: boolean;
     }>();
+    
+    // MCP call data collection for OpenAI Responses API
+    const mcpCallCollector = new Map<string, {
+      item_id: string;
+      output_index: number;
+      name: string;
+      server_label: string;
+      accumulated_args: string;
+      is_complete: boolean;
+    }>();
+    
+    // MCP tool mapping to store actual tool names from mcp_list_tools
+    const mcpToolNameMapping = new Map<string, string>(); // tool_id -> tool_name
     
     // Handle both reasoning and regular events
     for await (const event of responsesStream) {
@@ -553,20 +587,75 @@ export class ChatEngine {
         console.log('🎯 Function call completed:', { tool_id });
         // Keep in collector for potential debugging, but mark as done
       } else if (event.type === 'mcp_tool_start') {
-        // Remote MCP tool started
+        // Initialize MCP call tracking
         const { tool_id, tool_name, server_label } = event as { tool_id: string; tool_name: string; server_label: string };
-        console.log('🌐 Remote MCP tool started:', { tool_id, tool_name, server_label });
-        // Remote MCP tools are handled by OpenAI, so we just log them
+        
+        // Try to get the real tool name from our mapping, fallback to the provided name
+        const actualToolName = mcpToolNameMapping.get(tool_id) || tool_name;
+        console.log('🌐 [CHATENGINE] ✅ MCP TOOL START EVENT RECEIVED:', { 
+          tool_id, 
+          provided_name: tool_name, 
+          actual_name: actualToolName,
+          server_label 
+        });
+        
+        mcpCallCollector.set(tool_id, {
+          item_id: tool_id,
+          output_index: 0, // Will be updated if available
+          name: actualToolName,
+          server_label: server_label,
+          accumulated_args: '',
+          is_complete: false
+        });
+        console.log('🌐 [CHATENGINE] MCP call added to collector. Current collector size:', mcpCallCollector.size);
+      } else if (event.type === 'mcp_tool_arguments_delta') {
+        // Accumulate MCP call arguments
+        const { tool_id, delta } = event as { tool_id: string; delta: string };
+        console.log('🌐 [CHATENGINE] MCP ARGS DELTA RECEIVED:', { tool_id, delta_length: delta.length });
+        const mcpCall = mcpCallCollector.get(tool_id);
+        if (mcpCall) {
+          mcpCall.accumulated_args += delta;
+          console.log('🌐 [CHATENGINE] MCP args accumulated. Total length:', mcpCall.accumulated_args.length);
+        } else {
+          console.error('🚨 [CHATENGINE] MCP call not found in collector for delta event:', { tool_id, collector_keys: Array.from(mcpCallCollector.keys()) });
+        }
+      } else if (event.type === 'mcp_tool_finalized') {
+        // MCP call arguments are complete - add to event builder
+        const { tool_id, args } = event as { tool_id: string; args: object };
+        console.log('🌐 [CHATENGINE] ✅ MCP TOOL FINALIZED EVENT RECEIVED:', { tool_id, args });
+        const mcpCall = mcpCallCollector.get(tool_id);
+        if (mcpCall) {
+          mcpCall.is_complete = true;
+          // Add MCP tool call segment to event builder
+          console.log('🌐 [CHATENGINE] Adding MCP tool call to eventBuilder:', { tool_id, tool_name: mcpCall.name, server_label: mcpCall.server_label });
+          eventBuilder.addToolCall(tool_id, mcpCall.name, args);
+          console.log('🌐 [CHATENGINE] ✅ MCP tool call added to event builder successfully');
+        } else {
+          console.error('🚨 [CHATENGINE] MCP call not found in collector for finalized event:', { tool_id, collector_keys: Array.from(mcpCallCollector.keys()) });
+        }
       } else if (event.type === 'mcp_tool_complete') {
-        // Remote MCP tool completed
+        // MCP call execution complete (cleanup)
         const { tool_id, output, error } = event as { tool_id: string; output: string | null; error: string | null };
-        console.log('🌐 Remote MCP tool completed:', { tool_id, has_output: !!output, has_error: !!error });
-        // Remote MCP results are already included in the response, no additional processing needed
+        console.log('🎯 MCP call completed:', { tool_id, has_output: !!output, has_error: !!error });
+        // For remote MCP tools, the results are included in the text response by OpenAI
+        // No need to create separate tool result events
       } else if (event.type === 'mcp_list_tools') {
-        // MCP server tools discovered
+        // MCP server tools discovered - extract tool names for better display
         const { server_label, tools } = event as { server_label: string; tools: unknown[] };
-        console.log('🔍 MCP tools discovered:', { server_label, tool_count: tools.length });
-        // This is informational - tools are automatically available to the model
+        console.log('🔍 MCP tools discovered:', { server_label, tool_count: tools.length, tools });
+        
+        // Extract tool names from the tools array for later use
+        if (tools && Array.isArray(tools)) {
+          for (const tool of tools) {
+            if (tool && typeof tool === 'object') {
+              const toolObj = tool as { name?: string; id?: string; [key: string]: unknown };
+              if (toolObj.name && toolObj.id) {
+                mcpToolNameMapping.set(toolObj.id, toolObj.name);
+                console.log('🔍 Mapped MCP tool:', { id: toolObj.id, name: toolObj.name });
+              }
+            }
+          }
+        }
       } else if (event.type === 'mcp_approval_request') {
         // MCP tool approval requested (for future implementation)
         const { approval_request_id, tool_name, server_label } = event as { 
@@ -627,16 +716,22 @@ export class ChatEngine {
         }
         
         // Finalize the current event only once (from OpenAI response.completed)
+        console.log('🌐 [CHATENGINE] Finalizing event builder...');
         const builtEvent = eventBuilder.finalize();
         if (builtEvent) {
+          console.log('🌐 [CHATENGINE] ✅ Event finalized with segments:', builtEvent.segments.length);
+          console.log('🌐 [CHATENGINE] Event segments:', builtEvent.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name, server_label: s.server_label } : {}) })));
           eventLog.addEvent(builtEvent);
           
           // Save assistant event to database if in individual mode
           if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
+            console.log('🌐 [CHATENGINE] Saving event to database...');
             await this.config.eventSaver(builtEvent, conversationId);
           }
           
           eventFinalized = true; // Mark as finalized to prevent duplicates
+        } else {
+          console.warn('🚨 [CHATENGINE] Event builder returned null/undefined event');
         }
       }
     }
@@ -795,19 +890,24 @@ export class ChatEngine {
           .eq('workspace_id', workspaceId)
           .in('id', mcpConfig.servers);
         
+        console.log('🌐 [CHATENGINE] Application servers to convert:', applicationServers?.length || 0);
+        
         for (const server of applicationServers || []) {
           // Convert application-managed server to foundation model-managed MCP config
           if (server.endpoint) {
-            mcpTools.push({
+            const mcpTool = {
               type: 'mcp' as const,
               server_label: server.name.toLowerCase().replace(/\s+/g, '_'),
               server_url: server.endpoint,
               require_approval: 'never', // Default for converted servers
-            });
+            };
+            console.log('🌐 [CHATENGINE] Converting application server to MCP tool:', mcpTool);
+            mcpTools.push(mcpTool);
           }
         }
       }
       
+      console.log('🌐 [CHATENGINE] Final MCP tools config:', mcpTools);
       return mcpTools;
     } catch (error) {
       console.warn('Failed to get remote MCP tools:', error);

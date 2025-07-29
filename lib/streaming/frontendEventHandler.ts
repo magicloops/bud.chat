@@ -151,6 +151,25 @@ export class FrontendEventHandler {
       case 'reasoning_summary_done':
         await this.handleReasoningSummaryDone(data);
         break;
+      // MCP event handlers
+      case 'mcp_tool_start':
+        await this.handleMCPToolStartEvent(data);
+        break;
+      case 'mcp_tool_arguments_delta':
+        await this.handleMCPToolArgumentsDeltaEvent(data);
+        break;
+      case 'mcp_tool_finalized':
+        await this.handleMCPToolFinalizedEvent(data);
+        break;
+      case 'mcp_tool_complete':
+        await this.handleMCPToolCompleteEvent(data);
+        break;
+      case 'mcp_list_tools':
+        await this.handleMCPListToolsEvent(data);
+        break;
+      case 'mcp_approval_request':
+        await this.handleMCPApprovalRequestEvent(data);
+        break;
       case 'complete':
         await this.handleCompleteEvent(data);
         break;
@@ -215,6 +234,76 @@ export class FrontendEventHandler {
     } else {
       this.updateStoreStateToolComplete(data);
     }
+  }
+
+  /**
+   * MCP EVENT HANDLERS
+   */
+
+  /**
+   * Handle MCP tool start events
+   */
+  private async handleMCPToolStartEvent(data: StreamEvent): Promise<void> {
+    console.log('🌐 [FRONTEND-HANDLER] ✅ MCP TOOL START EVENT RECEIVED:', { 
+      tool_id: data.tool_id, 
+      tool_name: data.tool_name, 
+      server_label: data.server_label,
+      isLocalState: this.isLocalState()
+    });
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolStart(data);
+    } else {
+      this.updateStoreStateMCPToolStart(data);
+    }
+  }
+
+  /**
+   * Handle MCP tool arguments delta events
+   */
+  private async handleMCPToolArgumentsDeltaEvent(data: StreamEvent): Promise<void> {
+    // Similar to regular tool arguments delta - no immediate UI update needed
+    // Arguments are accumulated in the backend and finalized in mcp_tool_finalized
+  }
+
+  /**
+   * Handle MCP tool finalized events
+   */
+  private async handleMCPToolFinalizedEvent(data: StreamEvent): Promise<void> {
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolFinalized(data);
+    } else {
+      this.updateStoreStateMCPToolFinalized(data);
+    }
+  }
+
+  /**
+   * Handle MCP tool complete events
+   */
+  private async handleMCPToolCompleteEvent(data: StreamEvent): Promise<void> {
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolComplete(data);
+    } else {
+      this.updateStoreStateMCPToolComplete(data);
+    }
+  }
+
+  /**
+   * Handle MCP list tools events (informational)
+   */
+  private async handleMCPListToolsEvent(data: StreamEvent): Promise<void> {
+    const { server_label, tools } = data;
+    console.log('🔍 MCP tools discovered:', { server_label, tool_count: (tools as unknown[])?.length || 0 });
+    // This is informational only - no UI updates needed
+  }
+
+  /**
+   * Handle MCP approval request events (future implementation)
+   */
+  private async handleMCPApprovalRequestEvent(data: StreamEvent): Promise<void> {
+    const { approval_request_id, tool_name, server_label } = data;
+    console.log('⚠️ MCP approval requested:', { approval_request_id, tool_name, server_label });
+    // Future implementation: show approval dialog to user
+    // For now, just log the event
   }
 
   /**
@@ -564,6 +653,82 @@ export class FrontendEventHandler {
   }
 
   /**
+   * MCP LOCAL STATE UPDATES
+   */
+
+  private updateLocalStateMCPToolStart(data: StreamEvent): void {
+    console.log('🌐 [FRONTEND-HANDLER] Updating local state for MCP tool start:', { 
+      tool_id: data.tool_id, 
+      tool_name: data.tool_name,
+      has_updater: !!this.localStateUpdater,
+      has_placeholder: !!this.assistantPlaceholder
+    });
+    
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) {
+      console.error('🚨 [FRONTEND-HANDLER] Missing required data for MCP tool start update:', {
+        has_updater: !!this.localStateUpdater,
+        has_placeholder: !!this.assistantPlaceholder,
+        has_tool_id: !!data.tool_id,
+        has_tool_name: !!data.tool_name
+      });
+      return;
+    }
+
+    this.localStateUpdater(events => {
+      console.log('🌐 [FRONTEND-HANDLER] Adding MCP tool call segment to event:', {
+        placeholder_id: this.assistantPlaceholder!.id,
+        current_segments: events.find(e => e.id === this.assistantPlaceholder!.id)?.segments.length
+      });
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: [
+                ...event.segments,
+                {
+                  type: 'tool_call' as const,
+                  id: data.tool_id!,
+                  name: data.tool_name!,
+                  args: {},
+                  // Add MCP-specific metadata if available
+                  server_label: data.server_label
+                }
+              ],
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+    console.log('🌐 [FRONTEND-HANDLER] ✅ MCP tool call segment added to local state');
+  }
+
+  private updateLocalStateMCPToolFinalized(data: StreamEvent): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.args) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => 
+                segment.type === 'tool_call' && segment.id === data.tool_id
+                  ? { ...segment, args: data.args! }
+                  : segment
+              ),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  private updateLocalStateMCPToolComplete(_data: StreamEvent): void {
+    // For remote MCP tools, the results are included in the text response by OpenAI
+    // No separate tool result events are needed
+    // This is mainly for cleanup and state tracking
+  }
+
+  /**
    * STORE STATE UPDATES (for existing /chat/[id] flow)
    * NOTE: During streaming, we keep updates LOCAL and only update store on completion
    */
@@ -633,6 +798,31 @@ export class FrontendEventHandler {
       isStreaming: false,
       streamingEventId: undefined
     });
+  }
+
+  /**
+   * MCP STORE STATE UPDATES
+   */
+
+  private updateStoreStateMCPToolStart(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateMCPToolStart(data);
+    }
+  }
+
+  private updateStoreStateMCPToolFinalized(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateMCPToolFinalized(data);
+    }
+  }
+
+  private updateStoreStateMCPToolComplete(data: StreamEvent): void {
+    // Delegate to local state updater for MCP tool completion
+    if (this.localStateUpdater) {
+      this.updateLocalStateMCPToolComplete(data);
+    }
   }
 
   /**

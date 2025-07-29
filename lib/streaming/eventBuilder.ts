@@ -37,6 +37,8 @@ export class EventStreamBuilder {
    * Add a tool call to the current event
    */
   addToolCall(id: string, name: string, args: object): void {
+    console.log('🔧 [EVENTBUILDER] Adding tool call segment:', { id, name, args_keys: Object.keys(args) });
+    
     // Remove from pending if it was there
     this.pendingToolCalls.delete(id);
     
@@ -47,6 +49,8 @@ export class EventStreamBuilder {
       name,
       args
     });
+    
+    console.log('🔧 [EVENTBUILDER] ✅ Tool call segment added. Total segments:', this.segments.length);
   }
 
   /**
@@ -169,8 +173,12 @@ export class EventStreamBuilder {
    * Finalize the event and return it
    */
   finalize(): Event {
+    console.log('🔧 [EVENTBUILDER] Finalizing event. Current segments:', this.segments.length);
+    console.log('🔧 [EVENTBUILDER] Segment types:', this.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name } : {}) })));
+    
     // Complete any pending tool calls
     for (const [id, _pendingCall] of this.pendingToolCalls.entries()) {
+      console.log('🔧 [EVENTBUILDER] Completing pending tool call:', id);
       this.completeToolCall(id);
     }
 
@@ -181,6 +189,8 @@ export class EventStreamBuilder {
       }
       return true;
     });
+    
+    console.log('🔧 [EVENTBUILDER] After cleanup - Final segments:', this.segments.length);
 
     return {
       id: this.eventId,

@@ -13,6 +13,15 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
+  // Log ALL events to see what we're actually receiving
+  if (event.type.includes('mcp')) {
+    console.log('🌐 [MCP-TRANSFORMER] RAW MCP EVENT:', { 
+      type: event.type, 
+      keys: Object.keys(event),
+      event: event 
+    });
+  }
+  
   
 
   switch (event.type) {
@@ -122,6 +131,12 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.output_item.added':
       // Check if this is a function call or MCP call being added
       const item = event.item as { type?: string; id?: string; name?: string; server_label?: string };
+      console.log('🌐 [MCP-TRANSFORMER] output_item.added:', { 
+        item_type: item?.type, 
+        item_id: item?.id, 
+        item_name: item?.name,
+        server_label: item?.server_label 
+      });
       if (item?.type === 'function_call') {
         return {
           type: 'tool_start',
@@ -129,6 +144,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tool_name: item.name as string
         };
       } else if (item?.type === 'mcp_call') {
+        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DETECTED:', { 
+          tool_id: item.id, 
+          tool_name: item.name, 
+          server_label: item.server_label 
+        });
         return {
           type: 'mcp_tool_start',
           tool_id: item.id as string,
@@ -136,6 +156,10 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           server_label: item.server_label as string
         };
       } else if (item?.type === 'mcp_list_tools') {
+        console.log('🌐 [MCP-TRANSFORMER] MCP TOOLS LISTED:', { 
+          server_label: item.server_label, 
+          tool_count: (item as { tools?: unknown[] }).tools?.length 
+        });
         return {
           type: 'mcp_list_tools',
           server_label: item.server_label as string,
@@ -162,6 +186,10 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     // Handle MCP call events - remote MCP tools
     case 'response.mcp_call_arguments.delta':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call_arguments.delta:', { 
+        item_id: event.item_id, 
+        delta_length: (event.delta as string)?.length 
+      });
       return {
         type: 'mcp_tool_arguments_delta',
         tool_id: event.item_id as string,
@@ -169,6 +197,10 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       };
 
     case 'response.mcp_call_arguments.done':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call_arguments.done:', { 
+        item_id: event.item_id, 
+        args_length: (event.arguments as string)?.length 
+      });
       return {
         type: 'mcp_tool_finalized',
         tool_id: event.item_id as string,
@@ -177,6 +209,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     // Handle MCP lifecycle events
     case 'response.mcp_list_tools':
+      console.log('🌐 [MCP-TRANSFORMER] ✅ MCP TOOLS LIST RECEIVED:', { 
+        server_label: event.server_label, 
+        tools_count: (event.tools as unknown[])?.length,
+        tools: event.tools
+      });
       return {
         type: 'mcp_list_tools',
         server_label: event.server_label as string,
@@ -184,20 +221,65 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       };
 
     case 'response.mcp_list_tools.in_progress':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.in_progress:', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
       // MCP tool listing is in progress - this is informational
       return null;
 
     case 'response.mcp_list_tools.completed':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.completed:', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
       // MCP tool listing completed - this is informational  
       return null;
 
-    case 'response.mcp_call.in_progress':
-      // MCP call is in progress - this is informational
+    case 'response.mcp_list_tools.failed':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.failed:', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
+      // MCP tool listing failed - this is informational
       return null;
 
+    case 'response.mcp_call.in_progress':
+      console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL IN PROGRESS (START):', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
+      // This is the MCP equivalent of tool_start - the MCP call has begun
+      return {
+        type: 'mcp_tool_start',
+        tool_id: event.item_id as string,
+        tool_name: `mcp_tool_${(event.item_id as string).slice(-8)}`, // Generate name since OpenAI doesn't provide it
+        server_label: 'remote_mcp' // We know it's a remote MCP call
+      };
+
     case 'response.mcp_call.completed':
-      // MCP call completed - this is informational
-      return null;
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call.completed:', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
+      return {
+        type: 'mcp_tool_complete',
+        tool_id: event.item_id as string,
+        output: null, // MCP results are included in the text response
+        error: null
+      };
+
+    case 'response.mcp_call.failed':
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call.failed:', { 
+        item_id: event.item_id, 
+        output_index: event.output_index 
+      });
+      return {
+        type: 'mcp_tool_complete',
+        tool_id: event.item_id as string,
+        output: null,
+        error: 'MCP call failed'
+      };
 
     case 'response.mcp_approval_request':
       return {
@@ -256,6 +338,17 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         timestamp: Date.now(),
         note: 'This event type is not being processed by our transformer'
       });
+      
+      // Special check for potential MCP-related events we might be missing
+      if (event.type.includes('mcp') || event.type.includes('tool') || event.type.includes('call')) {
+        console.log('🚨 [MCP-TRANSFORMER] POTENTIALLY MISSING MCP EVENT TYPE:', {
+          type: event.type,
+          item: event.item,
+          tool_id: event.tool_id,
+          item_id: event.item_id
+        });
+      }
+      
       return null;
   }
 
@@ -312,16 +405,38 @@ export async function* processResponsesAPIStream(
 ): AsyncGenerator<StreamEvent, void, unknown> {
   try {
     for await (const event of stream) {
-      const transformedEvent = transformOpenAIReasoningEvent(event);
-      if (transformedEvent) {
-        yield transformedEvent;
+      try {
+        const transformedEvent = transformOpenAIReasoningEvent(event);
+        if (transformedEvent) {
+          yield transformedEvent;
+        }
+      } catch (eventError) {
+        console.error('Error transforming individual event:', eventError, 'Event:', event);
+        // Continue processing other events instead of failing the entire stream
+        continue;
       }
     }
   } catch (error) {
     console.error('Error processing OpenAI Responses API stream:', error);
-    yield {
-      type: 'error',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
+    console.error('Error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      error: error
+    });
+    
+    // Check if this is an MCP-related error
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    if (errorMessage.includes('mcp') || errorMessage.includes('MCP') || errorMessage.includes('server_error')) {
+      console.error('🚨 MCP-related error detected. This might be due to MCP server configuration issues.');
+      yield {
+        type: 'error',
+        error: 'MCP server error: ' + errorMessage + '. The AI will continue without MCP tools.'
+      };
+    } else {
+      yield {
+        type: 'error',
+        error: errorMessage
+      };
+    }
   }
 }

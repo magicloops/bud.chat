@@ -4,7 +4,7 @@ export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
   | { type: 'text'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args: object }
+  | { type: 'tool_call'; id: string; name: string; args: object; server_label?: string }
   | { type: 'tool_result'; id: string; output: object; error?: string };
 
 // Reasoning data types for OpenAI o-series models
