@@ -19,7 +19,8 @@ import {
   Moon,
   Sun,
   Palette,
-  Cog
+  Cog,
+  Wrench
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -75,6 +76,12 @@ export function UserMenu() {
     }
   };
 
+  const handleWorkspaceSettings = () => {
+    if (selectedWorkspaceId) {
+      router.push(`/workspace/${selectedWorkspaceId}/settings`);
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -98,10 +105,16 @@ export function UserMenu() {
             Settings
         </DropdownMenuItem>
         {selectedWorkspaceId && (
-          <DropdownMenuItem onClick={handleManageBuds}>
-            <Cog className="h-4 w-4 mr-2" />
-            Manage Buds
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem onClick={handleManageBuds}>
+              <Cog className="h-4 w-4 mr-2" />
+              Manage Buds
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleWorkspaceSettings}>
+              <Wrench className="h-4 w-4 mr-2" />
+              Workspace Settings
+            </DropdownMenuItem>
+          </>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={hasCustomTheme ? undefined : toggleTheme} className={hasCustomTheme ? 'opacity-50 cursor-not-allowed' : ''}>

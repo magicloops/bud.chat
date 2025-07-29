@@ -4,7 +4,10 @@ import { ReasoningData } from '@/lib/types/events';
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+  type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+    // MCP event types (remote MCP tools)
+    | 'mcp_tool_start' | 'mcp_tool_arguments_delta' | 'mcp_tool_finalized' | 'mcp_tool_complete' 
+    | 'mcp_list_tools' | 'mcp_approval_request'
     // New reasoning types
     | 'reasoning_summary_part_added' | 'reasoning_summary_part_done'
     | 'reasoning_summary_text_delta' | 'reasoning_summary_text_done'
@@ -17,8 +20,14 @@ export interface StreamEvent {
   tool_id?: string;
   tool_name?: string;
   args?: object;
-  output?: object;
+  output?: object | string | null;
   error?: string;
+  
+  // MCP-specific fields
+  server_label?: string;
+  tools?: unknown[];
+  approval_request_id?: string;
+  arguments?: string;
   
   // New reasoning fields
   item_id?: string;
@@ -512,7 +521,7 @@ export class FrontendEventHandler {
       segments: [{
         type: 'tool_result',
         id: data.tool_id,
-        output: data.output
+        output: typeof data.output === 'object' && data.output !== null ? data.output : { result: data.output }
       }],
       ts: Date.now()
     };

@@ -320,7 +320,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                           <div>
                             <div className="font-medium">{displayName}</div>
                             <div className="text-sm text-muted-foreground line-clamp-1">
-                              {config.systemPrompt.slice(0, 60)}...
+                              {config.systemPrompt?.slice(0, 60) || 'No system prompt'}...
                             </div>
                           </div>
                         </div>

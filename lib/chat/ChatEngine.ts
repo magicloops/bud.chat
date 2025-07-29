@@ -433,11 +433,35 @@ export class ChatEngine {
     const openaiMessages = eventsToOpenAIMessages(events);
     
     // Get available tools if budId is provided
-    // TODO: Implement tool support for OpenAI Responses API
-    // const tools: OpenAI.ChatCompletionTool[] = [];
-    // if (validatedRequest.budId) {
-    //   tools = await this.getOpenAITools(validatedRequest.budId, validatedRequest.workspaceId);
-    // }
+    const responsesApiTools: OpenAI.Responses.Tool[] = [];
+    if (validatedRequest.budId) {
+      // Check if this model supports foundation model-managed MCP
+      const supportsFoundationMCP = this.supportsFoundationModelMCP(validatedRequest.model);
+      console.log(`🔍 Model ${validatedRequest.model} supports foundation MCP: ${supportsFoundationMCP}`);
+      
+      if (supportsFoundationMCP) {
+        // For models that support foundation MCP (like o-series), use MCP server configs
+        // This includes both explicit remote_servers and application-managed servers converted to MCP
+        const remoteMCPTools = await this.getRemoteMCPTools(validatedRequest.budId, validatedRequest.workspaceId);
+        console.log(`🔧 Found ${remoteMCPTools.length} remote MCP tools:`, remoteMCPTools.map(t => t.server_label));
+        responsesApiTools.push(...remoteMCPTools);
+      } else {
+        // For other models, use application-managed servers as function calls
+        const localMCPTools = await this.getOpenAITools(validatedRequest.budId, validatedRequest.workspaceId);
+        const localFunctionTools = localMCPTools.map(tool => ({
+          type: 'function' as const,
+          name: tool.function.name,
+          description: tool.function.description || '',
+          parameters: tool.function.parameters || {},
+          strict: false
+        }));
+        responsesApiTools.push(...localFunctionTools);
+        
+        // Also add any explicit remote MCP servers
+        const remoteMCPTools = await this.getRemoteMCPTools(validatedRequest.budId, validatedRequest.workspaceId);
+        responsesApiTools.push(...remoteMCPTools);
+      }
+    }
     
     // Determine reasoning effort based on model and bud config
     let reasoningEffort: 'low' | 'medium' | 'high' | undefined;
@@ -445,16 +469,14 @@ export class ChatEngine {
       reasoningEffort = await this.getReasoningEffort(validatedRequest.budId);
     }
     
-    // Use OpenAI Responses API for o-series models  
+    // Convert ChatCompletionMessageParam[] to ResponseInputItem[] format
+    const responsesInputItems: OpenAI.Responses.ResponseInputItem[] = this.convertToResponsesInputItems(openaiMessages);
+    
     const responsesRequest = {
       model: apiModelName,
-      input: openaiMessages.map(msg => {
-        if (typeof msg.content === 'string') {
-          return msg.content;
-        }
-        return JSON.stringify(msg.content);
-      }).join('\n'),
+      input: responsesInputItems,  // Use proper ResponseInputItem[] array format
       stream: true as const,
+      ...(responsesApiTools.length > 0 && { tools: responsesApiTools }),  // Include tools if available
       reasoning: { 
         effort: reasoningEffort || 'medium',
         summary: 'auto' as const  // Enable reasoning summaries
@@ -470,6 +492,15 @@ export class ChatEngine {
     // Process the Responses API stream with reasoning events
     const responsesStream = processResponsesAPIStream(stream);
     const encoder = new TextEncoder();
+    
+    // Function call data collection for OpenAI Responses API (local to this method)
+    const functionCallCollector = new Map<string, {
+      item_id: string;
+      output_index: number;
+      name: string;
+      accumulated_args: string;
+      is_complete: boolean;
+    }>();
     
     // Handle both reasoning and regular events
     for await (const event of responsesStream) {
@@ -487,6 +518,64 @@ export class ChatEngine {
       // Build events for database storage
       if (event.type === 'token' && event.content) {
         eventBuilder.addTextChunk(event.content);
+      } else if (event.type === 'tool_start') {
+        // Initialize function call tracking
+        const { tool_id, tool_name } = event as { tool_id: string; tool_name: string };
+        functionCallCollector.set(tool_id, {
+          item_id: tool_id,
+          output_index: 0, // Will be updated if available
+          name: tool_name,
+          accumulated_args: '',
+          is_complete: false
+        });
+        console.log('🔧 Started tracking function call:', { tool_id, tool_name });
+      } else if (event.type === 'tool_arguments_delta') {
+        // Accumulate function call arguments
+        const { tool_id, delta } = event as { tool_id: string; delta: string };
+        const funcCall = functionCallCollector.get(tool_id);
+        if (funcCall) {
+          funcCall.accumulated_args += delta;
+          console.log('🔧 Accumulated function args delta:', { tool_id, delta_length: delta.length, total_length: funcCall.accumulated_args.length });
+        }
+      } else if (event.type === 'tool_finalized') {
+        // Function call arguments are complete - add to event builder
+        const { tool_id, args } = event as { tool_id: string; args: object };
+        const funcCall = functionCallCollector.get(tool_id);
+        if (funcCall) {
+          funcCall.is_complete = true;
+          // Add tool call segment to event builder
+          eventBuilder.addToolCall(tool_id, funcCall.name, args);
+          console.log('✅ Finalized function call:', { tool_id, tool_name: funcCall.name, args });
+        }
+      } else if (event.type === 'tool_complete') {
+        // Function call execution complete (cleanup)
+        const { tool_id } = event as { tool_id: string };
+        console.log('🎯 Function call completed:', { tool_id });
+        // Keep in collector for potential debugging, but mark as done
+      } else if (event.type === 'mcp_tool_start') {
+        // Remote MCP tool started
+        const { tool_id, tool_name, server_label } = event as { tool_id: string; tool_name: string; server_label: string };
+        console.log('🌐 Remote MCP tool started:', { tool_id, tool_name, server_label });
+        // Remote MCP tools are handled by OpenAI, so we just log them
+      } else if (event.type === 'mcp_tool_complete') {
+        // Remote MCP tool completed
+        const { tool_id, output, error } = event as { tool_id: string; output: string | null; error: string | null };
+        console.log('🌐 Remote MCP tool completed:', { tool_id, has_output: !!output, has_error: !!error });
+        // Remote MCP results are already included in the response, no additional processing needed
+      } else if (event.type === 'mcp_list_tools') {
+        // MCP server tools discovered
+        const { server_label, tools } = event as { server_label: string; tools: unknown[] };
+        console.log('🔍 MCP tools discovered:', { server_label, tool_count: tools.length });
+        // This is informational - tools are automatically available to the model
+      } else if (event.type === 'mcp_approval_request') {
+        // MCP tool approval requested (for future implementation)
+        const { approval_request_id, tool_name, server_label } = event as { 
+          approval_request_id: string; 
+          tool_name: string; 
+          server_label: string 
+        };
+        console.log('⚠️ MCP approval requested:', { approval_request_id, tool_name, server_label });
+        // For now, we log this - future implementation could pause and request user approval
       } else if (event.type.includes('reasoning_summary')) {
         // Collect reasoning events for database storage
         const { item_id } = event as { item_id?: string };
@@ -647,6 +736,85 @@ export class ChatEngine {
     }
   }
 
+  private supportsFoundationModelMCP(model: string): boolean {
+    // Models that support foundation model-managed MCP (native MCP integration)
+    const foundationMCPModels = [
+      'o1', 'o1-preview', 'o1-mini', 
+      'o3', 'o3-mini', 'o4-mini',
+      // Add other models that support native MCP as they become available
+    ];
+    
+    return foundationMCPModels.some(supportedModel => 
+      model.includes(supportedModel) || model.startsWith(supportedModel)
+    );
+  }
+
+  private async getRemoteMCPTools(budId: string, workspaceId?: string): Promise<OpenAI.Responses.Tool.Mcp[]> {
+    try {
+      const mcpTools: OpenAI.Responses.Tool.Mcp[] = [];
+      
+      // Get bud MCP configuration
+      const { data: bud } = await this.supabase
+        .from('buds')
+        .select('mcp_config')
+        .eq('id', budId)
+        .single();
+      
+      const mcpConfig = bud?.mcp_config as { 
+        remote_servers?: Array<{
+          server_label: string;
+          server_url: string;
+          require_approval: 'never' | 'always' | {
+            never?: { tool_names: string[] };
+            always?: { tool_names: string[] };
+          };
+          allowed_tools?: string[];
+          headers?: Record<string, string>;
+        }>;
+        servers?: string[];
+      };
+      
+      // 1. Add explicit remote MCP servers
+      const remoteMCPServers = mcpConfig?.remote_servers || [];
+      for (const server of remoteMCPServers) {
+        mcpTools.push({
+          type: 'mcp' as const,
+          server_label: server.server_label,
+          server_url: server.server_url,
+          require_approval: server.require_approval || 'never',
+          ...(server.allowed_tools && { allowed_tools: server.allowed_tools }),
+          ...(server.headers && { headers: server.headers })
+        });
+      }
+      
+      // 2. Convert application-managed MCP servers to foundation model-managed
+      if (workspaceId && mcpConfig?.servers) {
+        const { data: applicationServers } = await this.supabase
+          .from('mcp_servers')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .in('id', mcpConfig.servers);
+        
+        for (const server of applicationServers || []) {
+          // Convert application-managed server to foundation model-managed MCP config
+          if (server.endpoint) {
+            mcpTools.push({
+              type: 'mcp' as const,
+              server_label: server.name.toLowerCase().replace(/\s+/g, '_'),
+              server_url: server.endpoint,
+              require_approval: 'never', // Default for converted servers
+            });
+          }
+        }
+      }
+      
+      return mcpTools;
+    } catch (error) {
+      console.warn('Failed to get remote MCP tools:', error);
+      return [];
+    }
+  }
+
   private async getReasoningEffort(budId?: string): Promise<'low' | 'medium' | 'high'> {
     if (!budId) return 'medium';
     
@@ -663,5 +831,90 @@ export class ChatEngine {
       console.warn('Failed to get bud reasoning effort:', error);
       return 'medium';
     }
+  }
+
+  /**
+   * Convert ChatCompletionMessageParam[] to ResponseInputItem[] format for Responses API
+   */
+  private convertToResponsesInputItems(
+    openaiMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]
+  ): OpenAI.Responses.ResponseInputItem[] {
+    const inputItems: OpenAI.Responses.ResponseInputItem[] = [];
+    
+    for (const message of openaiMessages) {
+      // Handle different message types
+      if (message.role === 'system') {
+        // System messages become EasyInputMessage with system role
+        inputItems.push({
+          type: 'message',
+          role: 'system',
+          content: typeof message.content === 'string' ? message.content : 
+                   Array.isArray(message.content) ? this.convertContentArray(message.content) : 
+                   String(message.content)
+        });
+      } else if (message.role === 'user') {
+        // User messages become EasyInputMessage with user role
+        inputItems.push({
+          type: 'message',
+          role: 'user',
+          content: typeof message.content === 'string' ? message.content :
+                   Array.isArray(message.content) ? this.convertContentArray(message.content) :
+                   String(message.content)
+        });
+      } else if (message.role === 'assistant') {
+        // Assistant messages become EasyInputMessage with assistant role
+        // Tool calls are handled separately in the Responses API
+        const content = typeof message.content === 'string' ? message.content : 
+                       message.content && Array.isArray(message.content) ? this.convertContentArray(message.content) :
+                       String(message.content || '');
+                       
+        if (content) {
+          inputItems.push({
+            type: 'message',
+            role: 'assistant',
+            content: content
+          });
+        }
+        
+        // Note: Tool calls from assistant messages are not converted here
+        // In the Responses API, tool calls would be separate input items
+        // but they're typically generated by the model, not provided as input
+      } else if (message.role === 'tool') {
+        // Tool result messages need special handling
+        // In Responses API, these would typically be tool outputs
+        // For now, we'll convert them to user messages with clear labeling
+        const toolMessage = message as OpenAI.Chat.Completions.ChatCompletionToolMessageParam;
+        inputItems.push({
+          type: 'message',
+          role: 'user',
+          content: `Tool result (${toolMessage.tool_call_id}): ${toolMessage.content}`
+        });
+      }
+      // Skip 'function' role messages as they're deprecated
+    }
+    
+    return inputItems;
+  }
+
+  /**
+   * Convert content array from Chat Completions to Responses API format
+   */
+  private convertContentArray(content: unknown[]): string {
+    // For now, extract text content from mixed content arrays
+    // This is a simplified conversion - in a full implementation,
+    // you'd want to preserve images, audio, etc. in the proper format
+    return content
+      .map(item => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'text' in item) {
+          return String(item.text);
+        }
+        if (item && typeof item === 'object' && 'type' in item && (item as { type: string; text?: string }).type === 'text') {
+          return String((item as { type: string; text?: string }).text || '');
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
   }
 }

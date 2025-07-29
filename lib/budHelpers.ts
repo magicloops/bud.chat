@@ -97,7 +97,23 @@ export const budManager = new BudManager();
 
 // Utility functions for working with Buds
 export function getBudConfig(bud: Bud): BudConfig {
-  return bud.default_json as BudConfig;
+  const config = bud.default_json as BudConfig;
+  const defaults = getDefaultBudConfig();
+  
+  // Ensure all required fields are present with fallbacks
+  return {
+    name: config?.name || bud.name || defaults.name,
+    systemPrompt: config?.systemPrompt || defaults.systemPrompt,
+    model: config?.model || defaults.model,
+    temperature: config?.temperature ?? defaults.temperature,
+    maxTokens: config?.maxTokens || defaults.maxTokens,
+    avatar: config?.avatar || defaults.avatar,
+    greeting: config?.greeting,
+    tools: config?.tools,
+    customTheme: config?.customTheme,
+    // MCP config comes from separate mcp_config column, not default_json
+    mcpConfig: bud.mcp_config || config?.mcpConfig
+  };
 }
 
 export function createBudSystemEvent(bud: Bud, _conversationId: string = 'temp'): Event {

@@ -118,6 +118,135 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       console.log('📝 OpenAI Responses API: response.content_part.done - lifecycle event, ignoring');
       return null; // Just a lifecycle event, don't do anything
 
+    // Handle tool call events - modern Responses API format
+    case 'response.output_item.added':
+      // Check if this is a function call or MCP call being added
+      const item = event.item as { type?: string; id?: string; name?: string; server_label?: string };
+      if (item?.type === 'function_call') {
+        return {
+          type: 'tool_start',
+          tool_id: item.id as string,
+          tool_name: item.name as string
+        };
+      } else if (item?.type === 'mcp_call') {
+        return {
+          type: 'mcp_tool_start',
+          tool_id: item.id as string,
+          tool_name: item.name as string,
+          server_label: item.server_label as string
+        };
+      } else if (item?.type === 'mcp_list_tools') {
+        return {
+          type: 'mcp_list_tools',
+          server_label: item.server_label as string,
+          tools: (item as { tools?: unknown[] }).tools || []
+        };
+      }
+      return null;
+
+    case 'response.function_call_arguments.delta':
+      return {
+        type: 'tool_arguments_delta',
+        tool_id: event.item_id as string,
+        output_index: event.output_index as number,
+        delta: event.delta as string
+      };
+
+    case 'response.function_call_arguments.done':
+      return {
+        type: 'tool_finalized',
+        tool_id: event.item_id as string,
+        output_index: event.output_index as number,
+        args: JSON.parse(event.arguments as string)
+      };
+
+    // Handle MCP call events - remote MCP tools
+    case 'response.mcp_call_arguments.delta':
+      return {
+        type: 'mcp_tool_arguments_delta',
+        tool_id: event.item_id as string,
+        delta: event.delta as string
+      };
+
+    case 'response.mcp_call_arguments.done':
+      return {
+        type: 'mcp_tool_finalized',
+        tool_id: event.item_id as string,
+        args: JSON.parse(event.arguments as string)
+      };
+
+    // Handle MCP lifecycle events
+    case 'response.mcp_list_tools':
+      return {
+        type: 'mcp_list_tools',
+        server_label: event.server_label as string,
+        tools: event.tools as unknown[]
+      };
+
+    case 'response.mcp_list_tools.in_progress':
+      // MCP tool listing is in progress - this is informational
+      return null;
+
+    case 'response.mcp_list_tools.completed':
+      // MCP tool listing completed - this is informational  
+      return null;
+
+    case 'response.mcp_call.in_progress':
+      // MCP call is in progress - this is informational
+      return null;
+
+    case 'response.mcp_call.completed':
+      // MCP call completed - this is informational
+      return null;
+
+    case 'response.mcp_approval_request':
+      return {
+        type: 'mcp_approval_request',
+        approval_request_id: event.id as string,
+        tool_name: event.name as string,
+        server_label: event.server_label as string,
+        arguments: event.arguments as string
+      };
+
+    // Handle legacy tool call events (for backwards compatibility)
+    case 'response.function_call.start':
+      return {
+        type: 'tool_start',
+        tool_id: event.call_id as string,
+        tool_name: event.name as string
+      };
+
+    case 'response.function_call.arguments.delta':
+      return {
+        type: 'tool_arguments_delta',
+        tool_id: event.call_id as string,
+        delta: event.delta as string
+      };
+
+    case 'response.function_call.done':
+      return {
+        type: 'tool_complete',
+        tool_id: event.call_id as string
+      };
+
+    // Handle output item completion for both function calls and MCP calls
+    case 'response.output_item.done':
+      const doneItem = event.item as { type?: string; id?: string; output?: string; error?: string };
+      if (doneItem?.type === 'function_call') {
+        return {
+          type: 'tool_complete',
+          tool_id: doneItem.id as string
+        };
+      } else if (doneItem?.type === 'mcp_call') {
+        return {
+          type: 'mcp_tool_complete',
+          tool_id: doneItem.id as string,
+          output: doneItem.output || undefined,
+          error: doneItem.error || undefined
+        };
+      }
+      return null;
+
     default:
       // Log unknown events for debugging with full details
       console.log('🚨 UNHANDLED OpenAI Responses API event:', {
