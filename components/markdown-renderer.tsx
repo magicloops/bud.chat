@@ -19,7 +19,7 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
 }: MarkdownRendererProps) {
   // Pre-process content to handle special formatting patterns
   const processedContent = React.useMemo(() => {
-    return content
+    let txt = content
       // Convert box-drawing character lines to horizontal rules
       .replace(/^([─═━┅┄┉┈]{10,})$/gm, '\n---\n')
       // Handle section headers that might have box characters around them
@@ -28,16 +28,27 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
       .replace(/^(\d+)\.\s+(.+?)$/gm, (match, num, title) => {
         return `\n### ${num}. ${title}\n`;
       })
-      // Preserve structured bullet points
-      .replace(/^•\s+(.+)$/gm, '• $1')
-      // Handle em-dash bullet points  
-      .replace(/^[–—]\s+(.+)$/gm, '- $1')
+      // A. / B. / C. -> sub-headers
+      .replace(/^([A-Z])\.\s+/gm, '#### $1. ')
+      // bullet "• something" -> "- something"
+      .replace(/^•\s+/gm, '- ')
+      // en-dash sub-items "– nested" -> "  - nested"
+      .replace(/^[–—]\s+/gm, '  - ')
       // Ensure proper spacing around sections
       .replace(/\n{3,}/g, '\n\n');
+
+      // NEW: convert 1‑3 leading spaces *inside* a paragraph line
+      // to hard spaces so the parser keeps them.
+      // • look for either BOM or newline, then 1‑3 plain spaces, then a non‑space char
+      // • replace each plain space with \u00A0 (NBSP)
+      txt = txt.replace(/(^|\n)( {1,3})(?=\S)/g, (_, brk, s) =>
+        brk + '\u00A0'.repeat(s.length)
+      );
+      return txt;
   }, [content]);
 
   return (
-    <div className={`${className} break-words overflow-wrap-anywhere`}>
+    <div className={`prose prose-gray max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -73,47 +84,10 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
               {children}
             </blockquote>
           ),
-          h1: ({ children }) => (
-            <h1 className="text-xl font-semibold mt-6 mb-3 first:mt-0 break-words border-b border-muted-foreground/20 pb-2">{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="text-lg font-semibold mt-5 mb-3 first:mt-0 break-words border-b border-muted-foreground/10 pb-1">{children}</h2>
-          ),
+          // Let prose handle most styling, just override a few key elements
           h3: ({ children }) => (
-            <h3 className="text-md font-semibold mt-4 mb-2 first:mt-0 break-words text-primary">{children}</h3>
+            <h3 className="text-primary">{children}</h3>
           ),
-          ul: ({ children }) => (
-            <ul className="list-disc list-outside ml-6 my-2 space-y-1">{children}</ul>
-          ),
-          ol: ({ className, children, ...rest }) => (
-            // ordered is a boolean that React doesn't understand, so we drop it, 
-            // but keep everything else - especially "start"
-            <ol
-              {...rest}
-              className={`list-decimal list-outside ml-6 my-2 space-y-1 ${className || ''}`}
-            >
-              {children}
-            </ol>
-          ),
-          li: ({ className, children, ...rest }) => (
-            <li {...rest} className={`break-words ${className || ''}`}>
-              {children}
-            </li>
-          ),
-          p: ({ children }) => {
-            // Check if this paragraph contains structured content (numbered sections, etc.)
-            const textContent = children?.toString() || '';
-            const isStructuredSection = /^\d+\.\s+/.test(textContent.trim());
-            const isSubSection = /^[–—]\s+/.test(textContent.trim());
-            
-            if (isStructuredSection) {
-              return <p className="mb-3 mt-4 break-words font-medium">{children}</p>;
-            } else if (isSubSection) {
-              return <p className="mb-1 ml-4 break-words">{children}</p>;
-            }
-            
-            return <p className="mb-2 last:mb-0 break-words">{children}</p>;
-          },
           a: ({ href, children }) => (
             <a 
               href={href} 
