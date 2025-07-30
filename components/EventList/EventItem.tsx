@@ -325,14 +325,9 @@ export const EventItem = memo(function EventItem({
                 </div>
               )}
             
-              {/* Regular Content - Now comes after reasoning */}
-              {textContent && (
-                <MarkdownRenderer content={textContent} />
-              )}
-            
-              {/* Tool Call Display (moved to end) */}
+              {/* Tool Call Display - should appear before text content */}
               {isToolCall && toolCalls.length > 0 && (
-                <div className="mt-2 space-y-2">
+                <div className="mt-2 mb-2 space-y-2">
                   {toolCalls.map((toolCall, index) => {
                     const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
                     const toolResult = allEvents?.find(event => 
@@ -452,6 +447,11 @@ export const EventItem = memo(function EventItem({
                     );
                   })}
                 </div>
+              )}
+              
+              {/* Regular Content - now comes after tool calls */}
+              {textContent && (
+                <MarkdownRenderer content={textContent} />
               )}
             
               {/* Error Display */}
@@ -611,14 +611,9 @@ export const EventItem = memo(function EventItem({
               </div>
             )}
             
-            {/* Regular Content - Now comes after reasoning */}
-            {textContent && (
-              <MarkdownRenderer content={textContent} />
-            )}
-            
-            {/* Tool Call Display (moved to end) */}
+            {/* Tool Call Display - should appear before text content */}
             {isToolCall && toolCalls.length > 0 && (
-              <div className="mt-2 space-y-2">
+              <div className="mt-2 mb-2 space-y-2">
                 {toolCalls.map((toolCall, index) => {
                   const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
                   const toolResult = allEvents?.find(event => 
@@ -738,6 +733,11 @@ export const EventItem = memo(function EventItem({
                   );
                 })}
               </div>
+            )}
+            
+            {/* Regular Content - now comes after tool calls */}
+            {textContent && (
+              <MarkdownRenderer content={textContent} />
             )}
             
             {/* Error Display */}

@@ -36,8 +36,22 @@ export class EventStreamBuilder {
   /**
    * Add a tool call to the current event
    */
-  addToolCall(id: string, name: string, args: object): void {
-    console.log('🔧 [EVENTBUILDER] Adding tool call segment:', { id, name, args_keys: Object.keys(args) });
+  addToolCall(
+    id: string, 
+    name: string, 
+    args: object, 
+    metadata?: { 
+      server_label?: string; 
+      display_name?: string; 
+      server_type?: string; 
+    }
+  ): void {
+    console.log('🔧 [EVENTBUILDER] Adding tool call segment:', { 
+      id, 
+      name, 
+      args_keys: Object.keys(args),
+      metadata
+    });
     
     // Remove from pending if it was there
     this.pendingToolCalls.delete(id);
@@ -47,7 +61,10 @@ export class EventStreamBuilder {
       type: 'tool_call',
       id,
       name,
-      args
+      args,
+      ...(metadata?.server_label && { server_label: metadata.server_label }),
+      ...(metadata?.display_name && { display_name: metadata.display_name }),
+      ...(metadata?.server_type && { server_type: metadata.server_type }),
     });
     
     console.log('🔧 [EVENTBUILDER] ✅ Tool call segment added. Total segments:', this.segments.length);

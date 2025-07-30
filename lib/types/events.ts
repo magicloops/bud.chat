@@ -4,7 +4,15 @@ export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
   | { type: 'text'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args: object; server_label?: string }
+  | { 
+      type: 'tool_call'; 
+      id: string; 
+      name: string; 
+      args: object; 
+      server_label?: string;
+      display_name?: string; // Human-readable tool name for UI
+      server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
+    }
   | { type: 'tool_result'; id: string; output: object; error?: string };
 
 // Reasoning data types for OpenAI o-series models
@@ -104,14 +112,25 @@ export class EventLog {
             id: segment.id,
             name: segment.name,
             args: segment.args,
-            argsType: typeof segment.args
+            argsType: typeof segment.args,
+            server_type: segment.server_type
           });
+          
           toolCalls.set(segment.id, {
             id: segment.id,
             name: segment.name,
             args: segment.args
           });
         } else if (segment.type === 'tool_result') {
+          console.log('🔍 Found tool result segment:', {
+            id: segment.id,
+            output: segment.output,
+            outputType: typeof segment.output,
+            hasOutput: !!segment.output,
+            outputPreview: typeof segment.output === 'string' 
+              ? segment.output.substring(0, 100) + '...' 
+              : segment.output
+          });
           resolvedIds.add(segment.id);
         }
       }
@@ -121,6 +140,14 @@ export class EventLog {
     const unresolvedCalls = Array.from(toolCalls.values())
       .filter(call => !resolvedIds.has(call.id));
     
+    console.log('🔧 Tool resolution summary:', {
+      totalToolCalls: toolCalls.size,
+      resolvedToolCalls: resolvedIds.size,
+      unresolvedCount: unresolvedCalls.length,
+      resolvedIds: Array.from(resolvedIds),
+      unresolvedIds: unresolvedCalls.map(call => call.id)
+    });
+    
     console.log('🔧 Unresolved tool calls:', unresolvedCalls.map(call => ({
       id: call.id,
       name: call.name,
@@ -128,8 +155,7 @@ export class EventLog {
       argsType: typeof call.args
     })));
     
-    return unresolvedCalls
-      .filter(call => !resolvedIds.has(call.id));
+    return unresolvedCalls;
   }
 
   getToolCallById(id: string): ToolCall | null {

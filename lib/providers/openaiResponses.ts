@@ -14,8 +14,8 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   if (!event.type || typeof event.type !== 'string') return null;
   
   // Log ALL events to see what we're actually receiving
-  if (event.type.includes('mcp')) {
-    console.log('🌐 [MCP-TRANSFORMER] RAW MCP EVENT:', { 
+  if (event.type.includes('mcp') || event.type.includes('output_item')) {
+    console.log('🌐 [MCP-TRANSFORMER] RAW EVENT:', { 
       type: event.type, 
       keys: Object.keys(event),
       event: event 
@@ -105,8 +105,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     // Handle response lifecycle events (informational only)
     case 'response.created':
     case 'response.in_progress':
-    case 'response.output_item.added':
-    case 'response.output_item.done':
+      console.log('🌐 [MCP-TRANSFORMER] LIFECYCLE EVENT:', { 
+        type: event.type,
+        keys: Object.keys(event),
+        event: event
+      });
       // These are lifecycle events, don't transform them
       return null;
 
@@ -130,12 +133,16 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     // Handle tool call events - modern Responses API format
     case 'response.output_item.added':
       // Check if this is a function call or MCP call being added
-      const item = event.item as { type?: string; id?: string; name?: string; server_label?: string };
-      console.log('🌐 [MCP-TRANSFORMER] output_item.added:', { 
+      const item = event.item as { type?: string; id?: string; name?: string; server_label?: string; tools?: unknown[] };
+      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.ADDED EVENT RECEIVED:', { 
         item_type: item?.type, 
         item_id: item?.id, 
         item_name: item?.name,
-        server_label: item?.server_label 
+        server_label: item?.server_label,
+        has_tools: !!item?.tools,
+        tools_count: Array.isArray(item?.tools) ? item.tools.length : 0,
+        all_keys: Object.keys(item || {}),
+        full_item: item
       });
       if (item?.type === 'function_call') {
         return {
@@ -144,7 +151,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tool_name: item.name as string
         };
       } else if (item?.type === 'mcp_call') {
-        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DETECTED:', { 
+        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DETECTED (REAL TOOL NAME):', { 
           tool_id: item.id, 
           tool_name: item.name, 
           server_label: item.server_label 
@@ -152,8 +159,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         return {
           type: 'mcp_tool_start',
           tool_id: item.id as string,
-          tool_name: item.name as string,
-          server_label: item.server_label as string
+          tool_name: item.name as string, // Real tool name from OpenAI
+          server_label: item.server_label as string,
+          // Add metadata for better frontend display
+          display_name: item.name as string, // Use real tool name as display name
+          server_type: 'remote_mcp'
         };
       } else if (item?.type === 'mcp_list_tools') {
         console.log('🌐 [MCP-TRANSFORMER] MCP TOOLS LISTED:', { 
@@ -231,8 +241,22 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.mcp_list_tools.completed':
       console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.completed:', { 
         item_id: event.item_id, 
-        output_index: event.output_index 
+        output_index: event.output_index,
+        full_event: event // Log the full event to see if it contains tools data
       });
+      // Check if this event contains the tools data
+      if (event.tools && Array.isArray(event.tools)) {
+        console.log('🌐 [MCP-TRANSFORMER] ✅ TOOLS FOUND IN COMPLETED EVENT:', { 
+          server_label: event.server_label, 
+          tools_count: event.tools.length,
+          tools: event.tools
+        });
+        return {
+          type: 'mcp_list_tools',
+          server_label: event.server_label as string || 'unknown_server',
+          tools: event.tools as unknown[]
+        };
+      }
       // MCP tool listing completed - this is informational  
       return null;
 
@@ -245,29 +269,22 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return null;
 
     case 'response.mcp_call.in_progress':
-      console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL IN PROGRESS (START):', { 
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call.in_progress - SKIPPING (tool start handled by output_item.added):', { 
         item_id: event.item_id, 
         output_index: event.output_index 
       });
-      // This is the MCP equivalent of tool_start - the MCP call has begun
-      return {
-        type: 'mcp_tool_start',
-        tool_id: event.item_id as string,
-        tool_name: `mcp_tool_${(event.item_id as string).slice(-8)}`, // Generate name since OpenAI doesn't provide it
-        server_label: 'remote_mcp' // We know it's a remote MCP call
-      };
+      // Skip this event - MCP tool start data comes through output_item.added events with real tool names
+      // Processing both creates duplicate tool call events with different names
+      return null;
 
     case 'response.mcp_call.completed':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call.completed:', { 
+      console.log('🌐 [MCP-TRANSFORMER] mcp_call.completed - SKIPPING (output handled by output_item.done):', { 
         item_id: event.item_id, 
-        output_index: event.output_index 
+        output_index: event.output_index
       });
-      return {
-        type: 'mcp_tool_complete',
-        tool_id: event.item_id as string,
-        output: null, // MCP results are included in the text response
-        error: null
-      };
+      // Skip this event - MCP tool outputs come through output_item.done events
+      // Processing both creates duplicate tool result events
+      return null;
 
     case 'response.mcp_call.failed':
       console.log('🌐 [MCP-TRANSFORMER] mcp_call.failed:', { 
@@ -313,40 +330,82 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     // Handle output item completion for both function calls and MCP calls
     case 'response.output_item.done':
-      const doneItem = event.item as { type?: string; id?: string; output?: string; error?: string };
+      const doneItem = event.item as { 
+        type?: string; 
+        id?: string; 
+        output?: string; 
+        error?: string; 
+        tools?: unknown[];
+        server_label?: string;
+      };
+      
+      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.DONE EVENT RECEIVED:', { 
+        item_type: doneItem?.type, 
+        item_id: doneItem?.id,
+        has_tools: !!doneItem?.tools,
+        tools_count: Array.isArray(doneItem?.tools) ? doneItem.tools.length : 0,
+        server_label: doneItem?.server_label,
+        has_output: !!doneItem?.output,
+        output_length: typeof doneItem?.output === 'string' ? doneItem.output.length : 0,
+        output_preview: typeof doneItem?.output === 'string' ? doneItem.output.substring(0, 100) + '...' : doneItem?.output,
+        has_error: !!doneItem?.error,
+        all_keys: Object.keys(doneItem || {}),
+        full_item: doneItem
+      });
+      
       if (doneItem?.type === 'function_call') {
         return {
           type: 'tool_complete',
           tool_id: doneItem.id as string
         };
       } else if (doneItem?.type === 'mcp_call') {
+        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DONE WITH OUTPUT:', { 
+          tool_id: doneItem.id, 
+          has_output: !!doneItem.output,
+          output_length: typeof doneItem.output === 'string' ? doneItem.output.length : 0,
+          has_error: !!doneItem.error
+        });
         return {
           type: 'mcp_tool_complete',
           tool_id: doneItem.id as string,
           output: doneItem.output || undefined,
           error: doneItem.error || undefined
         };
+      } else if (doneItem?.type === 'mcp_list_tools' && doneItem.tools) {
+        // Check if this is where the MCP tools data comes from
+        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP TOOLS FOUND IN output_item.done:', { 
+          server_label: doneItem.server_label, 
+          tools_count: Array.isArray(doneItem.tools) ? doneItem.tools.length : 0,
+          tools: doneItem.tools
+        });
+        return {
+          type: 'mcp_list_tools',
+          server_label: doneItem.server_label as string || 'unknown_server',
+          tools: doneItem.tools as unknown[]
+        };
       }
       return null;
 
     default:
       // Log unknown events for debugging with full details
-      console.log('🚨 UNHANDLED OpenAI Responses API event:', {
-        type: event.type,
-        allKeys: Object.keys(event),
-        fullEvent: event,
-        timestamp: Date.now(),
-        note: 'This event type is not being processed by our transformer'
-      });
+      console.log('🚨🚨🚨 UNHANDLED OpenAI Responses API EVENT 🚨🚨🚨');
+      console.log('Event Type:', event.type);
+      console.log('All Keys:', Object.keys(event));
+      console.log('Full Event:', JSON.stringify(event, null, 2));
+      console.log('Timestamp:', new Date().toISOString());
+      console.log('Note: This event type is not being processed by our transformer');
+      console.log('🚨🚨🚨 END UNHANDLED EVENT 🚨🚨🚨');
       
       // Special check for potential MCP-related events we might be missing
       if (event.type.includes('mcp') || event.type.includes('tool') || event.type.includes('call')) {
-        console.log('🚨 [MCP-TRANSFORMER] POTENTIALLY MISSING MCP EVENT TYPE:', {
-          type: event.type,
-          item: event.item,
-          tool_id: event.tool_id,
-          item_id: event.item_id
-        });
+        console.log('🔥🔥🔥 POTENTIALLY MISSING MCP EVENT TYPE 🔥🔥🔥');
+        console.log('Type:', event.type);
+        console.log('Item:', event.item);
+        console.log('Tool ID:', event.tool_id);
+        console.log('Item ID:', event.item_id);
+        console.log('Tools:', event.tools);
+        console.log('Server Label:', event.server_label);
+        console.log('🔥🔥🔥 END MCP EVENT 🔥🔥🔥');
       }
       
       return null;

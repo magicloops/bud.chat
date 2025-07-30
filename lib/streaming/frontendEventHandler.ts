@@ -28,6 +28,8 @@ export interface StreamEvent {
   tools?: unknown[];
   approval_request_id?: string;
   arguments?: string;
+  display_name?: string; // Human-readable tool name
+  server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
   
   // New reasoning fields
   item_id?: string;

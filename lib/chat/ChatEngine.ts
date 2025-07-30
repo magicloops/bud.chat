@@ -196,43 +196,62 @@ export class ChatEngine {
       // Check if there are pending tool calls
       const pendingToolCalls = eventLog.getUnresolvedToolCalls();
       if (pendingToolCalls.length > 0) {
-        console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`);
         
-        // Execute all pending tool calls
-        const toolResults = await this.executeMCPToolCalls(
-          pendingToolCalls,
-          validatedRequest.workspaceId,
-          validatedRequest.budId
-        );
-        
-        // Add tool results to event log
-        for (const result of toolResults) {
-          const toolResultEvent = createToolResultEvent(result.id, result.output);
-          eventLog.addEvent(toolResultEvent);
+        // For OpenAI Responses API, tool calls are handled by OpenAI - skip our execution
+        if (provider === 'openai-responses') {
+          console.log(`🔧 Found ${pendingToolCalls.length} pending tool calls, but OpenAI Responses API handles execution - skipping our execution`);
           
-          // Save tool result if in individual mode
-          if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
-            await this.config.eventSaver(toolResultEvent, conversationId);
+          // If this is not the first iteration, it means we already processed a response
+          // and there are still unresolved tools, which shouldn't happen with remote MCP
+          if (iteration > 1) {
+            console.warn('🚨 [CHATENGINE] Found unresolved tools in iteration > 1 for OpenAI Responses API - this should not happen with remote MCP. Breaking conversation loop.');
+            shouldContinue = false;
+            break;
           }
           
-          // Stream tool result to user
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: "tool_result",
-            tool_id: result.id,
-            output: result.output,
-            error: result.error || null
-          })}\n\n`));
+          // For first iteration, this is expected - OpenAI will handle the tools
+          // and include results in the response. Don't continue the loop.
+          console.log('🌐 [CHATENGINE] First iteration with pending tools - OpenAI will handle these during streaming');
+        } else {
+          // For regular OpenAI and Anthropic, we execute tools ourselves
+          console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`);
           
-          // Stream tool completion to user
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: "tool_complete",
-            tool_id: result.id,
-            content: result.error ? "❌ Tool failed" : "✅ Tool completed"
-          })}\n\n`));
+          // Execute all pending tool calls
+          const toolResults = await this.executeMCPToolCalls(
+            pendingToolCalls,
+            validatedRequest.workspaceId,
+            validatedRequest.budId
+          );
+          
+          // Add tool results to event log
+          for (const result of toolResults) {
+            const toolResultEvent = createToolResultEvent(result.id, result.output);
+            eventLog.addEvent(toolResultEvent);
+            
+            // Save tool result if in individual mode
+            if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
+              await this.config.eventSaver(toolResultEvent, conversationId);
+            }
+            
+            // Stream tool result to user
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: "tool_result",
+              tool_id: result.id,
+              output: result.output,
+              error: result.error || null
+            })}\n\n`));
+            
+            // Stream tool completion to user
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: "tool_complete",
+              tool_id: result.id,
+              content: result.error ? "❌ Tool failed" : "✅ Tool completed"
+            })}\n\n`));
+          }
+          
+          // Continue to next iteration to get follow-up response
+          continue;
         }
-        
-        // Continue to next iteration to get follow-up response
-        continue;
       }
       
       // No pending tool calls, get next response from LLM
@@ -256,12 +275,38 @@ export class ChatEngine {
         eventFinalized = true; // OpenAI Responses handles finalization internally
       }
       
-      // Check if we have tool calls to execute
+      // Check if we have tool calls to execute in the final event
       const finalEvent = eventLog.getLastEvent();
       const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
       
-      // If no tool calls, we're done
+      console.log('🔍 [CHATENGINE] Checking final event for tool calls:', {
+        event_id: finalEvent?.id,
+        event_role: finalEvent?.role,
+        total_segments: finalEvent?.segments.length || 0,
+        tool_call_segments: toolCallSegments.length,
+        segment_types: finalEvent?.segments.map(s => s.type) || [],
+        iteration: iteration,
+        provider: provider
+      });
+      
+      // For OpenAI Responses API, if we just processed MCP tools, check if any tools are still unresolved
+      if (provider === 'openai-responses' && iteration === 1) {
+        const stillUnresolved = eventLog.getUnresolvedToolCalls();
+        console.log('🔍 [CHATENGINE] Post-streaming tool resolution check:', {
+          still_unresolved_count: stillUnresolved.length,
+          tool_call_segments_in_final_event: toolCallSegments.length
+        });
+        
+        // If no unresolved tool calls after first iteration, we're done
+        if (stillUnresolved.length === 0) {
+          console.log('✅ [CHATENGINE] All tools resolved after OpenAI Responses API streaming - conversation complete');
+          shouldContinue = false;
+        }
+      }
+      
+      // If no tool calls in the final event, we're done
       if (toolCallSegments.length === 0) {
+        console.log('✅ [CHATENGINE] No tool calls in final event - conversation complete');
         shouldContinue = false;
       }
       
@@ -510,6 +555,18 @@ export class ChatEngine {
     
     console.log('📡 OpenAI Responses API stream created, starting to process...');
     
+    // Create placeholder assistant event BEFORE streaming starts to ensure correct database ordering
+    const placeholderAssistant = createTextEvent('assistant', '');
+    let assistantEventId = placeholderAssistant.id;
+    let assistantEventCreated = false;
+    
+    // Save placeholder to database immediately (gets correct fractional index before tool results)
+    if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
+      await this.config.eventSaver(placeholderAssistant, conversationId);
+      assistantEventCreated = true;
+      console.log('✅ Created placeholder assistant event in database:', { id: assistantEventId });
+    }
+    
     // Process the Responses API stream with reasoning events
     const responsesStream = processResponsesAPIStream(stream);
     const encoder = new TextEncoder();
@@ -529,6 +586,8 @@ export class ChatEngine {
       output_index: number;
       name: string;
       server_label: string;
+      display_name?: string;
+      server_type?: string;
       accumulated_args: string;
       is_complete: boolean;
     }>();
@@ -588,7 +647,13 @@ export class ChatEngine {
         // Keep in collector for potential debugging, but mark as done
       } else if (event.type === 'mcp_tool_start') {
         // Initialize MCP call tracking
-        const { tool_id, tool_name, server_label } = event as { tool_id: string; tool_name: string; server_label: string };
+        const { tool_id, tool_name, server_label, display_name, server_type } = event as { 
+          tool_id: string; 
+          tool_name: string; 
+          server_label: string;
+          display_name?: string;
+          server_type?: string;
+        };
         
         // Try to get the real tool name from our mapping, fallback to the provided name
         const actualToolName = mcpToolNameMapping.get(tool_id) || tool_name;
@@ -596,7 +661,9 @@ export class ChatEngine {
           tool_id, 
           provided_name: tool_name, 
           actual_name: actualToolName,
-          server_label 
+          server_label,
+          display_name,
+          server_type
         });
         
         mcpCallCollector.set(tool_id, {
@@ -604,6 +671,8 @@ export class ChatEngine {
           output_index: 0, // Will be updated if available
           name: actualToolName,
           server_label: server_label,
+          display_name: display_name,
+          server_type: server_type,
           accumulated_args: '',
           is_complete: false
         });
@@ -626,9 +695,19 @@ export class ChatEngine {
         const mcpCall = mcpCallCollector.get(tool_id);
         if (mcpCall) {
           mcpCall.is_complete = true;
-          // Add MCP tool call segment to event builder
-          console.log('🌐 [CHATENGINE] Adding MCP tool call to eventBuilder:', { tool_id, tool_name: mcpCall.name, server_label: mcpCall.server_label });
-          eventBuilder.addToolCall(tool_id, mcpCall.name, args);
+          // Add MCP tool call segment to event builder with metadata
+          console.log('🌐 [CHATENGINE] Adding MCP tool call to eventBuilder:', { 
+            tool_id, 
+            tool_name: mcpCall.name, 
+            server_label: mcpCall.server_label,
+            display_name: mcpCall.display_name,
+            server_type: mcpCall.server_type
+          });
+          eventBuilder.addToolCall(tool_id, mcpCall.name, args, {
+            server_label: mcpCall.server_label,
+            display_name: mcpCall.display_name,
+            server_type: mcpCall.server_type
+          });
           console.log('🌐 [CHATENGINE] ✅ MCP tool call added to event builder successfully');
         } else {
           console.error('🚨 [CHATENGINE] MCP call not found in collector for finalized event:', { tool_id, collector_keys: Array.from(mcpCallCollector.keys()) });
@@ -637,8 +716,45 @@ export class ChatEngine {
         // MCP call execution complete (cleanup)
         const { tool_id, output, error } = event as { tool_id: string; output: string | null; error: string | null };
         console.log('🎯 MCP call completed:', { tool_id, has_output: !!output, has_error: !!error });
-        // For remote MCP tools, the results are included in the text response by OpenAI
-        // No need to create separate tool result events
+        
+        // For remote MCP tools, create tool result events with the actual output from OpenAI
+        // This is needed so future conversation iterations can reference the tool results
+        const toolResult = {
+          id: tool_id,
+          output: output || { result: "Tool executed by OpenAI - results included in response text" },
+          error: error || undefined
+        };
+        
+        const toolResultEvent = createToolResultEvent(toolResult.id, toolResult.output);
+        eventLog.addEvent(toolResultEvent);
+        console.log('🌐 [CHATENGINE] ✅ Created tool result event for MCP tool:', { 
+          tool_id, 
+          has_output: !!output,
+          output_preview: typeof output === 'string' ? output.substring(0, 100) + '...' : output,
+          has_error: !!error 
+        });
+        
+        // Stream MCP tool result to frontend
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: "tool_result",
+          tool_id: tool_id,
+          output: toolResult.output,
+          error: toolResult.error || null
+        })}\n\n`));
+        
+        // Stream MCP tool completion to frontend
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          type: "tool_complete",
+          tool_id: tool_id,
+          content: toolResult.error ? "❌ MCP Tool failed" : "✅ MCP Tool completed"
+        })}\n\n`));
+        
+        console.log('🌐 [CHATENGINE] ✅ Streamed MCP tool result to frontend');
+        
+        // Save tool result if in individual mode
+        if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
+          await this.config.eventSaver(toolResultEvent, conversationId);
+        }
       } else if (event.type === 'mcp_list_tools') {
         // MCP server tools discovered - extract tool names for better display
         const { server_label, tools } = event as { server_label: string; tools: unknown[] };
@@ -706,6 +822,13 @@ export class ChatEngine {
               .join('\n\n');
           }
         }
+      } else if (event.type !== 'finalize_only') {
+        // Catch-all for any events we're not handling in ChatEngine
+        console.log('🔍🔍🔍 UNHANDLED EVENT IN CHATENGINE 🔍🔍🔍');
+        console.log('Event Type:', event.type);
+        console.log('Event Data:', JSON.stringify(event, null, 2));
+        console.log('Note: This event made it through the transformer but is not being processed in ChatEngine');
+        console.log('🔍🔍🔍 END UNHANDLED CHATENGINE EVENT 🔍🔍🔍');
       } else if (event.type === 'finalize_only' && !eventFinalized) {
         // Attach reasoning data to event builder before finalization
         const reasoningEntries = Array.from(reasoningCollector.values());
@@ -723,9 +846,56 @@ export class ChatEngine {
           console.log('🌐 [CHATENGINE] Event segments:', builtEvent.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name, server_label: s.server_label } : {}) })));
           eventLog.addEvent(builtEvent);
           
-          // Save assistant event to database if in individual mode
-          if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
-            console.log('🌐 [CHATENGINE] Saving event to database...');
+          // Update placeholder assistant event in database with final content
+          if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
+            console.log('🌐 [CHATENGINE] Updating placeholder assistant event in database...');
+            console.log('🔍 [CHATENGINE] Update parameters:', {
+              conversation_id: conversationId,
+              assistant_event_id: assistantEventId,
+              segments_count: builtEvent.segments.length,
+              has_reasoning: !!builtEvent.reasoning,
+              segments_preview: builtEvent.segments.map(s => ({ 
+                type: s.type, 
+                ...(s.type === 'tool_call' ? { id: s.id, name: s.name } : {})
+              }))
+            });
+            
+            const { data, error } = await this.supabase
+              .from('events')
+              .update({ 
+                segments: builtEvent.segments, // JSONB column - pass actual JSON, not stringified
+                reasoning: builtEvent.reasoning || null, // JSONB column - pass actual JSON, not stringified
+                ts: builtEvent.ts // Update timestamp to reflect final event time
+              })
+              .eq('conversation_id', conversationId)
+              .eq('id', assistantEventId)
+              .select(); // Add select() to get the updated data back
+              
+            if (error) {
+              console.error('❌ [CHATENGINE] Failed to update assistant event in database:', {
+                error: error,
+                error_message: error?.message,
+                error_details: error?.details,
+                error_hint: error?.hint,
+                error_code: error?.code,
+                conversation_id: conversationId,
+                assistant_event_id: assistantEventId,
+                update_data: {
+                  segments_length: JSON.stringify(builtEvent.segments).length,
+                  has_reasoning: !!builtEvent.reasoning,
+                  reasoning_length: builtEvent.reasoning ? JSON.stringify(builtEvent.reasoning).length : 0
+                }
+              });
+            } else {
+              console.log('✅ [CHATENGINE] Updated placeholder assistant event in database:', {
+                updated_rows: data?.length || 0,
+                conversation_id: conversationId,
+                assistant_event_id: assistantEventId
+              });
+            }
+          } else if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId && !assistantEventCreated) {
+            // Fallback: if placeholder wasn't created, use old method
+            console.log('🌐 [CHATENGINE] Saving event to database (fallback)...');
             await this.config.eventSaver(builtEvent, conversationId);
           }
           
