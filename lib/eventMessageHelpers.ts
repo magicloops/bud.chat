@@ -1,7 +1,7 @@
 // Event-based message helpers for optimistic UI
 // These maintain compatibility with existing patterns while using events
 
-import { Event, createTextEvent } from '@/lib/types/events';
+import { Event, createTextEvent, Segment, ReasoningPart, ResponseMetadata, createReasoningSegment, sortSegmentsBySequence } from '@/lib/types/events';
 // createMixedEvent currently unused
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
 import { BudConfig } from '@/lib/types';
@@ -183,51 +183,139 @@ export function eventsToStreamingFormat(events: Event[]): Record<string, unknown
 }
 
 /**
- * Create a streaming event builder for real-time updates
+ * Enhanced streaming event builder for unified segments model
+ * Supports reasoning segments, sequence ordering, and response metadata
  */
 export class StreamingEventBuilder {
   private event: Event;
   private onUpdate?: (event: Event) => void;
+  private responseMetadata: ResponseMetadata = {};
   
   constructor(initialEvent: Event, onUpdate?: (event: Event) => void) {
-    this.event = { ...initialEvent };
+    this.event = { 
+      ...initialEvent,
+      response_metadata: initialEvent.response_metadata || {}
+    };
+    this.responseMetadata = this.event.response_metadata || {};
     this.onUpdate = onUpdate;
   }
   
-  addTextChunk(text: string) {
+  addTextChunk(text: string, sequenceNumber?: number) {
     // Find or create text segment
-    let textSegment = this.event.segments.find(s => s.type === 'text');
+    let textSegment = this.event.segments.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
     if (!textSegment) {
       textSegment = { type: 'text', text: '' };
       this.event.segments.push(textSegment);
     }
     
-    if (textSegment.type === 'text') {
-      textSegment.text += text;
+    textSegment.text += text;
+    
+    // Sort segments if sequence numbers are provided
+    if (sequenceNumber !== undefined) {
+      this.sortSegments();
     }
     
-    this.onUpdate?.(this.event);
+    this.triggerUpdate();
   }
   
-  addToolCall(id: string, name: string, args: object) {
-    this.event.segments.push({
+  addToolCall(
+    id: string, 
+    name: string, 
+    args: object, 
+    options?: {
+      server_label?: string;
+      display_name?: string;
+      server_type?: string;
+      output_index?: number;
+      sequence_number?: number;
+    }
+  ) {
+    const toolCallSegment: Segment = {
       type: 'tool_call',
       id,
       name,
-      args
-    });
+      args,
+      server_label: options?.server_label,
+      display_name: options?.display_name,
+      server_type: options?.server_type,
+      output_index: options?.output_index,
+      sequence_number: options?.sequence_number
+    };
     
-    this.onUpdate?.(this.event);
+    this.event.segments.push(toolCallSegment);
+    this.sortSegments();
+    this.triggerUpdate();
   }
   
-  addToolResult(id: string, output: object) {
+  addToolResult(id: string, output: object, error?: string) {
     this.event.segments.push({
       type: 'tool_result',
       id,
-      output
+      output,
+      error
     });
     
+    this.triggerUpdate();
+  }
+  
+  addReasoningSegment(
+    id: string,
+    output_index: number,
+    sequence_number: number,
+    parts: ReasoningPart[],
+    options?: {
+      combined_text?: string;
+      effort_level?: 'low' | 'medium' | 'high';
+      reasoning_tokens?: number;
+      streaming?: boolean;
+    }
+  ) {
+    const reasoningSegment = createReasoningSegment(
+      id,
+      output_index,
+      sequence_number,
+      parts,
+      options
+    );
+    
+    // Check if we already have a reasoning segment with this ID (for updates)
+    const existingIndex = this.event.segments.findIndex(
+      s => s.type === 'reasoning' && s.id === id
+    );
+    
+    if (existingIndex >= 0) {
+      // Update existing reasoning segment
+      this.event.segments[existingIndex] = reasoningSegment;
+    } else {
+      // Add new reasoning segment
+      this.event.segments.push(reasoningSegment);
+    }
+    
+    this.sortSegments();
+    this.triggerUpdate();
+  }
+  
+  updateResponseMetadata(metadata: Partial<ResponseMetadata>) {
+    this.responseMetadata = { ...this.responseMetadata, ...metadata };
+    this.event.response_metadata = this.responseMetadata;
+    this.triggerUpdate();
+  }
+  
+  private sortSegments() {
+    this.event.segments = sortSegmentsBySequence(this.event.segments);
+  }
+  
+  private triggerUpdate() {
+    this.event.ts = Date.now(); // Update timestamp
     this.onUpdate?.(this.event);
+  }
+  
+  getSegments(): Segment[] {
+    return [...this.event.segments];
+  }
+  
+  getResponseMetadata(): ResponseMetadata {
+    return { ...this.responseMetadata };
   }
   
   getCurrentEvent(): Event {
@@ -235,7 +323,22 @@ export class StreamingEventBuilder {
   }
   
   finalize(): Event {
+    // Mark response as complete
+    this.responseMetadata.completion_status = 'complete';
+    this.event.response_metadata = this.responseMetadata;
     return this.getCurrentEvent();
+  }
+  
+  reset(role: 'assistant' | 'user' | 'system' | 'tool'): void {
+    // Create a new empty event for the next iteration
+    this.event = {
+      id: crypto.randomUUID(),
+      role,
+      segments: role === 'assistant' ? [{ type: 'text', text: '' }] : [],
+      ts: Date.now(),
+      response_metadata: {}
+    };
+    this.responseMetadata = {};
   }
 }
 

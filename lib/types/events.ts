@@ -12,8 +12,23 @@ export type Segment =
       server_label?: string;
       display_name?: string; // Human-readable tool name for UI
       server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
+      // Sequence metadata for OpenAI Responses API
+      output_index?: number;
+      sequence_number?: number;
     }
-  | { type: 'tool_result'; id: string; output: object; error?: string };
+  | { type: 'tool_result'; id: string; output: object; error?: string }
+  | { 
+      type: 'reasoning'; 
+      id: string; // item_id from OpenAI
+      output_index: number;
+      sequence_number: number;
+      parts: ReasoningPart[];
+      combined_text?: string;
+      effort_level?: 'low' | 'medium' | 'high';
+      reasoning_tokens?: number;
+      // Streaming state (client-side only, not persisted)
+      streaming?: boolean;
+    };
 
 // Reasoning data types for OpenAI o-series models
 export interface ReasoningPart {
@@ -43,11 +58,30 @@ export interface ReasoningData {
   streaming_part_index?: number; // Which part is currently streaming
 }
 
+// Response-level metadata for OpenAI Responses API
+export interface ResponseMetadata {
+  total_output_items?: number;
+  completion_status?: 'complete' | 'partial' | 'interrupted';
+  usage?: {
+    reasoning_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  // OpenAI-specific metadata
+  openai_response_id?: string;
+  model?: string;
+}
+
 export interface Event {
   id: string;           // uuid
   role: Role;
   segments: Segment[];  // ordered – may contain 1-N segments
   ts: number;          // unix millis
+  
+  // Response-level metadata (for Responses API)
+  response_metadata?: ResponseMetadata;
+  
+  // Legacy reasoning field - will be deprecated after migration
   reasoning?: ReasoningData; // Optional reasoning data for o-series models
 }
 
@@ -346,6 +380,21 @@ export class EventLog {
 
     return systemTexts.join('\n\n');
   }
+
+  updateEvent(event: Event): boolean {
+    const index = this.events.findIndex(e => e.id === event.id);
+    if (index >= 0) {
+      console.log('📝 Updating event in EventLog:', { 
+        id: event.id, 
+        role: event.role, 
+        segments_count: event.segments.length 
+      });
+      this.events[index] = event;
+      return true;
+    }
+    console.warn('⚠️ Event not found for update:', { id: event.id, role: event.role });
+    return false;
+  }
 }
 
 // Helper functions for creating events
@@ -383,4 +432,38 @@ export function createMixedEvent(role: Role, segments: Segment[], timestamp?: nu
     segments,
     ts: timestamp || Date.now()
   };
+}
+
+export function createReasoningSegment(
+  id: string, 
+  output_index: number, 
+  sequence_number: number, 
+  parts: ReasoningPart[],
+  options?: {
+    combined_text?: string;
+    effort_level?: 'low' | 'medium' | 'high';
+    reasoning_tokens?: number;
+    streaming?: boolean;
+  }
+): Segment {
+  return {
+    type: 'reasoning',
+    id,
+    output_index,
+    sequence_number,
+    parts,
+    combined_text: options?.combined_text,
+    effort_level: options?.effort_level,
+    reasoning_tokens: options?.reasoning_tokens,
+    streaming: options?.streaming
+  };
+}
+
+// Helper to sort segments by sequence number
+export function sortSegmentsBySequence(segments: Segment[]): Segment[] {
+  return segments.sort((a, b) => {
+    const aSeq = 'sequence_number' in a ? a.sequence_number || 0 : 0;
+    const bSeq = 'sequence_number' in b ? b.sequence_number || 0 : 0;
+    return aSeq - bSeq;
+  });
 }

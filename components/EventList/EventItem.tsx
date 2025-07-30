@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -84,12 +84,14 @@ export const EventItem = memo(function EventItem({
     setLocalTextContent(textContent);
   }, [textContent]);
   
-  // Extract tool calls and results
+  // Extract tool calls, results, and reasoning segments
   const toolCalls = event.segments.filter(s => s.type === 'tool_call');
   const toolResults = event.segments.filter(s => s.type === 'tool_result');
+  const reasoningSegments = event.segments.filter(s => s.type === 'reasoning');
   
   const isToolCall = toolCalls.length > 0;
   const isToolResult = toolResults.length > 0;
+  const hasReasoningSegments = reasoningSegments.length > 0;
   
   // Get assistant identity - all events in a conversation should show the same identity
   // The conversation meta should already have the resolved identity (overrides or bud defaults)
@@ -143,13 +145,95 @@ export const EventItem = memo(function EventItem({
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
   
-  // Reasoning logic - frontend-only approach
-  const hasReasoning = !!event.reasoning;
-  // Reasoning is streaming if:
-  // 1. Event has reasoning data AND
-  // 2. Event has no text content yet (reasoning happens before assistant response)
-  const hasTextContent = textContent.length > 0;
-  const isReasoningStreaming = hasReasoning && !hasTextContent;
+  // Unified reasoning logic - supports both new reasoning segments AND legacy reasoning field
+  const hasReasoning = hasReasoningSegments || !!event.reasoning;
+  
+  // Check if reasoning is complete - prioritize reasoning segments over legacy field
+  const isReasoningComplete = useMemo(() => {
+    if (hasReasoningSegments) {
+      // New unified segments model: check if all reasoning segments are complete
+      return reasoningSegments.every(segment => {
+        if (segment.type === 'reasoning') {
+          return !segment.streaming && (
+            !!segment.combined_text ||
+            segment.parts.every(part => part.is_complete)
+          );
+        }
+        return true;
+      });
+    } else if (event.reasoning) {
+      // Legacy reasoning field: use existing logic
+      return (
+        !!event.reasoning.combined_text ||
+        (event.reasoning.parts && Object.values(event.reasoning.parts).every(part => part.is_complete)) ||
+        !event.reasoning.streaming_part_index
+      );
+    }
+    return false;
+  }, [hasReasoningSegments, reasoningSegments, event.reasoning]);
+  
+  // Reasoning is streaming if we have reasoning data but it's not complete
+  const isReasoningStreaming = hasReasoning && !isReasoningComplete;
+  
+  // Get combined reasoning content from segments or legacy field
+  const reasoningContent = useMemo(() => {
+    if (hasReasoningSegments) {
+      // New segments model: combine all reasoning segments
+      return reasoningSegments
+        .sort((a, b) => {
+          if (a.type === 'reasoning' && b.type === 'reasoning') {
+            return (a.sequence_number || 0) - (b.sequence_number || 0);
+          }
+          return 0;
+        })
+        .map(segment => {
+          if (segment.type === 'reasoning') {
+            return segment.combined_text || segment.parts.map(part => part.text).join('\n');
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n\n');
+    } else if (event.reasoning) {
+      // Legacy reasoning field
+      return event.reasoning.combined_text || 
+        Object.values(event.reasoning.parts || {})
+          .sort((a, b) => a.summary_index - b.summary_index)
+          .map(part => part.text)
+          .join('\n\n');
+    }
+    return '';
+  }, [hasReasoningSegments, reasoningSegments, event.reasoning]);
+  
+  // Get reasoning effort level from segments or legacy field
+  const reasoningEffortLevel = useMemo(() => {
+    if (hasReasoningSegments) {
+      // Find the first reasoning segment with effort level
+      const segmentWithEffort = reasoningSegments.find(segment => 
+        segment.type === 'reasoning' && segment.effort_level
+      );
+      return segmentWithEffort?.type === 'reasoning' ? segmentWithEffort.effort_level : undefined;
+    }
+    return event.reasoning?.effort_level;
+  }, [hasReasoningSegments, reasoningSegments, event.reasoning]);
+  
+  // Debug logging for reasoning state
+  useEffect(() => {
+    if (hasReasoning) {
+      console.log('🧠 [REASONING] Unified state check:', {
+        event_id: event.id,
+        hasReasoning,
+        hasReasoningSegments,
+        segments_count: reasoningSegments.length,
+        has_legacy_reasoning: !!event.reasoning,
+        isReasoningComplete,
+        isReasoningStreaming,
+        content_length: reasoningContent.length,
+        effort_level: reasoningEffortLevel
+      });
+    }
+  }, [hasReasoning, hasReasoningSegments, reasoningSegments.length, event.reasoning, isReasoningComplete, isReasoningStreaming, reasoningContent.length, reasoningEffortLevel, event.id]);
+  
   // Show reasoning automatically while streaming, or manually when user toggles
   const shouldShowReasoning = isReasoningStreaming || showReasoning;
   
@@ -287,20 +371,54 @@ export const EventItem = memo(function EventItem({
                             <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
                           )}
                         </span>
-                        {event.reasoning?.effort_level && (
+                        {reasoningEffortLevel && (
                           <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
-                            {event.reasoning.effort_level} effort
+                            {reasoningEffortLevel} effort
                           </Badge>
                         )}
                       </div>
                       
                       <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-                        {event.reasoning?.combined_text && (
-                          <MarkdownRenderer content={event.reasoning.combined_text} />
+                        {reasoningContent && (
+                          <MarkdownRenderer content={reasoningContent} />
                         )}
                         
-                        {/* Show individual parts during streaming if combined_text not ready */}
-                        {!event.reasoning?.combined_text && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
+                        {/* Show individual parts during streaming if no combined content yet */}
+                        {!reasoningContent && hasReasoningSegments && reasoningSegments.some(segment => segment.type === 'reasoning') && (
+                          <div className="reasoning-parts space-y-2">
+                            {reasoningSegments
+                              .filter(segment => segment.type === 'reasoning')
+                              .sort((a, b) => {
+                                if (a.type === 'reasoning' && b.type === 'reasoning') {
+                                  return (a.sequence_number || 0) - (b.sequence_number || 0);
+                                }
+                                return 0;
+                              })
+                              .map((segment, index) => {
+                                if (segment.type !== 'reasoning') return null;
+                                return (
+                                  <div key={segment.id || index} className="reasoning-part">
+                                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                      <span>Reasoning {index + 1}</span>
+                                      {segment.streaming && (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      )}
+                                    </div>
+                                    <div className="text-xs">
+                                      {segment.parts.map((part, partIndex) => (
+                                        <div key={partIndex} className="mb-2">
+                                          <MarkdownRenderer content={part.text} />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        )}
+                        
+                        {/* Legacy fallback for old reasoning format */}
+                        {!reasoningContent && !hasReasoningSegments && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
                           <div className="reasoning-parts space-y-2">
                             {Object.values(event.reasoning.parts)
                               .sort((a, b) => a.summary_index - b.summary_index)
@@ -536,7 +654,7 @@ export const EventItem = memo(function EventItem({
               {isUser ? 'You' : (isTool || isToolResult) ? 'Tool' : assistantName}
             </span>
             <span className="text-xs text-muted-foreground">
-              · {isStreaming ? (isReasoningStreaming || (isToolCall && !hasTextContent) ? 'thinking...' : 'typing...') : formatEventDuration(event, _index)}
+              · {isStreaming ? (isReasoningStreaming || (isToolCall && !textContent) ? 'thinking...' : 'typing...') : formatEventDuration(event, _index)}
             </span>
           </div>
           <div className="relative">
@@ -573,20 +691,50 @@ export const EventItem = memo(function EventItem({
                           <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
                         )}
                       </span>
-                      {event.reasoning?.effort_level && (
+                      {reasoningEffortLevel && (
                         <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
-                          {event.reasoning.effort_level} effort
+                          {reasoningEffortLevel} effort
                         </Badge>
                       )}
                     </div>
                     
                     <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-                      {event.reasoning?.combined_text && (
-                        <MarkdownRenderer content={event.reasoning.combined_text} />
+                      {reasoningContent && (
+                        <MarkdownRenderer content={reasoningContent} />
                       )}
                       
-                      {/* Show individual parts during streaming if combined_text not ready */}
-                      {!event.reasoning?.combined_text && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
+                      {/* Show individual parts during streaming if no combined content yet */}
+                      {!reasoningContent && hasReasoningSegments && reasoningSegments.some(segment => segment.type === 'reasoning') && (
+                        <div className="reasoning-parts space-y-2">
+                          {reasoningSegments
+                            .filter(segment => segment.type === 'reasoning')
+                            .sort((a, b) => {
+                              if (a.type === 'reasoning' && b.type === 'reasoning') {
+                                return (a.sequence_number || 0) - (b.sequence_number || 0);
+                              }
+                              return 0;
+                            })
+                            .map((segment, index) => {
+                              if (segment.type !== 'reasoning') return null;
+                              return (
+                                <div key={segment.id || index} className="reasoning-part">
+                                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                                    <span>Reasoning {index + 1}</span>
+                                    {segment.streaming && (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    )}
+                                  </div>
+                                  <div className="text-xs">
+                                    <MarkdownRenderer content={segment.combined_text || segment.parts.map(part => part.text).join('\n')} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
+                      
+                      {/* Fallback to legacy reasoning display for backward compatibility */}
+                      {!reasoningContent && !hasReasoningSegments && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
                         <div className="reasoning-parts space-y-2">
                           {Object.values(event.reasoning.parts)
                             .sort((a, b) => a.summary_index - b.summary_index)

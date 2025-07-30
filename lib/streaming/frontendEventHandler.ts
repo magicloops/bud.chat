@@ -12,6 +12,8 @@ export interface StreamEvent {
     | 'reasoning_summary_part_added' | 'reasoning_summary_part_done'
     | 'reasoning_summary_text_delta' | 'reasoning_summary_text_done'
     | 'reasoning_summary_delta' | 'reasoning_summary_done'
+    // Unified segments reasoning events
+    | 'reasoning_start' | 'reasoning_complete'
     // Internal-only event types
     | 'finalize_only';
   
@@ -42,6 +44,17 @@ export interface StreamEvent {
   delta?: string | { text: string };
   text?: string;
   sequence_number?: number;
+  
+  // Unified segments reasoning fields
+  parts?: Array<{
+    summary_index: number;
+    type: 'summary_text';
+    text: string;
+    sequence_number: number;
+    is_complete: boolean;
+    created_at: number;
+  }>;
+  combined_text?: string;
 }
 
 export interface LocalStateUpdater {
