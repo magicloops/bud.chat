@@ -89,6 +89,7 @@ export const EventItem = memo(function EventItem({
   const toolResults = event.segments.filter(s => s.type === 'tool_result');
   const reasoningSegments = event.segments.filter(s => s.type === 'reasoning');
   
+  
   const isToolCall = toolCalls.length > 0;
   const isToolResult = toolResults.length > 0;
   const hasReasoningSegments = reasoningSegments.length > 0;
@@ -178,7 +179,7 @@ export const EventItem = memo(function EventItem({
   // Get combined reasoning content from segments or legacy field
   const reasoningContent = useMemo(() => {
     if (hasReasoningSegments) {
-      // New segments model: combine all reasoning segments
+      // New segments model: combine all reasoning segments that have content
       return reasoningSegments
         .sort((a, b) => {
           if (a.type === 'reasoning' && b.type === 'reasoning') {
@@ -188,11 +189,12 @@ export const EventItem = memo(function EventItem({
         })
         .map(segment => {
           if (segment.type === 'reasoning') {
-            return segment.combined_text || segment.parts.map(part => part.text).join('\n');
+            const content = segment.combined_text || segment.parts.map(part => part.text).join('\n');
+            return content.trim();
           }
           return '';
         })
-        .filter(Boolean)
+        .filter(content => content.length > 0) // Filter out empty content
         .join('\n\n');
     } else if (event.reasoning) {
       // Legacy reasoning field
@@ -217,25 +219,22 @@ export const EventItem = memo(function EventItem({
     return event.reasoning?.effort_level;
   }, [hasReasoningSegments, reasoningSegments, event.reasoning]);
   
-  // Debug logging for reasoning state
-  useEffect(() => {
-    if (hasReasoning) {
-      console.log('🧠 [REASONING] Unified state check:', {
-        event_id: event.id,
-        hasReasoning,
-        hasReasoningSegments,
-        segments_count: reasoningSegments.length,
-        has_legacy_reasoning: !!event.reasoning,
-        isReasoningComplete,
-        isReasoningStreaming,
-        content_length: reasoningContent.length,
-        effort_level: reasoningEffortLevel
-      });
-    }
-  }, [hasReasoning, hasReasoningSegments, reasoningSegments.length, event.reasoning, isReasoningComplete, isReasoningStreaming, reasoningContent.length, reasoningEffortLevel, event.id]);
+  
+  // Auto-collapse logic: show reasoning while streaming, collapse when complete and other content exists
+  const hasOtherContent = useMemo(() => {
+    return event.segments.some(s => 
+      s.type === 'text' && s.text.trim() || 
+      s.type === 'tool_call' || 
+      s.type === 'tool_result'
+    );
+  }, [event.segments]);
   
   // Show reasoning automatically while streaming, or manually when user toggles
-  const shouldShowReasoning = isReasoningStreaming || showReasoning;
+  // Priority: manual toggle > auto-collapse logic
+  const shouldShowReasoning = isReasoningStreaming || // Always show while streaming
+    showReasoning || // Always show when user manually toggles it
+    (hasReasoning && !hasOtherContent); // Auto-show if reasoning is the only content
+    
   
   
   

@@ -896,6 +896,21 @@ export class ChatEngine {
             parts: {}
           });
         }
+        
+        // Add streaming reasoning segment to event builder for immediate UI feedback
+        if (eventBuilder instanceof StreamingEventBuilder) {
+          eventBuilder.addReasoningSegment(
+            item_id,
+            output_index,
+            sequence_number,
+            [], // Empty parts initially
+            {
+              streaming: true // Mark as streaming for frontend
+            }
+          );
+          
+          // Note: Database will be updated when reasoning segment is finalized
+        }
       } else if (event.type === 'reasoning_complete') {
         // Complete reasoning segment - add to event builder and update database
         const { item_id, output_index, sequence_number, parts, combined_text } = event as { 
@@ -951,6 +966,114 @@ export class ChatEngine {
             reasoningData.parts[part.summary_index] = part;
           }
           reasoningData.combined_text = combined_text;
+        }
+      } else if (event.type === 'reasoning_summary_part_added') {
+        // Handle reasoning part being added during streaming
+        const { item_id, summary_index, part, output_index, sequence_number } = event as {
+          item_id: string;
+          summary_index: number;
+          part: { type: string; text: string };
+          output_index: number;
+          sequence_number: number;
+        };
+        
+        console.log('🧠 [CHATENGINE] ✅ REASONING PART ADDED:', { 
+          item_id, 
+          summary_index, 
+          part_text_length: part.text.length 
+        });
+        
+        // Update reasoning segment with new part
+        if (eventBuilder instanceof StreamingEventBuilder) {
+          // Get existing reasoning segment to update it
+          const currentSegments = eventBuilder.getSegments();
+          const reasoningSegment = currentSegments.find(s => 
+            s.type === 'reasoning' && s.id === item_id
+          );
+          
+          if (reasoningSegment && reasoningSegment.type === 'reasoning') {
+            // Add the new part
+            const newPart = {
+              summary_index,
+              type: part.type as 'summary_text',
+              text: part.text,
+              sequence_number,
+              is_complete: false,
+              created_at: Date.now()
+            };
+            
+            const updatedParts = [...reasoningSegment.parts, newPart];
+            
+            // Update the reasoning segment
+            eventBuilder.addReasoningSegment(
+              item_id,
+              output_index,
+              sequence_number,
+              updatedParts,
+              {
+                streaming: true // Still streaming
+              }
+            );
+            
+            // Note: Database will be updated when reasoning segment is finalized
+          }
+        }
+      } else if (event.type === 'reasoning_summary_text_delta') {
+        // Handle reasoning text streaming in real-time
+        const { item_id, delta, summary_index, output_index, sequence_number } = event as {
+          item_id: string;
+          delta: string;
+          summary_index: number;
+          output_index: number;
+          sequence_number: number;
+        };
+        
+        console.log('🧠 [CHATENGINE] ✅ REASONING TEXT DELTA:', { 
+          item_id, 
+          summary_index,
+          delta_length: delta.length 
+        });
+        
+        // Update reasoning segment with streaming text
+        if (eventBuilder instanceof StreamingEventBuilder) {
+          const currentSegments = eventBuilder.getSegments();
+          const reasoningSegment = currentSegments.find(s => 
+            s.type === 'reasoning' && s.id === item_id
+          );
+          
+          if (reasoningSegment && reasoningSegment.type === 'reasoning') {
+            // Find the part being updated and append delta text
+            const updatedParts = reasoningSegment.parts.map(part => 
+              part.summary_index === summary_index 
+                ? { ...part, text: part.text + delta }
+                : part
+            );
+            
+            // If part doesn't exist yet, create it
+            if (!updatedParts.some(p => p.summary_index === summary_index)) {
+              updatedParts.push({
+                summary_index,
+                type: 'summary_text' as const,
+                text: delta,
+                sequence_number,
+                is_complete: false,
+                created_at: Date.now()
+              });
+            }
+            
+            // Update the reasoning segment
+            eventBuilder.addReasoningSegment(
+              item_id,
+              output_index,
+              sequence_number,
+              updatedParts,
+              {
+                streaming: true // Still streaming
+              }
+            );
+            
+            // Note: Database will be updated when reasoning segment is finalized
+          }
         }
       } else if (event.type.includes('reasoning_summary')) {
         // Handle legacy reasoning events for backward compatibility

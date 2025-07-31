@@ -1,5 +1,5 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
-import { ReasoningData } from '@/lib/types/events';
+import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 
@@ -498,16 +498,15 @@ export class FrontendEventHandler {
     }
   }
 
-  private updateLocalStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
+  private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.localStateUpdater || !this.assistantPlaceholder) return;
-
 
     this.localStateUpdater(events => {
       return events.map(event => 
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
-              reasoning: reasoningData
+              segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
               // Don't update ts during reasoning streaming to prevent infinite re-renders
             }
           : event
@@ -515,7 +514,7 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateStoreStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
+  private updateStoreStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.conversationId || !this.storeInstance) return;
 
     const store = this.storeInstance.getState();
@@ -526,12 +525,11 @@ export class FrontendEventHandler {
     const streamingEventId = conversation.streamingEventId;
     if (!streamingEventId) return;
 
-
     const updatedEvents = conversation.events.map(event =>
       event.id === streamingEventId
         ? {
             ...event,
-            reasoning: reasoningData
+            segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
             // Don't update ts during reasoning streaming to prevent infinite re-renders
           }
         : event
@@ -541,6 +539,39 @@ export class FrontendEventHandler {
       ...conversation,
       events: updatedEvents
     });
+  }
+
+  /**
+   * Helper method to update reasoning segments in the segments array
+   */
+  private updateReasoningSegments(segments: Segment[], item_id: string, reasoningData: ReasoningData): Segment[] {
+    // Convert ReasoningData to reasoning segment format
+    const reasoningSegment = {
+      type: 'reasoning' as const,
+      id: item_id,
+      output_index: reasoningData.output_index,
+      sequence_number: 0, // Will be set by the backend when finalized
+      parts: Object.values(reasoningData.parts),
+      combined_text: reasoningData.combined_text,
+      effort_level: reasoningData.effort_level,
+      reasoning_tokens: reasoningData.reasoning_tokens,
+      streaming: reasoningData.streaming_part_index !== undefined
+    };
+
+    // Find existing reasoning segment with the same ID and update it, or add new one
+    const existingIndex = segments.findIndex(s => 
+      s.type === 'reasoning' && s.id === item_id
+    );
+
+    if (existingIndex >= 0) {
+      // Update existing reasoning segment
+      return segments.map((segment, index) => 
+        index === existingIndex ? reasoningSegment : segment
+      );
+    } else {
+      // Add new reasoning segment
+      return [...segments, reasoningSegment];
+    }
   }
 
   /**
