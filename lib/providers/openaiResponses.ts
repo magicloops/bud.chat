@@ -18,7 +18,23 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     console.log('🌐 [MCP-TRANSFORMER] RAW EVENT:', { 
       type: event.type, 
       keys: Object.keys(event),
-      event: event 
+      event: event,
+      // Deep inspection of item structure for reasoning items (both added and done)
+      ...((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') && (event as any).item?.type === 'reasoning' ? {
+        reasoning_item_deep_inspect: {
+          event_type: event.type,
+          all_item_keys: Object.keys((event as any).item || {}),
+          has_content: !!((event as any).item?.content),
+          content_type: typeof (event as any).item?.content,
+          content_length: Array.isArray((event as any).item?.content) ? (event as any).item?.content.length : 'not_array',
+          content_preview: (event as any).item?.content,
+          has_summary: !!((event as any).item?.summary),
+          summary_type: typeof (event as any).item?.summary,
+          summary_length: Array.isArray((event as any).item?.summary) ? (event as any).item?.summary.length : 'not_array',
+          summary_preview: (event as any).item?.summary,
+          raw_item_json: JSON.stringify((event as any).item, null, 2)
+        }
+      } : {})
     });
   }
   
@@ -179,12 +195,19 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tools: (item as { tools?: unknown[] }).tools || []
         };
       } else if (item?.type === 'reasoning') {
+        const summaryData = Array.isArray(item.summary) ? item.summary : [];
         console.log('🧠 [MCP-TRANSFORMER] ✅ REASONING ITEM STARTED:', { 
           item_id: item.id,
           output_index: event.output_index,
           sequence_number: event.sequence_number,
           has_summary: !!item.summary,
-          summary_length: Array.isArray(item.summary) ? item.summary.length : 0
+          summary_length: summaryData.length,
+          summary_preview: summaryData.slice(0, 2).map(part => ({
+            summary_index: part?.summary_index,
+            type: part?.type,
+            has_text: !!part?.text,
+            text_length: part?.text?.length || 0
+          }))
         });
         return {
           type: 'reasoning_start',

@@ -30,7 +30,10 @@ export class ReasoningEventLogger {
       'reasoning_summary_text_delta',
       'reasoning_summary_text_done',
       'reasoning_summary_delta',
-      'reasoning_summary_done'
+      'reasoning_summary_done',
+      // Unified segments reasoning events
+      'reasoning_start',
+      'reasoning_complete'
     ];
     
     if (!knownTypes.includes(eventData.type || '')) {

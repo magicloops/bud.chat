@@ -43,6 +43,7 @@ export interface ReasoningPart {
 export interface ReasoningData {
   item_id: string;
   output_index: number;
+  sequence_number?: number; // Sequence ordering from OpenAI Responses API
   
   // Parts are indexed and can stream independently
   parts: Record<number, ReasoningPart>; // Keyed by summary_index

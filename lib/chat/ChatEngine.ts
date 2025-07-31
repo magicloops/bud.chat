@@ -977,11 +977,6 @@ export class ChatEngine {
           sequence_number: number;
         };
         
-        console.log('🧠 [CHATENGINE] ✅ REASONING PART ADDED:', { 
-          item_id, 
-          summary_index, 
-          part_text_length: part.text.length 
-        });
         
         // Update reasoning segment with new part
         if (eventBuilder instanceof StreamingEventBuilder) {

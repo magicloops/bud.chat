@@ -66,8 +66,8 @@ export function ToolCallSegment({
     setIsExpanded(!isExpanded);
   };
 
-  // Show loading animation if streaming and no result yet
-  const showLoadingAnimation = !hasResult && isStreaming;
+  // Show loading animation if no result yet (same logic as original EventItem)
+  const showLoadingAnimation = !hasResult;
 
   return (
     <div 
@@ -86,13 +86,6 @@ export function ToolCallSegment({
           {segment.server_label && (
             <span className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded">
               {segment.server_label}
-            </span>
-          )}
-          
-          {/* Sequence number for debugging */}
-          {segment.sequence_number && (
-            <span className="text-xs text-muted-foreground">
-              #{segment.sequence_number}
             </span>
           )}
           

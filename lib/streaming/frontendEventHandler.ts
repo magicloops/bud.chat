@@ -166,6 +166,12 @@ export class FrontendEventHandler {
       case 'reasoning_summary_done':
         await this.handleReasoningSummaryDone(data);
         break;
+      case 'reasoning_complete':
+        await this.handleReasoningComplete(data);
+        break;
+      case 'reasoning_start':
+        await this.handleReasoningStart(data);
+        break;
       // MCP event handlers
       case 'mcp_tool_start':
         await this.handleMCPToolStartEvent(data);
@@ -259,12 +265,6 @@ export class FrontendEventHandler {
    * Handle MCP tool start events
    */
   private async handleMCPToolStartEvent(data: StreamEvent): Promise<void> {
-    console.log('🌐 [FRONTEND-HANDLER] ✅ MCP TOOL START EVENT RECEIVED:', { 
-      tool_id: data.tool_id, 
-      tool_name: data.tool_name, 
-      server_label: data.server_label,
-      isLocalState: this.isLocalState()
-    });
     if (this.isLocalState()) {
       this.updateLocalStateMCPToolStart(data);
     } else {
@@ -355,6 +355,7 @@ export class FrontendEventHandler {
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
     
+    
     if (!item_id || !part || summary_index === undefined) return;
     
     // Initialize or get existing reasoning data
@@ -363,6 +364,7 @@ export class FrontendEventHandler {
       reasoningData = {
         item_id,
         output_index: output_index || 0,
+        sequence_number: sequence_number,
         parts: {}
       };
       this.currentReasoningData.set(item_id, reasoningData);
@@ -476,6 +478,94 @@ export class FrontendEventHandler {
     this.currentReasoningData.delete(item_id);
   }
 
+  private async handleReasoningComplete(data: StreamEvent): Promise<void> {
+    const { item_id, parts, combined_text, output_index, sequence_number } = data as {
+      item_id: string;
+      parts?: Array<{
+        summary_index: number;
+        type: 'summary_text';
+        text: string;
+        sequence_number: number;
+        is_complete: boolean;
+        created_at: number;
+      }>;
+      combined_text?: string;
+      output_index?: number;
+      sequence_number?: number;
+    };
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    let reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) {
+      // Create new reasoning data if it doesn't exist
+      reasoningData = {
+        item_id,
+        output_index: output_index || 0,
+        sequence_number: sequence_number,
+        parts: {}
+      };
+      this.currentReasoningData.set(item_id, reasoningData);
+    }
+    
+    // Update with final parts if provided
+    if (parts && parts.length > 0) {
+      for (const part of parts) {
+        reasoningData.parts[part.summary_index] = part;
+      }
+    }
+    
+    // Set the final combined text
+    reasoningData.combined_text = combined_text || Object.values(reasoningData.parts)
+      .sort((a, b) => a.summary_index - b.summary_index)
+      .map(part => part.text)
+      .join('\n');
+    
+    // Clear streaming state
+    reasoningData.streaming_part_index = undefined;
+    
+    // Mark all parts as complete
+    Object.values(reasoningData.parts).forEach(part => {
+      part.is_complete = true;
+    });
+    
+    // Update UI state - reasoning is now complete
+    this.updateReasoningInState(item_id, reasoningData, true);
+    
+    // Clean up after completion
+    this.currentReasoningData.delete(item_id);
+  }
+
+  private async handleReasoningStart(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data as {
+      item_id: string;
+      output_index?: number;
+      sequence_number?: number;
+    };
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    // Initialize reasoning data for this item
+    const reasoningData: ReasoningData = {
+      item_id,
+      output_index: output_index || 0,
+      sequence_number: sequence_number,
+      parts: {},
+      streaming_part_index: 0 // Mark as streaming
+    };
+    
+    this.currentReasoningData.set(item_id, reasoningData);
+    
+    // Update UI state to show empty reasoning segment that will be populated
+    this.updateReasoningInState(item_id, reasoningData);
+  }
+
   // Helper method for logging reasoning events that don't need special handling
   private async logReasoningEvent(data: StreamEvent): Promise<void> {
     const { item_id } = data;
@@ -550,7 +640,7 @@ export class FrontendEventHandler {
       type: 'reasoning' as const,
       id: item_id,
       output_index: reasoningData.output_index,
-      sequence_number: 0, // Will be set by the backend when finalized
+      sequence_number: reasoningData.sequence_number || 0,
       parts: Object.values(reasoningData.parts),
       combined_text: reasoningData.combined_text,
       effort_level: reasoningData.effort_level,
@@ -703,12 +793,6 @@ export class FrontendEventHandler {
    */
 
   private updateLocalStateMCPToolStart(data: StreamEvent): void {
-    console.log('🌐 [FRONTEND-HANDLER] Updating local state for MCP tool start:', { 
-      tool_id: data.tool_id, 
-      tool_name: data.tool_name,
-      has_updater: !!this.localStateUpdater,
-      has_placeholder: !!this.assistantPlaceholder
-    });
     
     if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) {
       console.error('🚨 [FRONTEND-HANDLER] Missing required data for MCP tool start update:', {
@@ -721,10 +805,6 @@ export class FrontendEventHandler {
     }
 
     this.localStateUpdater(events => {
-      console.log('🌐 [FRONTEND-HANDLER] Adding MCP tool call segment to event:', {
-        placeholder_id: this.assistantPlaceholder!.id,
-        current_segments: events.find(e => e.id === this.assistantPlaceholder!.id)?.segments.length
-      });
       return events.map(event => 
         event.id === this.assistantPlaceholder!.id
           ? {
@@ -745,7 +825,6 @@ export class FrontendEventHandler {
           : event
       );
     });
-    console.log('🌐 [FRONTEND-HANDLER] ✅ MCP tool call segment added to local state');
   }
 
   private updateLocalStateMCPToolFinalized(data: StreamEvent): void {

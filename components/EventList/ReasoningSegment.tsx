@@ -47,6 +47,10 @@ export function ReasoningSegment({
   const reasoningContent = segment.combined_text || 
     segment.parts.map(part => part.text).join('\n');
   
+  // Check if we have any content (either combined_text or parts with text)
+  const hasAnyContent = !!segment.combined_text || 
+    segment.parts.some(part => part.text && part.text.trim());
+  
   // Check if reasoning is complete
   const isReasoningComplete = !segment.streaming && (
     !!segment.combined_text ||
@@ -59,11 +63,11 @@ export function ReasoningSegment({
   // Auto-show reasoning while streaming, otherwise user controls visibility
   const shouldShowReasoning = isReasoningStreaming || isExpanded;
   
-  // Don't render if no content
-  if (!reasoningContent.trim() && !isReasoningStreaming) {
+  // Don't render if no content and not streaming (allow empty segments during streaming)
+  if (!hasAnyContent && !isReasoningStreaming) {
     return null;
   }
-  
+
   return (
     <div 
       className={cn('reasoning-segment mb-3', className)}
@@ -101,20 +105,15 @@ export function ReasoningSegment({
                 {segment.effort_level} effort
               </Badge>
             )}
-            {segment.sequence_number && (
-              <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
-                #{segment.sequence_number}
-              </Badge>
-            )}
           </div>
           
           <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-            {reasoningContent && (
+            {reasoningContent && reasoningContent.trim() && (
               <MarkdownRenderer content={reasoningContent} />
             )}
             
             {/* Show individual parts during streaming if no combined content yet */}
-            {!reasoningContent && segment.parts.length > 0 && (
+            {(!reasoningContent || !reasoningContent.trim()) && segment.parts.length > 0 && (
               <div className="reasoning-parts space-y-2">
                 {segment.parts
                   .sort((a, b) => a.summary_index - b.summary_index)
