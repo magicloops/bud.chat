@@ -1,5 +1,7 @@
 // Core event types for vendor-agnostic message schema
 
+import { ProgressState } from '@/lib/types/progress';
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
@@ -81,6 +83,9 @@ export interface Event {
   
   // Response-level metadata (for Responses API)
   response_metadata?: ResponseMetadata;
+  
+  // Progress state (client-side only, not persisted)
+  progressState?: ProgressState;
   
   // Legacy reasoning field - will be deprecated after migration
   reasoning?: ReasoningData; // Optional reasoning data for o-series models

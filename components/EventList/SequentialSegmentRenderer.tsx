@@ -4,7 +4,9 @@ import React from 'react';
 import { ReasoningSegment } from './ReasoningSegment';
 import { ToolCallSegment } from './ToolCallSegment';
 import { TextSegment } from './TextSegment';
-import { Event, Segment } from '@/state/eventChatStore';
+import { ProgressIndicator } from './ProgressIndicator';
+import { Event } from '@/state/eventChatStore';
+import { Segment } from '@/lib/types/events';
 
 interface SequentialSegmentRendererProps {
   event: Event;
@@ -84,9 +86,23 @@ export function SequentialSegmentRenderer({
     }
   };
 
+  // Check if progress indicator should be shown
+  const progressState = event.progressState;
+  const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
+  const hasContent = sortedSegments.length > 0;
+
   return (
     <div className={className}>
       {sortedSegments.map(renderSegment)}
+      
+      {/* Show progress indicator at the bottom of content (or top if no content) */}
+      {shouldShowProgress && (
+        <ProgressIndicator
+          currentActivity={progressState.currentActivity}
+          hasContent={hasContent}
+          serverLabel={progressState.serverLabel}
+        />
+      )}
     </div>
   );
 }

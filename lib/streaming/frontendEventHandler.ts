@@ -2,6 +2,7 @@ import { Event, useEventChatStore } from '@/state/eventChatStore';
 import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
+import { ProgressState, ActivityType, getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress';
 
 export interface StreamEvent {
   type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
@@ -14,6 +15,8 @@ export interface StreamEvent {
     | 'reasoning_summary_delta' | 'reasoning_summary_done'
     // Unified segments reasoning events
     | 'reasoning_start' | 'reasoning_complete'
+    // Progress events
+    | 'progress_update' | 'progress_hide'
     // Internal-only event types
     | 'finalize_only';
   
@@ -55,6 +58,11 @@ export interface StreamEvent {
     created_at: number;
   }>;
   combined_text?: string;
+  
+  // Progress fields
+  activity?: ActivityType;
+  server_label?: string;
+  hideProgress?: boolean;
 }
 
 export interface LocalStateUpdater {
@@ -76,6 +84,12 @@ export class FrontendEventHandler {
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
+  
+  // Progress state management
+  private progressState: ProgressState = {
+    currentActivity: null,
+    isVisible: false
+  };
 
   /**
    * Set local state updater for optimistic flows
@@ -133,6 +147,10 @@ export class FrontendEventHandler {
     switch (data.type) {
       case 'token':
         await this.handleTokenEvent(data);
+        // Hide progress when text content starts
+        if (data.hideProgress) {
+          this.updateProgressState(null, false);
+        }
         break;
       case 'tool_start':
         await this.handleToolStartEvent(data);
@@ -196,6 +214,12 @@ export class FrontendEventHandler {
         break;
       case 'error':
         await this.handleErrorEvent(data);
+        break;
+      case 'progress_update':
+        await this.handleProgressUpdate(data);
+        break;
+      case 'progress_hide':
+        await this.handleProgressHide(data);
         break;
     }
   }
@@ -973,5 +997,86 @@ export class FrontendEventHandler {
       streamingEventId: undefined,
       shouldCreateNewEvent: false
     });
+  }
+
+  /**
+   * PROGRESS STATE MANAGEMENT
+   */
+  
+  private async handleProgressUpdate(data: StreamEvent): Promise<void> {
+    if (data.activity) {
+      this.updateProgressState(data.activity, true, data.server_label);
+    }
+  }
+
+  private async handleProgressHide(data: StreamEvent): Promise<void> {
+    this.updateProgressState(null, false);
+  }
+
+  private updateProgressState(activity: ActivityType | null, isVisible: boolean, serverLabel?: string): void {
+    this.progressState = {
+      currentActivity: activity,
+      serverLabel: serverLabel,
+      isVisible: isVisible,
+      startTime: activity ? Date.now() : undefined
+    };
+
+    // Update UI state based on current mode
+    if (this.isLocalState()) {
+      this.updateLocalStateProgress();
+    } else {
+      this.updateStoreStateProgress();
+    }
+  }
+
+  private updateLocalStateProgress(): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              progressState: { ...this.progressState }
+            }
+          : event
+      );
+    });
+  }
+
+  private updateStoreStateProgress(): void {
+    if (!this.storeInstance || !this.conversationId) return;
+
+    // Update the current event with progress state
+    const state = this.storeInstance.getState();
+    const conversation = state.conversations[this.conversationId];
+    if (!conversation || conversation.events.length === 0) return;
+
+    // Find the last assistant event
+    const lastAssistantEvent = conversation.events
+      .slice()
+      .reverse()
+      .find(event => event.role === 'assistant');
+
+    if (lastAssistantEvent) {
+      this.storeInstance.getState().updateEvent({
+        ...lastAssistantEvent,
+        progressState: { ...this.progressState }
+      });
+    }
+  }
+
+  /**
+   * Get current progress state
+   */
+  getProgressState(): ProgressState {
+    return { ...this.progressState };
+  }
+
+  /**
+   * Check if we're using local state
+   */
+  private isLocalState(): boolean {
+    return !!this.localStateUpdater && !!this.assistantPlaceholder;
   }
 }

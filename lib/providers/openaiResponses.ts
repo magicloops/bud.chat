@@ -7,14 +7,14 @@ import OpenAI from 'openai';
 /**
  * Transform OpenAI Responses API reasoning events to our internal format
  */
-export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent | null {
+export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent | StreamEvent[] | null {
   if (!openaiEvent || typeof openaiEvent !== 'object') return null;
   
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
-  // Log ALL events to see what we're actually receiving
-  if (event.type.includes('mcp') || event.type.includes('output_item')) {
+  // Log ALL events to see what we're actually receiving (including lifecycle events for progress)
+  if (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.')) {
     console.log('🌐 [MCP-TRANSFORMER] RAW EVENT:', { 
       type: event.type, 
       keys: Object.keys(event),
@@ -41,6 +41,36 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   
 
   switch (event.type) {
+    // Lifecycle events for progress indication
+    case 'response.created':
+      return {
+        type: 'progress_update',
+        activity: 'response_starting',
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.in_progress':
+      return {
+        type: 'progress_update',
+        activity: 'thinking',
+        sequence_number: event.sequence_number as number
+      };
+
+    // MCP progress events
+    case 'response.mcp_list_tools.in_progress':
+      return {
+        type: 'progress_update',
+        activity: 'mcp_tool_listing',
+        server_label: (event as any).server_label,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.mcp_list_tools.completed':
+      return {
+        type: 'progress_hide',
+        sequence_number: event.sequence_number as number
+      };
+
     case 'response.reasoning_summary_part.added':
       return {
         type: 'reasoning_summary_part_added',
@@ -100,11 +130,13 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         sequence_number: event.sequence_number as number
       };
 
-    // Handle text output events
+    // Handle text output events - hide progress when text starts
     case 'response.output_text.delta':
       return {
         type: 'token',
-        content: event.delta as string
+        content: event.delta as string,
+        // Include progress hiding metadata
+        hideProgress: true
       };
 
     case 'response.output_text.done':
@@ -427,11 +459,19 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tools_count: Array.isArray(doneItem.tools) ? doneItem.tools.length : 0,
           tools: doneItem.tools
         });
-        return {
-          type: 'mcp_list_tools',
-          server_label: doneItem.server_label as string || 'unknown_server',
-          tools: doneItem.tools as unknown[]
-        };
+        
+        // Return both mcp_list_tools event and progress_hide
+        return [
+          {
+            type: 'mcp_list_tools',
+            server_label: doneItem.server_label as string || 'unknown_server',
+            tools: doneItem.tools as unknown[]
+          },
+          {
+            type: 'progress_hide',
+            sequence_number: event.sequence_number as number
+          }
+        ];
       } else if (doneItem?.type === 'reasoning' && doneItem.summary) {
         console.log('🧠 [MCP-TRANSFORMER] ✅ REASONING ITEM COMPLETED:', { 
           item_id: doneItem.id,
@@ -547,7 +587,14 @@ export async function* processResponsesAPIStream(
       try {
         const transformedEvent = transformOpenAIReasoningEvent(event);
         if (transformedEvent) {
-          yield transformedEvent;
+          // Handle both single events and arrays of events
+          if (Array.isArray(transformedEvent)) {
+            for (const singleEvent of transformedEvent) {
+              yield singleEvent;
+            }
+          } else {
+            yield transformedEvent;
+          }
         }
       } catch (eventError) {
         console.error('Error transforming individual event:', eventError, 'Event:', event);
