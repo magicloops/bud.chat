@@ -13,29 +13,73 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   const event = openaiEvent as Record<string, unknown>;
   if (!event.type || typeof event.type !== 'string') return null;
   
-  // Log ALL events to see what we're actually receiving (including lifecycle events for progress)
-  if (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.')) {
-    console.log('🌐 [MCP-TRANSFORMER] RAW EVENT:', { 
+  // Create a list of event types we already handle
+  const handledEventTypes = new Set([
+    // Lifecycle events
+    'response.created',
+    'response.in_progress',
+    'response.completed',
+    'response.content_part.added',
+    'response.content_part.done',
+    
+    // Text output events
+    'response.output_text.delta',
+    'response.output_text.done',
+    
+    // Output item events
+    'response.output_item.added',
+    'response.output_item.done',
+    
+    // Function call events
+    'response.function_call_arguments.delta',
+    'response.function_call_arguments.done',
+    'response.function_call.start',
+    'response.function_call.arguments.delta',
+    'response.function_call.done',
+    
+    // MCP events
+    'response.mcp_list_tools',
+    'response.mcp_list_tools.in_progress',
+    'response.mcp_list_tools.completed',
+    'response.mcp_list_tools.failed',
+    'response.mcp_call_arguments.delta',
+    'response.mcp_call_arguments.done',
+    'response.mcp_call.in_progress',
+    'response.mcp_call.completed',
+    'response.mcp_call.failed',
+    'response.mcp_approval_request',
+    
+    // Reasoning events
+    'response.reasoning_summary_part.added',
+    'response.reasoning_summary_part.done',
+    'response.reasoning_summary_text.delta',
+    'response.reasoning_summary_text.done',
+    'response.reasoning_summary.delta',
+    'response.reasoning_summary.done'
+  ]);
+  
+  // Only log events we're not already handling
+  const isHandled = handledEventTypes.has(event.type);
+  if (!isHandled && (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.'))) {
+    console.log('🚨 [MCP-TRANSFORMER] UNHANDLED RAW EVENT:', { 
       type: event.type, 
       keys: Object.keys(event),
-      event: event,
-      // Deep inspection of item structure for reasoning items (both added and done)
-      ...((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') && (event as any).item?.type === 'reasoning' ? {
-        reasoning_item_deep_inspect: {
-          event_type: event.type,
-          all_item_keys: Object.keys((event as any).item || {}),
-          has_content: !!((event as any).item?.content),
-          content_type: typeof (event as any).item?.content,
-          content_length: Array.isArray((event as any).item?.content) ? (event as any).item?.content.length : 'not_array',
-          content_preview: (event as any).item?.content,
-          has_summary: !!((event as any).item?.summary),
-          summary_type: typeof (event as any).item?.summary,
-          summary_length: Array.isArray((event as any).item?.summary) ? (event as any).item?.summary.length : 'not_array',
-          summary_preview: (event as any).item?.summary,
-          raw_item_json: JSON.stringify((event as any).item, null, 2)
-        }
-      } : {})
+      event: event
     });
+  }
+  
+  // Special detailed logging for reasoning items (only when we need to debug)
+  if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') && (event as any).item?.type === 'reasoning') {
+    // Only log reasoning items if they have unexpected structure (for debugging)
+    const item = (event as any).item;
+    const hasUnexpectedStructure = !item.summary && !item.content;
+    if (hasUnexpectedStructure) {
+      console.log('🧠 [MCP-TRANSFORMER] UNEXPECTED REASONING STRUCTURE:', {
+        event_type: event.type,
+        all_item_keys: Object.keys(item || {}),
+        raw_item_json: JSON.stringify(item, null, 2)
+      });
+    }
   }
   
   
@@ -150,16 +194,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         type: 'finalize_only' // Finalize event but don't send complete to frontend yet
       };
 
-    // Handle response lifecycle events (informational only)
-    case 'response.created':
-    case 'response.in_progress':
-      console.log('🌐 [MCP-TRANSFORMER] LIFECYCLE EVENT:', { 
-        type: event.type,
-        keys: Object.keys(event),
-        event: event
-      });
-      // These are lifecycle events, don't transform them
-      return null;
+    // Note: response.created and response.in_progress are handled earlier in the switch
 
     // Handle regular content events (text, tool calls, etc.) - legacy format
     case 'response.content_part.added':
@@ -269,10 +304,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     // Handle MCP call events - remote MCP tools
     case 'response.mcp_call_arguments.delta':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call_arguments.delta:', { 
-        item_id: event.item_id, 
-        delta_length: (event.delta as string)?.length 
-      });
       return {
         type: 'mcp_tool_arguments_delta',
         tool_id: event.item_id as string,
@@ -280,10 +311,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       };
 
     case 'response.mcp_call_arguments.done':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call_arguments.done:', { 
-        item_id: event.item_id, 
-        args_length: (event.arguments as string)?.length 
-      });
       return {
         type: 'mcp_tool_finalized',
         tool_id: event.item_id as string,
@@ -304,10 +331,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       };
 
     case 'response.mcp_list_tools.in_progress':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.in_progress:', { 
-        item_id: event.item_id, 
-        output_index: event.output_index 
-      });
       // MCP tool listing is in progress - this is informational
       return null;
 
@@ -334,27 +357,15 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return null;
 
     case 'response.mcp_list_tools.failed':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.failed:', { 
-        item_id: event.item_id, 
-        output_index: event.output_index 
-      });
       // MCP tool listing failed - this is informational
       return null;
 
     case 'response.mcp_call.in_progress':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call.in_progress - SKIPPING (tool start handled by output_item.added):', { 
-        item_id: event.item_id, 
-        output_index: event.output_index 
-      });
       // Skip this event - MCP tool start data comes through output_item.added events with real tool names
       // Processing both creates duplicate tool call events with different names
       return null;
 
     case 'response.mcp_call.completed':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call.completed - SKIPPING (output handled by output_item.done):', { 
-        item_id: event.item_id, 
-        output_index: event.output_index
-      });
       // Skip this event - MCP tool outputs come through output_item.done events
       // Processing both creates duplicate tool result events
       return null;

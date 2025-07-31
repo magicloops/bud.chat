@@ -81,7 +81,7 @@ export function SequentialSegmentRenderer({
         
       default:
         // Handle any unknown segment types gracefully
-        console.warn('Unknown segment type:', (segment as any).type);
+        console.warn('Unknown segment type:', (segment as unknown as { type: string }).type);
         return null;
     }
   };

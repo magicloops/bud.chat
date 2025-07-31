@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import MarkdownRenderer from '@/components/markdown-renderer';
@@ -43,6 +43,20 @@ export function ReasoningSegment({
 }: ReasoningSegmentProps) {
   const [isExpanded, setIsExpanded] = useState(autoExpanded || isStreaming);
   
+  // Auto-collapse reasoning when streaming finishes
+  useEffect(() => {
+    const isCurrentlyStreaming = segment.streaming || isStreaming;
+    
+    // If reasoning was streaming but now it's not, auto-collapse it
+    if (!isCurrentlyStreaming && isExpanded && (autoExpanded || segment.streaming !== undefined)) {
+      const timer = setTimeout(() => {
+        setIsExpanded(false);
+      }, 500); // Small delay to allow users to see the completion
+      
+      return () => clearTimeout(timer);
+    }
+  }, [segment.streaming, isStreaming, autoExpanded, isExpanded]);
+  
   // Get reasoning content from segment
   const reasoningContent = segment.combined_text || 
     segment.parts.map(part => part.text).join('\n');
@@ -51,11 +65,11 @@ export function ReasoningSegment({
   const hasAnyContent = !!segment.combined_text || 
     segment.parts.some(part => part.text && part.text.trim());
   
-  // Check if reasoning is complete
-  const isReasoningComplete = !segment.streaming && (
-    !!segment.combined_text ||
-    segment.parts.every(part => part.is_complete)
-  );
+  // Check if reasoning is complete (currently unused but kept for potential future use)
+  // const isReasoningComplete = !segment.streaming && (
+  //   !!segment.combined_text ||
+  //   segment.parts.every(part => part.is_complete)
+  // );
   
   // Determine if this reasoning segment is currently streaming
   const isReasoningStreaming = segment.streaming || isStreaming;
