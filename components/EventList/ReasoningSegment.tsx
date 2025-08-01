@@ -42,20 +42,25 @@ export function ReasoningSegment({
   className 
 }: ReasoningSegmentProps) {
   const [isExpanded, setIsExpanded] = useState(autoExpanded || isStreaming);
+  const [wasManuallyToggled, setWasManuallyToggled] = useState(false);
   
   // Auto-collapse reasoning when streaming finishes
   useEffect(() => {
     const isCurrentlyStreaming = segment.streaming || isStreaming;
     
-    // If reasoning was streaming but now it's not, auto-collapse it
-    if (!isCurrentlyStreaming && isExpanded && (autoExpanded || segment.streaming !== undefined)) {
+    // Only auto-collapse if:
+    // 1. Not currently streaming
+    // 2. Is expanded 
+    // 3. Was auto-expanded OR had streaming property (indicating it was streaming)
+    // 4. Was NOT manually toggled by user
+    if (!isCurrentlyStreaming && isExpanded && (autoExpanded || segment.streaming !== undefined) && !wasManuallyToggled) {
       const timer = setTimeout(() => {
         setIsExpanded(false);
       }, 500); // Small delay to allow users to see the completion
       
       return () => clearTimeout(timer);
     }
-  }, [segment.streaming, isStreaming, autoExpanded, isExpanded]);
+  }, [segment.streaming, isStreaming, autoExpanded, isExpanded, wasManuallyToggled]);
   
   // Get reasoning content from segment
   const reasoningContent = segment.combined_text || 
@@ -93,7 +98,10 @@ export function ReasoningSegment({
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setIsExpanded(!isExpanded)}
+          onClick={() => {
+            setIsExpanded(!isExpanded);
+            setWasManuallyToggled(true);
+          }}
           className="reasoning-toggle text-xs px-2 py-1 h-auto"
         >
           <Brain className="h-3 w-3 mr-1" />
