@@ -71,7 +71,7 @@ export function ToolCallSegment({
 
   return (
     <div 
-      className={cn('tool-call-segment mb-2', className)}
+      className={cn('tool-call-segment mt-2 mb-2', className)}
       data-testid={`segment-tool-call-${segment.sequence_number || 'no-seq'}`}
       data-type="tool_call"
     >

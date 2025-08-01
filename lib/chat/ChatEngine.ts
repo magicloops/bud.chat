@@ -258,10 +258,11 @@ export class ChatEngine {
     
     while (iteration < maxIterations && shouldContinue) {
       iteration++;
-      console.log(`🔄 Conversation iteration ${iteration}`);
+      console.log(`🔄 Conversation iteration ${iteration} (maxIterations: ${maxIterations}, shouldContinue: ${shouldContinue})`);
       
       // Check if there are pending tool calls
       const pendingToolCalls = eventLog.getUnresolvedToolCalls();
+      console.log(`🔍 [CHATENGINE] Iteration ${iteration} - Found ${pendingToolCalls.length} pending tool calls`);
       if (pendingToolCalls.length > 0) {
         
         // For OpenAI Responses API, tool calls are handled by OpenAI - skip our execution
@@ -377,7 +378,7 @@ export class ChatEngine {
         eventFinalized = true; // OpenAI Responses handles finalization internally
       }
       
-      // Check if we have tool calls to execute in the final event
+      // Check if we have tool calls to execute in the final event (the response we just got)
       const finalEvent = eventLog.getLastEvent();
       const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
       
@@ -410,14 +411,15 @@ export class ChatEngine {
       if (toolCallSegments.length > 0) {
         console.log('🔄 [CHATENGINE] Tool calls found - will execute and continue to next iteration');
         // Continue the loop to execute tools in the next iteration
-        // Don't reset eventBuilder here - we need to execute tools first
-        continue; // Skip the reset logic and go straight to tool execution
+        continue; // Go to next iteration to handle tool execution
       } else {
         // No tool calls in the final event - this means we got the final text response
         console.log('✅ [CHATENGINE] No tool calls in final event - this is the final response, conversation complete');
         shouldContinue = false;
       }
     }
+    
+    console.log(`🔚 [CHATENGINE] Conversation loop ended - iteration: ${iteration}, maxIterations: ${maxIterations}, shouldContinue: ${shouldContinue}`);
     
     // Create conversation in background (only if not an existing conversation)
     if (!conversationId && this.config.conversationCreator) {
@@ -521,9 +523,17 @@ export class ChatEngine {
               // Text block started - builder is ready
             } else if (event.content_block?.type === 'tool_use') {
               // Tool use block started
+              console.log('🔧 [ANTHROPIC DEBUG] Tool use block started:', {
+                raw_event: JSON.stringify(event, null, 2),
+                tool_id: event.content_block.id,
+                tool_name: event.content_block.name,
+                tool_input: event.content_block.input,
+                content_block_full: event.content_block
+              });
+              
               if (event.content_block.id && event.content_block.name) {
-                // Start streaming tool call using legacy compatibility method
-                eventBuilder.startToolCall(event.content_block.id, event.content_block.name);
+                // Start streaming tool call using legacy compatibility method with correct index
+                eventBuilder.startToolCallWithIndex(event.content_block.id, event.content_block.name, event.index);
                 
                 // Stream tool call start event
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -548,7 +558,20 @@ export class ChatEngine {
               })}\n\n`));
             } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
               // Handle tool call argument accumulation
+              console.log('🔧 [ANTHROPIC DEBUG] Tool arguments delta:', {
+                raw_event: JSON.stringify(event, null, 2),
+                index: event.index,
+                partial_json: event.delta.partial_json,
+                delta_full: event.delta
+              });
+              
               const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+              console.log('🔧 [ANTHROPIC DEBUG] Tool call ID resolution:', {
+                index: event.index,
+                resolved_tool_call_id: toolCallId,
+                pending_tool_calls: eventBuilder.getPendingToolCalls()
+              });
+              
               if (toolCallId && event.delta.partial_json) {
                 eventBuilder.addToolCallArguments(toolCallId, event.delta.partial_json);
               }
@@ -557,10 +580,26 @@ export class ChatEngine {
             
           case 'content_block_stop':
             // Complete any streaming tool calls
+            console.log('🔧 [ANTHROPIC DEBUG] Content block stop:', {
+              raw_event: JSON.stringify(event, null, 2),
+              index: event.index,
+              pending_tool_calls_before: eventBuilder.getPendingToolCalls()
+            });
+            
             if (event.index !== undefined) {
               const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+              console.log('🔧 [ANTHROPIC DEBUG] Completing tool call:', {
+                index: event.index,
+                tool_call_id: toolCallId,
+                pending_before_completion: eventBuilder.getPendingToolCalls()
+              });
+              
               if (toolCallId) {
                 eventBuilder.completeToolCall(toolCallId);
+                console.log('🔧 [ANTHROPIC DEBUG] Tool call completed:', {
+                  tool_call_id: toolCallId,
+                  pending_after_completion: eventBuilder.getPendingToolCalls()
+                });
               }
             }
             break;
@@ -577,7 +616,27 @@ export class ChatEngine {
             
             // Stream finalized tool calls with complete arguments
             const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call');
+            console.log('🔧 [ANTHROPIC DEBUG] Final tool calls in segments:', {
+              tool_call_count: toolCallSegments.length,
+              tool_calls: toolCallSegments.map(tc => ({
+                id: tc.id,
+                name: tc.name,
+                args: tc.args,
+                args_type: typeof tc.args,
+                args_json: JSON.stringify(tc.args),
+                args_keys: Object.keys(tc.args || {}),
+                args_empty: Object.keys(tc.args || {}).length === 0
+              }))
+            });
+            
             for (const toolCall of toolCallSegments) {
+              console.log('🔧 [ANTHROPIC DEBUG] Streaming finalized tool call:', {
+                tool_id: toolCall.id,
+                tool_name: toolCall.name,
+                args: toolCall.args,
+                args_stringified: JSON.stringify(toolCall.args)
+              });
+              
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'tool_finalized',
                 tool_id: toolCall.id,

@@ -362,6 +362,29 @@ export class StreamingEventBuilder {
   }
   
   /**
+   * Start a tool call with explicit index (Anthropic compatibility)
+   * Used for Anthropic streaming where content block index matters
+   */
+  startToolCallWithIndex(id: string, name: string, index: number): void {
+    // Store with the actual Anthropic content block index
+    this.pendingToolCalls.set(id, { id, name, args: '', index });
+    
+    // Add a placeholder tool call segment to show the tool is starting
+    // This will be replaced when the tool call is completed
+    const placeholderSegment: Segment = {
+      type: 'tool_call',
+      id,
+      name,
+      args: {}, // Empty args initially
+      // Add visual indicator that this is still building
+      display_name: `${name} (building...)`
+    };
+    
+    this.event.segments.push(placeholderSegment);
+    this.triggerUpdate();
+  }
+  
+  /**
    * Add arguments to a pending tool call (legacy compatibility)
    * Used by ChatStreamHandler for streaming tool call arguments
    */
@@ -448,9 +471,19 @@ export class StreamingEventBuilder {
    * Used by ChatStreamHandler to map streaming events to tool calls
    */
   getToolCallIdAtIndex(index: number): string | null {
+    console.log('🔍 [EventBuilder] getToolCallIdAtIndex lookup:', {
+      requested_index: index,
+      pending_tool_calls: Array.from(this.pendingToolCalls.entries()).map(([id, pending]) => ({
+        id,
+        stored_index: pending.index,
+        name: pending.name
+      }))
+    });
+    
     // First check pending tool calls by index
     for (const [id, pending] of this.pendingToolCalls) {
       if (pending.index === index) {
+        console.log('🔍 [EventBuilder] Found tool call by index:', { index, id, name: pending.name });
         return id;
       }
     }
@@ -460,7 +493,10 @@ export class StreamingEventBuilder {
       .filter(s => s.type === 'tool_call')
       .map(s => s as Extract<Segment, { type: 'tool_call' }>);
     
-    return toolCallSegments[index]?.id || null;
+    const fallbackId = toolCallSegments[index]?.id || null;
+    console.log('🔍 [EventBuilder] Fallback lookup result:', { index, fallbackId });
+    
+    return fallbackId;
   }
   
   /**
