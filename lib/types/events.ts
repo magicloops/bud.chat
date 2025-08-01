@@ -311,7 +311,37 @@ export class EventLog {
   private toOpenAIMessages(): unknown[] {
     const messages: unknown[] = [];
     
-    for (const event of this.events) {
+    console.log('🔍 Converting events to OpenAI messages. Total events:', this.events.length);
+    
+    // Deduplicate events by ID to prevent duplicate assistant messages
+    const seenEventIds = new Set<string>();
+    const deduplicatedEvents = this.events.filter(event => {
+      if (seenEventIds.has(event.id)) {
+        console.warn('🚨 Duplicate event detected and filtered out:', {
+          id: event.id,
+          role: event.role,
+          segmentTypes: event.segments.map(s => s.type)
+        });
+        return false;
+      }
+      seenEventIds.add(event.id);
+      return true;
+    });
+    
+    console.log('🔍 After deduplication:', deduplicatedEvents.length, 'events (removed', this.events.length - deduplicatedEvents.length, 'duplicates)');
+    
+    for (let i = 0; i < deduplicatedEvents.length; i++) {
+      const event = deduplicatedEvents[i];
+      console.log(`🔍 Event ${i}:`, {
+        id: event.id,
+        role: event.role,
+        segmentCount: event.segments.length,
+        segmentTypes: event.segments.map(s => s.type),
+        toolCallIds: event.segments.filter(s => s.type === 'tool_call').map(s => s.id)
+      });
+    }
+    
+    for (const event of deduplicatedEvents) {
       if (event.role === 'tool') {
         // Tool results become separate tool messages in OpenAI
         for (const segment of event.segments) {
@@ -353,6 +383,12 @@ export class EventLog {
             // Tool results are handled as separate messages above
             break;
         }
+      }
+
+      // Skip assistant messages that have no content and no tool calls (placeholders)
+      if (event.role === 'assistant' && !content && tool_calls.length === 0) {
+        console.log('🔍 Skipping empty assistant placeholder event:', { id: event.id });
+        continue;
       }
 
       const message: Record<string, unknown> = {

@@ -1,9 +1,7 @@
 // Shared Chat Engine - consolidates common logic between chat routes
 // Handles provider detection, streaming, tool execution, and event management
 
-import { EventStreamBuilder } from '@/lib/streaming/eventBuilder';
 import { StreamingEventBuilder } from '@/lib/eventMessageHelpers';
-import { ChatStreamHandler } from '@/lib/streaming/chatStreamHandler';
 import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor';
 import { EventLog, createTextEvent, createToolResultEvent, Event, ReasoningPart } from '@/lib/types/events';
 import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
@@ -241,7 +239,8 @@ export class ChatEngine {
     eventLog.addEvent(placeholderAssistantEvent);
     console.log('🌐 [CHATENGINE] ✅ Created assistant event placeholder:', { 
       id: placeholderAssistantEvent.id, 
-      role: placeholderAssistantEvent.role 
+      role: placeholderAssistantEvent.role,
+      segments_count: placeholderAssistantEvent.segments.length
     });
     
     // Reasoning data collection for OpenAI Responses API
@@ -282,7 +281,12 @@ export class ChatEngine {
           console.log('🌐 [CHATENGINE] First iteration with pending tools - OpenAI will handle these during streaming');
         } else {
           // For regular OpenAI and Anthropic, we execute tools ourselves
-          console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls`);
+          console.log(`🔧 Executing ${pendingToolCalls.length} pending tool calls for provider: ${provider}`);
+          console.log('🔧 Pending tool calls details:', pendingToolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            argsType: typeof tc.args
+          })));
           
           // Execute all pending tool calls
           const toolResults = await this.executeMCPToolCalls(
@@ -291,10 +295,26 @@ export class ChatEngine {
             validatedRequest.budId
           );
           
+          console.log(`🔧 Tool execution completed. Got ${toolResults.length} results:`, toolResults.map(tr => ({
+            id: tr.id,
+            hasOutput: !!tr.output,
+            hasError: !!tr.error
+          })));
+          
           // Add tool results to event log
           for (const result of toolResults) {
+            console.log(`🔧 Creating tool result event for ${result.id}`);
             const toolResultEvent = createToolResultEvent(result.id, result.output);
+            console.log(`🔧 Created tool result event:`, {
+              id: toolResultEvent.id,
+              role: toolResultEvent.role,
+              segments: toolResultEvent.segments.map(s => ({
+                type: s.type,
+                id: s.type === 'tool_result' ? s.id : undefined
+              }))
+            });
             eventLog.addEvent(toolResultEvent);
+            console.log(`🔧 Added tool result event to event log`);
             
             // Save tool result if in individual mode
             if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
@@ -316,6 +336,20 @@ export class ChatEngine {
               content: result.error ? "❌ Tool failed" : "✅ Tool completed"
             })}\n\n`));
           }
+          
+          // Prepare fresh assistant event for the follow-up response
+          console.log('🔄 [CHATENGINE] Tool execution complete - preparing fresh assistant event for follow-up response');
+          eventBuilder.reset('assistant');
+          
+          // Add the new assistant event to the log since reset() creates a new event
+          const newAssistantEvent = eventBuilder.getCurrentEvent();
+          eventLog.addEvent(newAssistantEvent);
+          console.log('🌐 [CHATENGINE] ✅ Added new assistant event for follow-up response:', { 
+            id: newAssistantEvent.id, 
+            role: newAssistantEvent.role 
+          });
+          
+          eventFinalized = false; // Reset finalization flag for next iteration
           
           // Continue to next iteration to get follow-up response
           continue;
@@ -372,20 +406,31 @@ export class ChatEngine {
         }
       }
       
-      // If no tool calls in the final event, we're done
-      if (toolCallSegments.length === 0) {
-        console.log('✅ [CHATENGINE] No tool calls in final event - conversation complete');
+      // If we have tool calls, continue to next iteration to execute them
+      if (toolCallSegments.length > 0) {
+        console.log('🔄 [CHATENGINE] Tool calls found - will execute and continue to next iteration');
+        // Continue the loop to execute tools in the next iteration
+        // Don't reset eventBuilder here - we need to execute tools first
+        continue; // Skip the reset logic and go straight to tool execution
+      } else {
+        // No tool calls in the final event - this means we got the final text response
+        console.log('✅ [CHATENGINE] No tool calls in final event - this is the final response, conversation complete');
         shouldContinue = false;
       }
-      
-      // Reset builder for next iteration
-      eventBuilder.reset('assistant');
-      eventFinalized = false; // Reset finalization flag for next iteration
     }
     
     // Create conversation in background (only if not an existing conversation)
     if (!conversationId && this.config.conversationCreator) {
       const allEvents = eventLog.getEvents();
+      console.log('🔍 [CHATENGINE] Final events before saving:', allEvents.map(e => ({
+        id: e.id,
+        role: e.role,
+        segments: e.segments.map(s => ({ 
+          type: s.type, 
+          hasContent: s.type === 'text' ? !!s.text && s.text.length > 0 : true,
+          contentLength: s.type === 'text' ? s.text?.length || 0 : undefined
+        }))
+      })));
       createdConversationId = await this.config.conversationCreator(
         allEvents,
         validatedRequest.workspaceId,
@@ -432,7 +477,7 @@ export class ChatEngine {
     events: Event[],
     apiModelName: string,
     validatedRequest: ValidatedChatRequest,
-    eventBuilder: EventStreamBuilder,
+    eventBuilder: StreamingEventBuilder,
     eventLog: EventLog,
     controller: ReadableStreamDefaultController,
     conversationId?: string
@@ -461,22 +506,101 @@ export class ChatEngine {
     
     console.log('📡 Anthropic stream created, starting to process...');
     
-    // Use unified ChatStreamHandler
-    const streamHandler = new ChatStreamHandler(
-      eventBuilder,
-      eventLog,
-      controller,
-      { debug: true, conversationId }
-    );
+    // Process stream directly to avoid duplicate event creation
+    const encoder = new TextEncoder();
     
-    await streamHandler.handleAnthropicStream(stream);
-    
-    // Save the finalized event to database if in individual mode
-    if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
-      const finalEvent = eventLog.getLastEvent();
-      if (finalEvent) {
-        await this.config.eventSaver(finalEvent, conversationId);
+    try {
+      for await (const event of stream) {
+        switch (event.type) {
+          case 'message_start':
+            // Don't reset - we already have our placeholder assistant event
+            break;
+            
+          case 'content_block_start':
+            if (event.content_block?.type === 'text') {
+              // Text block started - builder is ready
+            } else if (event.content_block?.type === 'tool_use') {
+              // Tool use block started
+              if (event.content_block.id && event.content_block.name) {
+                // Start streaming tool call using legacy compatibility method
+                eventBuilder.startToolCall(event.content_block.id, event.content_block.name);
+                
+                // Stream tool call start event
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_start',
+                  tool_id: event.content_block.id,
+                  tool_name: event.content_block.name,
+                  content: `🔧 *Using tool: ${event.content_block.name}*\n`
+                })}\n\n`));
+              }
+            }
+            break;
+            
+          case 'content_block_delta':
+            if (event.delta?.type === 'text_delta' && event.delta.text) {
+              // Add text chunk to event builder
+              eventBuilder.addTextChunk(event.delta.text);
+              
+              // Stream text content
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'token',
+                content: event.delta.text
+              })}\n\n`));
+            } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
+              // Handle tool call argument accumulation
+              const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+              if (toolCallId && event.delta.partial_json) {
+                eventBuilder.addToolCallArguments(toolCallId, event.delta.partial_json);
+              }
+            }
+            break;
+            
+          case 'content_block_stop':
+            // Complete any streaming tool calls
+            if (event.index !== undefined) {
+              const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
+              if (toolCallId) {
+                eventBuilder.completeToolCall(toolCallId);
+              }
+            }
+            break;
+            
+          case 'message_stop':
+            // Finalize the event and update in log
+            const finalEvent = eventBuilder.finalize();
+            console.log('🔍 [CHATENGINE] Anthropic finalization:', {
+              final_event_id: finalEvent.id,
+              final_event_segments: finalEvent.segments.map(s => ({ type: s.type, hasContent: s.type === 'text' ? !!s.text : true }))
+            });
+            const updateSuccess = eventLog.updateEvent(finalEvent);
+            console.log('🔍 [CHATENGINE] EventLog update result:', updateSuccess);
+            
+            // Stream finalized tool calls with complete arguments
+            const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call');
+            for (const toolCall of toolCallSegments) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'tool_finalized',
+                tool_id: toolCall.id,
+                tool_name: toolCall.name,
+                args: toolCall.args
+              })}\n\n`));
+            }
+            
+            // Update database if in individual mode
+            if (this.config.streamingMode === 'individual' && conversationId) {
+              await this.updateAssistantEventInDatabase(eventBuilder, conversationId, finalEvent.id);
+            }
+            
+            return;
+        }
       }
+    } catch (error) {
+      console.error('Error in Anthropic stream handling:', error);
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown streaming error'
+      })}\n\n`));
+      throw error;
     }
   }
 
@@ -484,7 +608,7 @@ export class ChatEngine {
     events: Event[],
     apiModelName: string,
     validatedRequest: ValidatedChatRequest,
-    eventBuilder: EventStreamBuilder,
+    eventBuilder: StreamingEventBuilder,
     eventLog: EventLog,
     controller: ReadableStreamDefaultController,
     conversationId?: string
@@ -511,22 +635,115 @@ export class ChatEngine {
     
     console.log('📡 OpenAI stream created, starting to process...');
     
-    // Use unified ChatStreamHandler
-    const streamHandler = new ChatStreamHandler(
-      eventBuilder,
-      eventLog,
-      controller,
-      { debug: true, conversationId }
-    );
-    
-    await streamHandler.handleOpenAIStream(stream);
-    
-    // Save the finalized event to database if in individual mode
-    if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
-      const finalEvent = eventLog.getLastEvent();
-      if (finalEvent) {
-        await this.config.eventSaver(finalEvent, conversationId);
+    // Process stream directly to avoid duplicate event creation
+    const encoder = new TextEncoder();
+    const activeToolCalls = new Map<number, { id: string; name: string; args: string }>();
+
+    try {
+      for await (const chunk of stream) {
+        const choice = chunk.choices?.[0];
+        if (!choice) continue;
+
+        const delta = choice.delta;
+        
+        // Handle text content
+        if (delta.content) {
+          eventBuilder.addTextChunk(delta.content);
+          
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+            type: 'token',
+            content: delta.content
+          })}\n\n`));
+        }
+        
+        // Handle tool calls
+        if (delta.tool_calls) {
+          for (const toolCallDelta of delta.tool_calls) {
+            const index = toolCallDelta.index;
+            if (index === undefined) continue;
+
+            // Initialize or update tool call tracking
+            if (!activeToolCalls.has(index)) {
+              const toolCallId = toolCallDelta.id || `tool_${Date.now()}_${index}`;
+              const toolName = toolCallDelta.function?.name || 'unknown';
+              
+              activeToolCalls.set(index, {
+                id: toolCallId,
+                name: toolName,
+                args: ''
+              });
+              
+              // Start tool call in event builder using legacy compatibility method
+              eventBuilder.startToolCall(toolCallId, toolName);
+              
+              // Stream tool start event
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'tool_start',
+                tool_id: toolCallId,
+                tool_name: toolName,
+                content: `🔧 *Using tool: ${toolName}*\n`
+              })}\n\n`));
+            }
+            
+            // Accumulate arguments
+            if (toolCallDelta.function?.arguments) {
+              const toolCall = activeToolCalls.get(index)!;
+              toolCall.args += toolCallDelta.function.arguments;
+              
+              // Update tool call arguments in event builder
+              eventBuilder.addToolCallArguments(toolCall.id, toolCallDelta.function.arguments);
+            }
+          }
+        }
+        
+        // Handle completion
+        if (choice.finish_reason === 'stop' || choice.finish_reason === 'tool_calls') {
+          // Finalize all active tool calls
+          for (const [index, toolCall] of activeToolCalls) {
+            eventBuilder.completeToolCall(toolCall.id);
+            
+            // Parse final arguments
+            let parsedArgs = {};
+            try {
+              parsedArgs = JSON.parse(toolCall.args);
+            } catch (e) {
+              console.warn('Failed to parse tool call arguments:', toolCall.args);
+            }
+            
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'tool_finalized',
+              tool_id: toolCall.id,
+              tool_name: toolCall.name,
+              args: parsedArgs
+            })}\n\n`));
+          }
+          
+          // Finalize the event and update in log
+          const finalEvent = eventBuilder.finalize();
+          console.log('🔍 [CHATENGINE] OpenAI finalization:', {
+            final_event_id: finalEvent.id,
+            final_event_segments: finalEvent.segments.map(s => ({ type: s.type, hasContent: s.type === 'text' ? !!s.text : true }))
+          });
+          const updateSuccess = eventLog.updateEvent(finalEvent);
+          console.log('🔍 [CHATENGINE] EventLog update result:', updateSuccess);
+          
+          // Update database if in individual mode
+          if (this.config.streamingMode === 'individual' && conversationId) {
+            await this.updateAssistantEventInDatabase(eventBuilder, conversationId, finalEvent.id);
+          }
+          
+          // Clear active tool calls
+          activeToolCalls.clear();
+          return;
+        }
       }
+    } catch (error) {
+      console.error('Error in OpenAI stream handling:', error);
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown streaming error'
+      })}\n\n`));
+      throw error;
     }
   }
 
@@ -534,7 +751,7 @@ export class ChatEngine {
     events: Event[],
     apiModelName: string,
     validatedRequest: ValidatedChatRequest,
-    eventBuilder: EventStreamBuilder,
+    eventBuilder: StreamingEventBuilder,
     eventLog: EventLog,
     controller: ReadableStreamDefaultController,
     reasoningCollector: Map<string, { 
@@ -778,28 +995,18 @@ export class ChatEngine {
             output_index: mcpCall.output_index
           });
           
-          if (eventBuilder instanceof StreamingEventBuilder) {
-            eventBuilder.addToolCall(tool_id, mcpCall.name, args, {
-              server_label: mcpCall.server_label,
-              display_name: mcpCall.display_name,
-              server_type: mcpCall.server_type,
-              output_index: mcpCall.output_index,
-              sequence_number: mcpCall.sequence_number || 0
-            });
-            
-            // Immediately update database with the new tool call segment
-            if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
-              console.log('🔧 [CHATENGINE] Updating database with tool call segment...');
-              await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
-            }
-          } else {
-            // Fallback for legacy EventStreamBuilder
-            eventBuilder.addToolCall(tool_id, mcpCall.name, args, {
-              server_label: mcpCall.server_label,
-              display_name: mcpCall.display_name,
-              server_type: mcpCall.server_type
-            });
-            console.log('🔧 [CHATENGINE] Using legacy EventStreamBuilder - no incremental DB update');
+          eventBuilder.addToolCall(tool_id, mcpCall.name, args, {
+            server_label: mcpCall.server_label,
+            display_name: mcpCall.display_name,
+            server_type: mcpCall.server_type,
+            output_index: mcpCall.output_index,
+            sequence_number: mcpCall.sequence_number || 0
+          });
+          
+          // Immediately update database with the new tool call segment
+          if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
+            console.log('🔧 [CHATENGINE] Updating database with tool call segment...');
+            await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
           }
           
           console.log('🌐 [CHATENGINE] ✅ MCP tool call added to event builder successfully');
@@ -815,7 +1022,7 @@ export class ChatEngine {
         // This is needed so future conversation iterations can reference the tool results
         const toolResult = {
           id: tool_id,
-          output: output || { result: "Tool executed by OpenAI - results included in response text" },
+          output: (typeof output === 'string' ? { result: output } : output) || { result: "Tool executed by OpenAI - results included in response text" },
           error: error || undefined
         };
         
@@ -898,19 +1105,17 @@ export class ChatEngine {
         }
         
         // Add streaming reasoning segment to event builder for immediate UI feedback
-        if (eventBuilder instanceof StreamingEventBuilder) {
-          eventBuilder.addReasoningSegment(
-            item_id,
-            output_index,
-            sequence_number,
-            [], // Empty parts initially
-            {
-              streaming: true // Mark as streaming for frontend
-            }
-          );
-          
-          // Note: Database will be updated when reasoning segment is finalized
-        }
+        eventBuilder.addReasoningSegment(
+          item_id,
+          output_index,
+          sequence_number,
+          [], // Empty parts initially
+          {
+            streaming: true // Mark as streaming for frontend
+          }
+        );
+        
+        // Note: Database will be updated when reasoning segment is finalized
       } else if (event.type === 'reasoning_complete') {
         // Complete reasoning segment - add to event builder and update database
         const { item_id, output_index, sequence_number, parts, combined_text } = event as { 
@@ -937,26 +1142,21 @@ export class ChatEngine {
         });
         
         // Add reasoning segment to event builder with incremental database updates
-        if (eventBuilder instanceof StreamingEventBuilder) {
-          eventBuilder.addReasoningSegment(
-            item_id,
-            output_index,
-            sequence_number,
-            parts,
-            {
-              combined_text,
-              streaming: false
-            }
-          );
-          
-          // Immediately update database with the new reasoning segment
-          if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
-            console.log('🧠 [CHATENGINE] Updating database with reasoning segment...');
-            await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
+        eventBuilder.addReasoningSegment(
+          item_id,
+          output_index,
+          sequence_number,
+          parts,
+          {
+            combined_text,
+            streaming: false
           }
-        } else {
-          // Fallback for legacy EventStreamBuilder
-          console.warn('🧠 [CHATENGINE] Using legacy EventStreamBuilder - reasoning segments not supported');
+        );
+        
+        // Immediately update database with the new reasoning segment
+        if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
+          console.log('🧠 [CHATENGINE] Updating database with reasoning segment...');
+          await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
         }
         
         // Update reasoning collector for legacy compatibility
@@ -979,39 +1179,37 @@ export class ChatEngine {
         
         
         // Update reasoning segment with new part
-        if (eventBuilder instanceof StreamingEventBuilder) {
-          // Get existing reasoning segment to update it
-          const currentSegments = eventBuilder.getSegments();
-          const reasoningSegment = currentSegments.find(s => 
-            s.type === 'reasoning' && s.id === item_id
+        // Get existing reasoning segment to update it
+        const currentSegments = eventBuilder.getSegments();
+        const reasoningSegment = currentSegments.find(s => 
+          s.type === 'reasoning' && s.id === item_id
+        );
+        
+        if (reasoningSegment && reasoningSegment.type === 'reasoning') {
+          // Add the new part
+          const newPart = {
+            summary_index,
+            type: part.type as 'summary_text',
+            text: part.text,
+            sequence_number,
+            is_complete: false,
+            created_at: Date.now()
+          };
+          
+          const updatedParts = [...reasoningSegment.parts, newPart];
+          
+          // Update the reasoning segment
+          eventBuilder.addReasoningSegment(
+            item_id,
+            output_index,
+            sequence_number,
+            updatedParts,
+            {
+              streaming: true // Still streaming
+            }
           );
           
-          if (reasoningSegment && reasoningSegment.type === 'reasoning') {
-            // Add the new part
-            const newPart = {
-              summary_index,
-              type: part.type as 'summary_text',
-              text: part.text,
-              sequence_number,
-              is_complete: false,
-              created_at: Date.now()
-            };
-            
-            const updatedParts = [...reasoningSegment.parts, newPart];
-            
-            // Update the reasoning segment
-            eventBuilder.addReasoningSegment(
-              item_id,
-              output_index,
-              sequence_number,
-              updatedParts,
-              {
-                streaming: true // Still streaming
-              }
-            );
-            
-            // Note: Database will be updated when reasoning segment is finalized
-          }
+          // Note: Database will be updated when reasoning segment is finalized
         }
       } else if (event.type === 'reasoning_summary_text_delta') {
         // Handle reasoning text streaming in real-time
@@ -1030,45 +1228,43 @@ export class ChatEngine {
         });
         
         // Update reasoning segment with streaming text
-        if (eventBuilder instanceof StreamingEventBuilder) {
-          const currentSegments = eventBuilder.getSegments();
-          const reasoningSegment = currentSegments.find(s => 
-            s.type === 'reasoning' && s.id === item_id
+        const currentSegments = eventBuilder.getSegments();
+        const reasoningSegment = currentSegments.find(s => 
+          s.type === 'reasoning' && s.id === item_id
+        );
+        
+        if (reasoningSegment && reasoningSegment.type === 'reasoning') {
+          // Find the part being updated and append delta text
+          const updatedParts = reasoningSegment.parts.map(part => 
+            part.summary_index === summary_index 
+              ? { ...part, text: part.text + delta }
+              : part
           );
           
-          if (reasoningSegment && reasoningSegment.type === 'reasoning') {
-            // Find the part being updated and append delta text
-            const updatedParts = reasoningSegment.parts.map(part => 
-              part.summary_index === summary_index 
-                ? { ...part, text: part.text + delta }
-                : part
-            );
-            
-            // If part doesn't exist yet, create it
-            if (!updatedParts.some(p => p.summary_index === summary_index)) {
-              updatedParts.push({
-                summary_index,
-                type: 'summary_text' as const,
-                text: delta,
-                sequence_number,
-                is_complete: false,
-                created_at: Date.now()
-              });
-            }
-            
-            // Update the reasoning segment
-            eventBuilder.addReasoningSegment(
-              item_id,
-              output_index,
+          // If part doesn't exist yet, create it
+          if (!updatedParts.some(p => p.summary_index === summary_index)) {
+            updatedParts.push({
+              summary_index,
+              type: 'summary_text' as const,
+              text: delta,
               sequence_number,
-              updatedParts,
-              {
-                streaming: true // Still streaming
-              }
-            );
-            
-            // Note: Database will be updated when reasoning segment is finalized
+              is_complete: false,
+              created_at: Date.now()
+            });
           }
+          
+          // Update the reasoning segment
+          eventBuilder.addReasoningSegment(
+            item_id,
+            output_index,
+            sequence_number,
+            updatedParts,
+            {
+              streaming: true // Still streaming
+            }
+          );
+          
+          // Note: Database will be updated when reasoning segment is finalized
         }
       } else if (event.type.includes('reasoning_summary')) {
         // Handle legacy reasoning events for backward compatibility
@@ -1121,84 +1317,29 @@ export class ChatEngine {
       } else if (event.type === 'finalize_only' && !eventFinalized) {
         console.log('🌐 [CHATENGINE] Finalizing event builder...');
         
-        // Handle enhanced StreamingEventBuilder vs legacy EventStreamBuilder
-        if (eventBuilder instanceof StreamingEventBuilder) {
-          // Enhanced finalization with response metadata
-          eventBuilder.updateResponseMetadata({
-            completion_status: 'complete',
-            total_output_items: Array.from(mcpCallCollector.size + reasoningCollector.size)
+        // Enhanced finalization with response metadata
+        eventBuilder.updateResponseMetadata({
+          completion_status: 'complete',
+          total_output_items: mcpCallCollector.size + reasoningCollector.size
+        });
+        
+        const builtEvent = eventBuilder.finalize();
+        if (builtEvent) {
+          console.log('🌐 [CHATENGINE] ✅ Enhanced event finalized:', {
+            segments_count: builtEvent.segments.length,
+            has_response_metadata: !!builtEvent.response_metadata,
+            completion_status: builtEvent.response_metadata?.completion_status
           });
+          console.log('🌐 [CHATENGINE] Event segments:', builtEvent.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name, server_label: s.server_label } : {}), ...(s.type === 'reasoning' ? { id: s.id, parts_count: s.parts.length } : {}) })));
+          eventLog.updateEvent(builtEvent);
           
-          const builtEvent = eventBuilder.finalize();
-          if (builtEvent) {
-            console.log('🌐 [CHATENGINE] ✅ Enhanced event finalized:', {
-              segments_count: builtEvent.segments.length,
-              has_response_metadata: !!builtEvent.response_metadata,
-              completion_status: builtEvent.response_metadata?.completion_status
-            });
-            console.log('🌐 [CHATENGINE] Event segments:', builtEvent.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name, server_label: s.server_label } : {}), ...(s.type === 'reasoning' ? { id: s.id, parts_count: s.parts.length } : {}) })));
-            eventLog.updateEvent(builtEvent);
-            
-            // Final database update with enhanced event model 
-            if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
-              console.log('🌐 [CHATENGINE] Final database update with enhanced model...');
-              await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
-            }
-          } else {
-            console.warn('🚨 [CHATENGINE] Enhanced event builder returned null/undefined event');
+          // Final database update with enhanced event model 
+          if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
+            console.log('🌐 [CHATENGINE] Final database update with enhanced model...');
+            await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
           }
         } else {
-          // Legacy EventStreamBuilder handling
-          const reasoningEntries = Array.from(reasoningCollector.values());
-          if (reasoningEntries.length > 0) {
-            // Use the first (and typically only) reasoning data
-            const reasoningData = reasoningEntries[0];
-            eventBuilder.setReasoningData(reasoningData);
-          }
-          
-          const builtEvent = eventBuilder.finalize();
-          if (builtEvent) {
-            console.log('🌐 [CHATENGINE] ✅ Legacy event finalized with segments:', builtEvent.segments.length);
-            console.log('🌐 [CHATENGINE] Event segments:', builtEvent.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name, server_label: s.server_label } : {}) })));
-            eventLog.updateEvent(builtEvent);
-            
-            // Legacy database update
-            if (this.config.streamingMode === 'individual' && conversationId && assistantEventCreated) {
-              console.log('🌐 [CHATENGINE] Updating placeholder assistant event in database (legacy)...');
-              
-              const { data, error } = await this.supabase
-                .from('events')
-                .update({ 
-                  segments: builtEvent.segments, // JSONB column - pass actual JSON, not stringified
-                  reasoning: builtEvent.reasoning || null, // JSONB column - pass actual JSON, not stringified
-                  ts: builtEvent.ts // Update timestamp to reflect final event time
-                })
-                .eq('conversation_id', conversationId)
-                .eq('id', assistantEventId)
-                .select();
-                
-              if (error) {
-                console.error('❌ [CHATENGINE] Failed to update assistant event in database:', {
-                  error: error,
-                  error_message: error?.message,
-                  conversation_id: conversationId,
-                  assistant_event_id: assistantEventId
-                });
-              } else {
-                console.log('✅ [CHATENGINE] Updated placeholder assistant event in database:', {
-                  updated_rows: data?.length || 0,
-                  conversation_id: conversationId,
-                  assistant_event_id: assistantEventId
-                });
-              }
-            } else if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId && !assistantEventCreated) {
-              // Fallback: if placeholder wasn't created, use old method
-              console.log('🌐 [CHATENGINE] Saving event to database (fallback)...');
-              await this.config.eventSaver(builtEvent, conversationId);
-            }
-          } else {
-            console.warn('🚨 [CHATENGINE] Legacy event builder returned null/undefined event');
-          }
+          console.warn('🚨 [CHATENGINE] Enhanced event builder returned null/undefined event');
         }
         
         eventFinalized = true; // Mark as finalized to prevent duplicates
@@ -1368,7 +1509,7 @@ export class ChatEngine {
               type: 'mcp' as const,
               server_label: server.name.toLowerCase().replace(/\s+/g, '_'),
               server_url: server.endpoint,
-              require_approval: 'never', // Default for converted servers
+              require_approval: 'never' as const, // Default for converted servers
             };
             console.log('🌐 [CHATENGINE] Converting application server to MCP tool:', mcpTool);
             mcpTools.push(mcpTool);

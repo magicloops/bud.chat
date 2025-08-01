@@ -191,6 +191,9 @@ export class StreamingEventBuilder {
   private onUpdate?: (event: Event) => void;
   private responseMetadata: ResponseMetadata = {};
   
+  // Legacy compatibility: track pending tool calls for incremental building
+  private pendingToolCalls: Map<string, {id: string, name: string, args: string, index: number}> = new Map();
+  
   constructor(initialEvent: Event, onUpdate?: (event: Event) => void) {
     this.event = { 
       ...initialEvent,
@@ -329,6 +332,153 @@ export class StreamingEventBuilder {
     return this.getCurrentEvent();
   }
   
+  // =============================================================================
+  // LEGACY COMPATIBILITY METHODS
+  // These methods provide backward compatibility with ChatStreamHandler
+  // =============================================================================
+  
+  /**
+   * Start a tool call (legacy compatibility)
+   * Used by ChatStreamHandler for incremental tool call building
+   */
+  startToolCall(id: string, name: string): void {
+    // Try to determine the index based on current tool calls
+    const currentIndex = this.pendingToolCalls.size;
+    this.pendingToolCalls.set(id, { id, name, args: '', index: currentIndex });
+    
+    // Add a placeholder tool call segment to show the tool is starting
+    // This will be replaced when the tool call is completed
+    const placeholderSegment: Segment = {
+      type: 'tool_call',
+      id,
+      name,
+      args: {}, // Empty args initially
+      // Add visual indicator that this is still building
+      display_name: `${name} (building...)`
+    };
+    
+    this.event.segments.push(placeholderSegment);
+    this.triggerUpdate();
+  }
+  
+  /**
+   * Add arguments to a pending tool call (legacy compatibility)
+   * Used by ChatStreamHandler for streaming tool call arguments
+   */
+  addToolCallArguments(id: string, args: string): void {
+    const pending = this.pendingToolCalls.get(id);
+    if (pending) {
+      pending.args += args;
+      
+      // Update the placeholder segment to show progress
+      const segmentIndex = this.event.segments.findIndex(
+        s => s.type === 'tool_call' && s.id === id
+      );
+      
+      if (segmentIndex >= 0) {
+        const segment = this.event.segments[segmentIndex];
+        if (segment.type === 'tool_call') {
+          // Update display name to show we're receiving arguments
+          segment.display_name = `${pending.name} (receiving args...)`;
+        }
+      }
+      
+      this.triggerUpdate();
+    }
+  }
+  
+  /**
+   * Complete a tool call by parsing arguments (legacy compatibility)
+   * Used by ChatStreamHandler when tool call arguments are fully received
+   */
+  completeToolCall(id: string): void {
+    const pending = this.pendingToolCalls.get(id);
+    if (pending) {
+      try {
+        // Parse the accumulated arguments
+        const parsedArgs = pending.args ? JSON.parse(pending.args) : {};
+        
+        // Find and replace the placeholder segment with the complete tool call
+        const segmentIndex = this.event.segments.findIndex(
+          s => s.type === 'tool_call' && s.id === id
+        );
+        
+        if (segmentIndex >= 0) {
+          // Replace placeholder with complete tool call
+          this.event.segments[segmentIndex] = {
+            type: 'tool_call',
+            id: pending.id,
+            name: pending.name,
+            args: parsedArgs,
+            display_name: pending.name // Remove the "building..." indicator
+          };
+        } else {
+          // If no placeholder exists, add the complete tool call
+          this.addToolCall(pending.id, pending.name, parsedArgs);
+        }
+        
+        // Remove from pending
+        this.pendingToolCalls.delete(id);
+        this.triggerUpdate();
+      } catch (error) {
+        console.error('Failed to parse tool call arguments:', error);
+        console.error('Raw arguments:', pending.args);
+        
+        // Still complete the tool call with raw args to avoid broken state
+        const segmentIndex = this.event.segments.findIndex(
+          s => s.type === 'tool_call' && s.id === id
+        );
+        
+        if (segmentIndex >= 0) {
+          const segment = this.event.segments[segmentIndex];
+          if (segment.type === 'tool_call') {
+            segment.args = { _raw: pending.args, _error: 'Failed to parse JSON' };
+            segment.display_name = `${pending.name} (parse error)`;
+          }
+        }
+        
+        this.pendingToolCalls.delete(id);
+        this.triggerUpdate();
+      }
+    }
+  }
+  
+  /**
+   * Get tool call ID by index (legacy compatibility)
+   * Used by ChatStreamHandler to map streaming events to tool calls
+   */
+  getToolCallIdAtIndex(index: number): string | null {
+    // First check pending tool calls by index
+    for (const [id, pending] of this.pendingToolCalls) {
+      if (pending.index === index) {
+        return id;
+      }
+    }
+    
+    // Fallback: check completed tool calls in segments
+    const toolCallSegments = this.event.segments
+      .filter(s => s.type === 'tool_call')
+      .map(s => s as Extract<Segment, { type: 'tool_call' }>);
+    
+    return toolCallSegments[index]?.id || null;
+  }
+  
+  /**
+   * Check if there are any pending tool calls
+   * Useful for debugging and state management
+   */
+  hasPendingToolCalls(): boolean {
+    return this.pendingToolCalls.size > 0;
+  }
+  
+  /**
+   * Get pending tool call information
+   * Useful for debugging
+   */
+  getPendingToolCalls(): Array<{id: string, name: string, args: string, index: number}> {
+    return Array.from(this.pendingToolCalls.values());
+  }
+  
   reset(role: 'assistant' | 'user' | 'system' | 'tool'): void {
     // Create a new empty event for the next iteration
     this.event = {
@@ -339,6 +489,9 @@ export class StreamingEventBuilder {
       response_metadata: {}
     };
     this.responseMetadata = {};
+    
+    // Clear any pending tool calls from previous session
+    this.pendingToolCalls.clear();
   }
 }
 
