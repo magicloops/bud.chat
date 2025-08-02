@@ -296,26 +296,12 @@ export class ChatEngine {
             validatedRequest.budId
           );
           
-          console.log(`🔧 Tool execution completed. Got ${toolResults.length} results:`, toolResults.map(tr => ({
-            id: tr.id,
-            hasOutput: !!tr.output,
-            hasError: !!tr.error
-          })));
+          console.log(`🔧 Tool execution completed. Got ${toolResults.length} results`);
           
           // Add tool results to event log
           for (const result of toolResults) {
-            console.log(`🔧 Creating tool result event for ${result.id}`);
             const toolResultEvent = createToolResultEvent(result.id, result.output);
-            console.log(`🔧 Created tool result event:`, {
-              id: toolResultEvent.id,
-              role: toolResultEvent.role,
-              segments: toolResultEvent.segments.map(s => ({
-                type: s.type,
-                id: s.type === 'tool_result' ? s.id : undefined
-              }))
-            });
             eventLog.addEvent(toolResultEvent);
-            console.log(`🔧 Added tool result event to event log`);
             
             // Save tool result if in individual mode
             if (this.config.streamingMode === 'individual' && this.config.eventSaver && conversationId) {
@@ -382,23 +368,12 @@ export class ChatEngine {
       const finalEvent = eventLog.getLastEvent();
       const toolCallSegments = finalEvent?.segments.filter(s => s.type === 'tool_call') || [];
       
-      console.log('🔍 [CHATENGINE] Checking final event for tool calls:', {
-        event_id: finalEvent?.id,
-        event_role: finalEvent?.role,
-        total_segments: finalEvent?.segments.length || 0,
-        tool_call_segments: toolCallSegments.length,
-        segment_types: finalEvent?.segments.map(s => s.type) || [],
-        iteration: iteration,
-        provider: provider
-      });
+      console.log('🔍 [CHATENGINE] Checking final event for tool calls:', toolCallSegments.length, 'tool calls found');
       
       // For OpenAI Responses API, if we just processed MCP tools, check if any tools are still unresolved
       if (provider === 'openai-responses' && iteration === 1) {
         const stillUnresolved = eventLog.getUnresolvedToolCalls();
-        console.log('🔍 [CHATENGINE] Post-streaming tool resolution check:', {
-          still_unresolved_count: stillUnresolved.length,
-          tool_call_segments_in_final_event: toolCallSegments.length
-        });
+        console.log('🔍 [CHATENGINE] Post-streaming tool resolution check:', stillUnresolved.length, 'still unresolved');
         
         // If no unresolved tool calls after first iteration, we're done
         if (stillUnresolved.length === 0) {
@@ -502,11 +477,10 @@ export class ChatEngine {
       ...(tools.length > 0 && { tools })
     };
     
-    console.log('🔄 Sending request to Anthropic:', JSON.stringify(request, null, 2));
+    console.log('🔄 Sending request to Anthropic with', messages.length, 'messages');
     
     const stream = await this.anthropic.messages.stream(request);
     
-    console.log('📡 Anthropic stream created, starting to process...');
     
     // Process stream directly to avoid duplicate event creation
     const encoder = new TextEncoder();
@@ -523,13 +497,6 @@ export class ChatEngine {
               // Text block started - builder is ready
             } else if (event.content_block?.type === 'tool_use') {
               // Tool use block started
-              console.log('🔧 [ANTHROPIC DEBUG] Tool use block started:', {
-                raw_event: JSON.stringify(event, null, 2),
-                tool_id: event.content_block.id,
-                tool_name: event.content_block.name,
-                tool_input: event.content_block.input,
-                content_block_full: event.content_block
-              });
               
               if (event.content_block.id && event.content_block.name) {
                 // Start streaming tool call using legacy compatibility method with correct index
@@ -558,19 +525,7 @@ export class ChatEngine {
               })}\n\n`));
             } else if (event.delta?.type === 'input_json_delta' && event.index !== undefined) {
               // Handle tool call argument accumulation
-              console.log('🔧 [ANTHROPIC DEBUG] Tool arguments delta:', {
-                raw_event: JSON.stringify(event, null, 2),
-                index: event.index,
-                partial_json: event.delta.partial_json,
-                delta_full: event.delta
-              });
-              
               const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
-              console.log('🔧 [ANTHROPIC DEBUG] Tool call ID resolution:', {
-                index: event.index,
-                resolved_tool_call_id: toolCallId,
-                pending_tool_calls: eventBuilder.getPendingToolCalls()
-              });
               
               if (toolCallId && event.delta.partial_json) {
                 eventBuilder.addToolCallArguments(toolCallId, event.delta.partial_json);
@@ -580,26 +535,11 @@ export class ChatEngine {
             
           case 'content_block_stop':
             // Complete any streaming tool calls
-            console.log('🔧 [ANTHROPIC DEBUG] Content block stop:', {
-              raw_event: JSON.stringify(event, null, 2),
-              index: event.index,
-              pending_tool_calls_before: eventBuilder.getPendingToolCalls()
-            });
-            
             if (event.index !== undefined) {
               const toolCallId = eventBuilder.getToolCallIdAtIndex(event.index);
-              console.log('🔧 [ANTHROPIC DEBUG] Completing tool call:', {
-                index: event.index,
-                tool_call_id: toolCallId,
-                pending_before_completion: eventBuilder.getPendingToolCalls()
-              });
               
               if (toolCallId) {
                 eventBuilder.completeToolCall(toolCallId);
-                console.log('🔧 [ANTHROPIC DEBUG] Tool call completed:', {
-                  tool_call_id: toolCallId,
-                  pending_after_completion: eventBuilder.getPendingToolCalls()
-                });
               }
             }
             break;
@@ -607,35 +547,12 @@ export class ChatEngine {
           case 'message_stop':
             // Finalize the event and update in log
             const finalEvent = eventBuilder.finalize();
-            console.log('🔍 [CHATENGINE] Anthropic finalization:', {
-              final_event_id: finalEvent.id,
-              final_event_segments: finalEvent.segments.map(s => ({ type: s.type, hasContent: s.type === 'text' ? !!s.text : true }))
-            });
             const updateSuccess = eventLog.updateEvent(finalEvent);
-            console.log('🔍 [CHATENGINE] EventLog update result:', updateSuccess);
             
             // Stream finalized tool calls with complete arguments
             const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call');
-            console.log('🔧 [ANTHROPIC DEBUG] Final tool calls in segments:', {
-              tool_call_count: toolCallSegments.length,
-              tool_calls: toolCallSegments.map(tc => ({
-                id: tc.id,
-                name: tc.name,
-                args: tc.args,
-                args_type: typeof tc.args,
-                args_json: JSON.stringify(tc.args),
-                args_keys: Object.keys(tc.args || {}),
-                args_empty: Object.keys(tc.args || {}).length === 0
-              }))
-            });
             
             for (const toolCall of toolCallSegments) {
-              console.log('🔧 [ANTHROPIC DEBUG] Streaming finalized tool call:', {
-                tool_id: toolCall.id,
-                tool_name: toolCall.name,
-                args: toolCall.args,
-                args_stringified: JSON.stringify(toolCall.args)
-              });
               
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                 type: 'tool_finalized',
@@ -688,7 +605,7 @@ export class ChatEngine {
       ...(tools.length > 0 && { tools })
     };
     
-    console.log('🔄 Sending request to OpenAI:', JSON.stringify(request, null, 2));
+    console.log('🔄 Sending request to OpenAI with', messages.length, 'messages');
     
     const stream = await this.openai.chat.completions.create(request) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
     
@@ -839,7 +756,7 @@ export class ChatEngine {
         
         // Add MCP tools with validation
         if (remoteMCPTools.length > 0) {
-          console.log('🔧 [DEBUG] Adding MCP tools to request:', remoteMCPTools);
+          console.log('🔧 Adding', remoteMCPTools.length, 'MCP tools to request');
           // Validate each MCP tool before adding
           for (const tool of remoteMCPTools) {
             try {
@@ -892,8 +809,7 @@ export class ChatEngine {
     console.log('🔄 Sending request to OpenAI Responses API:');
     console.log('Model:', responsesRequest.model);
     console.log('Tools count:', responsesApiTools.length);
-    console.log('Tools config:', JSON.stringify(responsesApiTools, null, 2));
-    console.log('Full request:', JSON.stringify(responsesRequest, null, 2));
+    console.log('🔄 Sending Responses API request with', responsesRequest.input.length, 'input items and', responsesApiTools.length, 'tools');
     
     const stream = await this.openai.responses.create(responsesRequest);
     
@@ -1034,7 +950,7 @@ export class ChatEngine {
           mcpCall.accumulated_args += delta;
           console.log('🌐 [CHATENGINE] MCP args accumulated. Total length:', mcpCall.accumulated_args.length);
         } else {
-          console.error('🚨 [CHATENGINE] MCP call not found in collector for delta event:', { tool_id, collector_keys: Array.from(mcpCallCollector.keys()) });
+          console.error('🚨 [CHATENGINE] MCP call not found in collector for delta event:', tool_id);
         }
       } else if (event.type === 'mcp_tool_finalized') {
         // MCP call arguments are complete - add to event builder with incremental database update
@@ -1068,14 +984,14 @@ export class ChatEngine {
             await this.updateAssistantEventInDatabase(eventBuilder, conversationId, assistantEventId);
           }
           
-          console.log('🌐 [CHATENGINE] ✅ MCP tool call added to event builder successfully');
+          console.log('🌐 [CHATENGINE] ✅ MCP tool call added to event builder');
         } else {
-          console.error('🚨 [CHATENGINE] MCP call not found in collector for finalized event:', { tool_id, collector_keys: Array.from(mcpCallCollector.keys()) });
+          console.error('🚨 [CHATENGINE] MCP call not found in collector for finalized event:', tool_id);
         }
       } else if (event.type === 'mcp_tool_complete') {
         // MCP call execution complete (cleanup)
         const { tool_id, output, error } = event as { tool_id: string; output: string | null; error: string | null };
-        console.log('🎯 MCP call completed:', { tool_id, has_output: !!output, has_error: !!error });
+        console.log('🎯 MCP call completed:', tool_id);
         
         // For remote MCP tools, create tool result events with the actual output from OpenAI
         // This is needed so future conversation iterations can reference the tool results
@@ -1087,12 +1003,7 @@ export class ChatEngine {
         
         const toolResultEvent = createToolResultEvent(toolResult.id, toolResult.output);
         eventLog.addEvent(toolResultEvent);
-        console.log('🌐 [CHATENGINE] ✅ Created tool result event for MCP tool:', { 
-          tool_id, 
-          has_output: !!output,
-          output_preview: typeof output === 'string' ? output.substring(0, 100) + '...' : output,
-          has_error: !!error 
-        });
+        console.log('🌐 [CHATENGINE] ✅ Created tool result event for MCP tool:', tool_id);
         
         // Stream MCP tool result to frontend
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -1370,7 +1281,6 @@ export class ChatEngine {
         // Catch-all for any events we're not handling in ChatEngine
         console.log('🔍🔍🔍 UNHANDLED EVENT IN CHATENGINE 🔍🔍🔍');
         console.log('Event Type:', event.type);
-        console.log('Event Data:', JSON.stringify(event, null, 2));
         console.log('Note: This event made it through the transformer but is not being processed in ChatEngine');
         console.log('🔍🔍🔍 END UNHANDLED CHATENGINE EVENT 🔍🔍🔍');
       } else if (event.type === 'finalize_only' && !eventFinalized) {

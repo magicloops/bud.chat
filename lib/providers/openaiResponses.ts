@@ -429,21 +429,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         }>;
       };
       
-      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.DONE EVENT RECEIVED:', { 
-        item_type: doneItem?.type, 
-        item_id: doneItem?.id,
-        has_tools: !!doneItem?.tools,
-        tools_count: Array.isArray(doneItem?.tools) ? doneItem.tools.length : 0,
-        server_label: doneItem?.server_label,
-        has_output: !!doneItem?.output,
-        output_length: typeof doneItem?.output === 'string' ? doneItem.output.length : 0,
-        output_preview: typeof doneItem?.output === 'string' ? doneItem.output.substring(0, 100) + '...' : doneItem?.output,
-        has_error: !!doneItem?.error,
-        has_summary: !!doneItem?.summary,
-        summary_count: Array.isArray(doneItem?.summary) ? doneItem.summary.length : 0,
-        all_keys: Object.keys(doneItem || {}),
-        full_item: doneItem
-      });
+      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.DONE EVENT RECEIVED:', doneItem?.type, 'for', doneItem?.server_label);
       
       if (doneItem?.type === 'function_call') {
         return {

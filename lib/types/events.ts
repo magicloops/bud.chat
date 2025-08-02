@@ -148,13 +148,7 @@ export class EventLog {
     for (const event of this.events) {
       for (const segment of event.segments) {
         if (segment.type === 'tool_call') {
-          console.log('🔍 Found tool call segment:', {
-            id: segment.id,
-            name: segment.name,
-            args: segment.args,
-            argsType: typeof segment.args,
-            server_type: segment.server_type
-          });
+          console.log('🔍 Found tool call segment:', segment.name, 'with id', segment.id);
           
           toolCalls.set(segment.id, {
             id: segment.id,
@@ -162,15 +156,7 @@ export class EventLog {
             args: segment.args
           });
         } else if (segment.type === 'tool_result') {
-          console.log('🔍 Found tool result segment:', {
-            id: segment.id,
-            output: segment.output,
-            outputType: typeof segment.output,
-            hasOutput: !!segment.output,
-            outputPreview: typeof segment.output === 'string' 
-              ? segment.output.substring(0, 100) + '...' 
-              : segment.output
-          });
+          console.log('🔍 Found tool result segment for id', segment.id);
           resolvedIds.add(segment.id);
         }
       }
