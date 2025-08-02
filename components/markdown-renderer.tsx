@@ -17,8 +17,38 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
   content, 
   className = 'text-sm' 
 }: MarkdownRendererProps) {
+  // Pre-process content to handle special formatting patterns
+  const processedContent = React.useMemo(() => {
+    let txt = content
+      // Convert box-drawing character lines to horizontal rules
+      .replace(/^([─═━┅┄┉┈]{10,})$/gm, '\n---\n')
+      // Handle section headers that might have box characters around them
+      .replace(/^([─═━┅┄┉┈]+)\n(.+?)\n([─═━┅┄┉┈]+)$/gm, '\n---\n### $2\n---\n')
+      // Convert numbered sections with box characters to proper headers
+      .replace(/^(\d+)\.\s+(.+?)$/gm, (match, num, title) => {
+        return `\n### ${num}. ${title}\n`;
+      })
+      // A. / B. / C. -> sub-headers
+      .replace(/^([A-Z])\.\s+/gm, '#### $1. ')
+      // bullet "• something" -> "- something"
+      .replace(/^•\s+/gm, '- ')
+      // en-dash sub-items "– nested" -> "  - nested"
+      .replace(/^[–—]\s+/gm, '  - ')
+      // Ensure proper spacing around sections
+      .replace(/\n{3,}/g, '\n\n');
+
+      // NEW: convert 1‑3 leading spaces *inside* a paragraph line
+      // to hard spaces so the parser keeps them.
+      // • look for either BOM or newline, then 1‑3 plain spaces, then a non‑space char
+      // • replace each plain space with \u00A0 (NBSP)
+      txt = txt.replace(/(^|\n)( {1,3})(?=\S)/g, (_, brk, s) =>
+        brk + '\u00A0'.repeat(s.length)
+      );
+      return txt;
+  }, [content]);
+
   return (
-    <div className={`${className} break-words overflow-wrap-anywhere`}>
+    <div className={`prose prose-gray dark:prose-invert max-w-none ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
@@ -54,35 +84,9 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
               {children}
             </blockquote>
           ),
-          h1: ({ children }) => (
-            <h1 className="text-xl font-semibold mt-4 mb-2 first:mt-0 break-words">{children}</h1>
-          ),
-          h2: ({ children }) => (
-            <h2 className="text-lg font-semibold mt-4 mb-2 first:mt-0 break-words">{children}</h2>
-          ),
+          // Let prose handle most styling, just override a few key elements
           h3: ({ children }) => (
-            <h3 className="text-md font-semibold mt-3 mb-2 first:mt-0 break-words">{children}</h3>
-          ),
-          ul: ({ children }) => (
-            <ul className="list-disc list-outside ml-6 my-2 space-y-1">{children}</ul>
-          ),
-          ol: ({ className, children, ...rest }) => (
-            // ordered is a boolean that React doesn't understand, so we drop it, 
-            // but keep everything else - especially "start"
-            <ol
-              {...rest}
-              className={`list-decimal list-outside ml-6 my-2 space-y-1 ${className || ''}`}
-            >
-              {children}
-            </ol>
-          ),
-          li: ({ className, children, ...rest }) => (
-            <li {...rest} className={`break-words ${className || ''}`}>
-              {children}
-            </li>
-          ),
-          p: ({ children }) => (
-            <p className="mb-2 last:mb-0 break-words">{children}</p>
+            <h3 className="text-primary">{children}</h3>
           ),
           a: ({ href, children }) => (
             <a 
@@ -109,9 +113,21 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           td: ({ children }) => (
             <td className="border border-muted px-3 py-2">{children}</td>
           ),
+          hr: () => (
+            <hr className="my-4 border-t border-muted-foreground/20" />
+          ),
+          // Handle text nodes to preserve formatting
+          text: ({ children }) => {
+            const text = children as string;
+            // If this is a line of special characters that wasn't caught by preprocessing
+            if (typeof text === 'string' && /^[─═━┅┄┉┈•–—]+$/.test(text.trim())) {
+              return <div className="my-2 text-muted-foreground font-mono text-xs">{text}</div>;
+            }
+            return <>{children}</>;
+          },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );

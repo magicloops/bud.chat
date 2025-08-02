@@ -1,14 +1,22 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
-import { ReasoningData } from '@/lib/types/events';
+import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
+import { ProgressState, ActivityType, getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress';
 
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+  type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+    // MCP event types (remote MCP tools)
+    | 'mcp_tool_start' | 'mcp_tool_arguments_delta' | 'mcp_tool_finalized' | 'mcp_tool_complete' 
+    | 'mcp_list_tools' | 'mcp_approval_request'
     // New reasoning types
     | 'reasoning_summary_part_added' | 'reasoning_summary_part_done'
     | 'reasoning_summary_text_delta' | 'reasoning_summary_text_done'
     | 'reasoning_summary_delta' | 'reasoning_summary_done'
+    // Unified segments reasoning events
+    | 'reasoning_start' | 'reasoning_complete'
+    // Progress events
+    | 'progress_update' | 'progress_hide'
     // Internal-only event types
     | 'finalize_only';
   
@@ -17,8 +25,16 @@ export interface StreamEvent {
   tool_id?: string;
   tool_name?: string;
   args?: object;
-  output?: object;
+  output?: object | string | null;
   error?: string;
+  
+  // MCP-specific fields
+  server_label?: string;
+  tools?: unknown[];
+  approval_request_id?: string;
+  arguments?: string;
+  display_name?: string; // Human-readable tool name
+  server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
   
   // New reasoning fields
   item_id?: string;
@@ -31,6 +47,21 @@ export interface StreamEvent {
   delta?: string | { text: string };
   text?: string;
   sequence_number?: number;
+  
+  // Unified segments reasoning fields
+  parts?: Array<{
+    summary_index: number;
+    type: 'summary_text';
+    text: string;
+    sequence_number: number;
+    is_complete: boolean;
+    created_at: number;
+  }>;
+  combined_text?: string;
+  
+  // Progress fields
+  activity?: ActivityType;
+  hideProgress?: boolean;
 }
 
 export interface LocalStateUpdater {
@@ -52,6 +83,12 @@ export class FrontendEventHandler {
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
+  
+  // Progress state management
+  private progressState: ProgressState = {
+    currentActivity: null,
+    isVisible: false
+  };
 
   /**
    * Set local state updater for optimistic flows
@@ -109,6 +146,10 @@ export class FrontendEventHandler {
     switch (data.type) {
       case 'token':
         await this.handleTokenEvent(data);
+        // Hide progress when text content starts
+        if (data.hideProgress) {
+          this.updateProgressState(null, false);
+        }
         break;
       case 'tool_start':
         await this.handleToolStartEvent(data);
@@ -142,11 +183,42 @@ export class FrontendEventHandler {
       case 'reasoning_summary_done':
         await this.handleReasoningSummaryDone(data);
         break;
+      case 'reasoning_complete':
+        await this.handleReasoningComplete(data);
+        break;
+      case 'reasoning_start':
+        await this.handleReasoningStart(data);
+        break;
+      // MCP event handlers
+      case 'mcp_tool_start':
+        await this.handleMCPToolStartEvent(data);
+        break;
+      case 'mcp_tool_arguments_delta':
+        await this.handleMCPToolArgumentsDeltaEvent(data);
+        break;
+      case 'mcp_tool_finalized':
+        await this.handleMCPToolFinalizedEvent(data);
+        break;
+      case 'mcp_tool_complete':
+        await this.handleMCPToolCompleteEvent(data);
+        break;
+      case 'mcp_list_tools':
+        await this.handleMCPListToolsEvent(data);
+        break;
+      case 'mcp_approval_request':
+        await this.handleMCPApprovalRequestEvent(data);
+        break;
       case 'complete':
         await this.handleCompleteEvent(data);
         break;
       case 'error':
         await this.handleErrorEvent(data);
+        break;
+      case 'progress_update':
+        await this.handleProgressUpdate(data);
+        break;
+      case 'progress_hide':
+        await this.handleProgressHide(data);
         break;
     }
   }
@@ -209,6 +281,70 @@ export class FrontendEventHandler {
   }
 
   /**
+   * MCP EVENT HANDLERS
+   */
+
+  /**
+   * Handle MCP tool start events
+   */
+  private async handleMCPToolStartEvent(data: StreamEvent): Promise<void> {
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolStart(data);
+    } else {
+      this.updateStoreStateMCPToolStart(data);
+    }
+  }
+
+  /**
+   * Handle MCP tool arguments delta events
+   */
+  private async handleMCPToolArgumentsDeltaEvent(data: StreamEvent): Promise<void> {
+    // Similar to regular tool arguments delta - no immediate UI update needed
+    // Arguments are accumulated in the backend and finalized in mcp_tool_finalized
+  }
+
+  /**
+   * Handle MCP tool finalized events
+   */
+  private async handleMCPToolFinalizedEvent(data: StreamEvent): Promise<void> {
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolFinalized(data);
+    } else {
+      this.updateStoreStateMCPToolFinalized(data);
+    }
+  }
+
+  /**
+   * Handle MCP tool complete events
+   */
+  private async handleMCPToolCompleteEvent(data: StreamEvent): Promise<void> {
+    if (this.isLocalState()) {
+      this.updateLocalStateMCPToolComplete(data);
+    } else {
+      this.updateStoreStateMCPToolComplete(data);
+    }
+  }
+
+  /**
+   * Handle MCP list tools events (informational)
+   */
+  private async handleMCPListToolsEvent(data: StreamEvent): Promise<void> {
+    const { server_label, tools } = data;
+    console.log('🔍 MCP tools discovered:', { server_label, tool_count: (tools as unknown[])?.length || 0 });
+    // This is informational only - no UI updates needed
+  }
+
+  /**
+   * Handle MCP approval request events (future implementation)
+   */
+  private async handleMCPApprovalRequestEvent(data: StreamEvent): Promise<void> {
+    const { approval_request_id, tool_name, server_label } = data;
+    console.log('⚠️ MCP approval requested:', { approval_request_id, tool_name, server_label });
+    // Future implementation: show approval dialog to user
+    // For now, just log the event
+  }
+
+  /**
    * Handle complete events
    */
   private async handleCompleteEvent(data: StreamEvent): Promise<void> {
@@ -242,6 +378,7 @@ export class FrontendEventHandler {
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
     
+    
     if (!item_id || !part || summary_index === undefined) return;
     
     // Initialize or get existing reasoning data
@@ -250,6 +387,7 @@ export class FrontendEventHandler {
       reasoningData = {
         item_id,
         output_index: output_index || 0,
+        sequence_number: sequence_number,
         parts: {}
       };
       this.currentReasoningData.set(item_id, reasoningData);
@@ -363,6 +501,94 @@ export class FrontendEventHandler {
     this.currentReasoningData.delete(item_id);
   }
 
+  private async handleReasoningComplete(data: StreamEvent): Promise<void> {
+    const { item_id, parts, combined_text, output_index, sequence_number } = data as {
+      item_id: string;
+      parts?: Array<{
+        summary_index: number;
+        type: 'summary_text';
+        text: string;
+        sequence_number: number;
+        is_complete: boolean;
+        created_at: number;
+      }>;
+      combined_text?: string;
+      output_index?: number;
+      sequence_number?: number;
+    };
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    let reasoningData = this.currentReasoningData.get(item_id);
+    if (!reasoningData) {
+      // Create new reasoning data if it doesn't exist
+      reasoningData = {
+        item_id,
+        output_index: output_index || 0,
+        sequence_number: sequence_number,
+        parts: {}
+      };
+      this.currentReasoningData.set(item_id, reasoningData);
+    }
+    
+    // Update with final parts if provided
+    if (parts && parts.length > 0) {
+      for (const part of parts) {
+        reasoningData.parts[part.summary_index] = part;
+      }
+    }
+    
+    // Set the final combined text
+    reasoningData.combined_text = combined_text || Object.values(reasoningData.parts)
+      .sort((a, b) => a.summary_index - b.summary_index)
+      .map(part => part.text)
+      .join('\n');
+    
+    // Clear streaming state
+    reasoningData.streaming_part_index = undefined;
+    
+    // Mark all parts as complete
+    Object.values(reasoningData.parts).forEach(part => {
+      part.is_complete = true;
+    });
+    
+    // Update UI state - reasoning is now complete
+    this.updateReasoningInState(item_id, reasoningData, true);
+    
+    // Clean up after completion
+    this.currentReasoningData.delete(item_id);
+  }
+
+  private async handleReasoningStart(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data as {
+      item_id: string;
+      output_index?: number;
+      sequence_number?: number;
+    };
+    
+    // Log event for debugging and validation
+    ReasoningEventLogger.logEvent(data);
+    
+    if (!item_id) return;
+    
+    // Initialize reasoning data for this item
+    const reasoningData: ReasoningData = {
+      item_id,
+      output_index: output_index || 0,
+      sequence_number: sequence_number,
+      parts: {},
+      streaming_part_index: 0 // Mark as streaming
+    };
+    
+    this.currentReasoningData.set(item_id, reasoningData);
+    
+    // Update UI state to show empty reasoning segment that will be populated
+    this.updateReasoningInState(item_id, reasoningData);
+  }
+
   // Helper method for logging reasoning events that don't need special handling
   private async logReasoningEvent(data: StreamEvent): Promise<void> {
     const { item_id } = data;
@@ -385,16 +611,15 @@ export class FrontendEventHandler {
     }
   }
 
-  private updateLocalStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
+  private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.localStateUpdater || !this.assistantPlaceholder) return;
-
 
     this.localStateUpdater(events => {
       return events.map(event => 
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
-              reasoning: reasoningData
+              segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
               // Don't update ts during reasoning streaming to prevent infinite re-renders
             }
           : event
@@ -402,7 +627,7 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateStoreStateReasoning(_item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
+  private updateStoreStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
     if (!this.conversationId || !this.storeInstance) return;
 
     const store = this.storeInstance.getState();
@@ -413,12 +638,11 @@ export class FrontendEventHandler {
     const streamingEventId = conversation.streamingEventId;
     if (!streamingEventId) return;
 
-
     const updatedEvents = conversation.events.map(event =>
       event.id === streamingEventId
         ? {
             ...event,
-            reasoning: reasoningData
+            segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
             // Don't update ts during reasoning streaming to prevent infinite re-renders
           }
         : event
@@ -431,11 +655,38 @@ export class FrontendEventHandler {
   }
 
   /**
-   * Check if we're in local state mode (optimistic flow)
+   * Helper method to update reasoning segments in the segments array
    */
-  private isLocalState(): boolean {
-    return this.localStateUpdater !== null;
+  private updateReasoningSegments(segments: Segment[], item_id: string, reasoningData: ReasoningData): Segment[] {
+    // Convert ReasoningData to reasoning segment format
+    const reasoningSegment = {
+      type: 'reasoning' as const,
+      id: item_id,
+      output_index: reasoningData.output_index,
+      sequence_number: reasoningData.sequence_number || 0,
+      parts: Object.values(reasoningData.parts),
+      combined_text: reasoningData.combined_text,
+      effort_level: reasoningData.effort_level,
+      reasoning_tokens: reasoningData.reasoning_tokens,
+      streaming: reasoningData.streaming_part_index !== undefined
+    };
+
+    // Find existing reasoning segment with the same ID and update it, or add new one
+    const existingIndex = segments.findIndex(s => 
+      s.type === 'reasoning' && s.id === item_id
+    );
+
+    if (existingIndex >= 0) {
+      // Update existing reasoning segment
+      return segments.map((segment, index) => 
+        index === existingIndex ? reasoningSegment : segment
+      );
+    } else {
+      // Add new reasoning segment
+      return [...segments, reasoningSegment];
+    }
   }
+
 
   /**
    * LOCAL STATE UPDATES (for optimistic /chat/new flow)
@@ -512,7 +763,7 @@ export class FrontendEventHandler {
       segments: [{
         type: 'tool_result',
         id: data.tool_id,
-        output: data.output
+        output: typeof data.output === 'object' && data.output !== null ? data.output : { result: data.output }
       }],
       ts: Date.now()
     };
@@ -552,6 +803,71 @@ export class FrontendEventHandler {
       // Remove the last 2 events (user + assistant placeholder) on error
       return events.slice(0, -2);
     });
+  }
+
+  /**
+   * MCP LOCAL STATE UPDATES
+   */
+
+  private updateLocalStateMCPToolStart(data: StreamEvent): void {
+    
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) {
+      console.error('🚨 [FRONTEND-HANDLER] Missing required data for MCP tool start update:', {
+        has_updater: !!this.localStateUpdater,
+        has_placeholder: !!this.assistantPlaceholder,
+        has_tool_id: !!data.tool_id,
+        has_tool_name: !!data.tool_name
+      });
+      return;
+    }
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: [
+                ...event.segments,
+                {
+                  type: 'tool_call' as const,
+                  id: data.tool_id!,
+                  name: data.tool_name!,
+                  args: {},
+                  // Add MCP-specific metadata if available
+                  server_label: data.server_label
+                }
+              ],
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  private updateLocalStateMCPToolFinalized(data: StreamEvent): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.args) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => 
+                segment.type === 'tool_call' && segment.id === data.tool_id
+                  ? { ...segment, args: data.args! }
+                  : segment
+              ),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  private updateLocalStateMCPToolComplete(_data: StreamEvent): void {
+    // For remote MCP tools, the results are included in the text response by OpenAI
+    // No separate tool result events are needed
+    // This is mainly for cleanup and state tracking
   }
 
   /**
@@ -627,6 +943,31 @@ export class FrontendEventHandler {
   }
 
   /**
+   * MCP STORE STATE UPDATES
+   */
+
+  private updateStoreStateMCPToolStart(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateMCPToolStart(data);
+    }
+  }
+
+  private updateStoreStateMCPToolFinalized(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateMCPToolFinalized(data);
+    }
+  }
+
+  private updateStoreStateMCPToolComplete(data: StreamEvent): void {
+    // Delegate to local state updater for MCP tool completion
+    if (this.localStateUpdater) {
+      this.updateLocalStateMCPToolComplete(data);
+    }
+  }
+
+  /**
    * Finalize streaming by updating the store with completed events
    * This should be called by the component when streaming is complete
    */
@@ -649,5 +990,89 @@ export class FrontendEventHandler {
       streamingEventId: undefined,
       shouldCreateNewEvent: false
     });
+  }
+
+  /**
+   * PROGRESS STATE MANAGEMENT
+   */
+  
+  private async handleProgressUpdate(data: StreamEvent): Promise<void> {
+    if (data.activity) {
+      this.updateProgressState(data.activity, true, data.server_label);
+    }
+  }
+
+  private async handleProgressHide(data: StreamEvent): Promise<void> {
+    this.updateProgressState(null, false);
+  }
+
+  private updateProgressState(activity: ActivityType | null, isVisible: boolean, serverLabel?: string): void {
+    this.progressState = {
+      currentActivity: activity,
+      serverLabel: serverLabel,
+      isVisible: isVisible,
+      startTime: activity ? Date.now() : undefined
+    };
+
+    // Update UI state based on current mode
+    if (this.isLocalState()) {
+      this.updateLocalStateProgress();
+    } else {
+      this.updateStoreStateProgress();
+    }
+  }
+
+  private updateLocalStateProgress(): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              progressState: { ...this.progressState }
+            }
+          : event
+      );
+    });
+  }
+
+  private updateStoreStateProgress(): void {
+    if (!this.storeInstance || !this.conversationId) return;
+
+    // Update the current event with progress state
+    const state = this.storeInstance.getState();
+    const conversation = state.conversations[this.conversationId];
+    if (!conversation || conversation.events.length === 0) return;
+
+    // Find the last assistant event
+    const lastAssistantEvent = conversation.events
+      .slice()
+      .reverse()
+      .find(event => event.role === 'assistant');
+
+    if (lastAssistantEvent) {
+      this.storeInstance.getState().updateEvent(
+        this.conversationId!,
+        lastAssistantEvent.id,
+        {
+          progressState: { ...this.progressState }
+        }
+      );
+    }
+  }
+
+  /**
+   * Get current progress state
+   */
+  getProgressState(): ProgressState {
+    return { ...this.progressState };
+  }
+
+  /**
+   * Check if we're using local state
+   */
+  private isLocalState(): boolean {
+    return !!this.localStateUpdater && !!this.assistantPlaceholder;
   }
 }

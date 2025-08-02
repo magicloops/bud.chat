@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { EventItem } from './EventItem';
+import { EventItemSequential as EventItem } from './EventItemSequential';
 import { 
   Event, 
   useConversation, 

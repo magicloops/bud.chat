@@ -17,9 +17,22 @@ export interface BudConfig {
   mcpConfig?: MCPBudConfig
 }
 
+// Remote MCP Configuration (for OpenAI-hosted MCP servers)
+export interface RemoteMCPConfig {
+  server_label: string;
+  server_url: string;
+  require_approval: 'never' | 'always' | {
+    never?: { tool_names: string[] };
+    always?: { tool_names: string[] };
+  };
+  allowed_tools?: string[];
+  headers?: Record<string, string>;
+}
+
 // MCP Configuration types (actively used)
 export interface MCPBudConfig {
-  servers?: string[] // Array of server IDs
+  servers?: string[] // Array of local MCP server IDs
+  remote_servers?: RemoteMCPConfig[] // Array of remote MCP server configs
   available_tools?: string[] // Array of "server_id.tool_name"
   disabled_tools?: string[] // Array of "server_id.tool_name" to disable
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
@@ -36,9 +49,10 @@ export type Conversation = Database['public']['Tables']['conversations']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceMember = Database['public']['Tables']['workspace_members']['Row']
 
-// Properly typed Bud with BudConfig for default_json
-export type Bud = Omit<Database['public']['Tables']['buds']['Row'], 'default_json'> & {
+// Properly typed Bud with BudConfig for default_json and MCPBudConfig for mcp_config
+export type Bud = Omit<Database['public']['Tables']['buds']['Row'], 'default_json' | 'mcp_config'> & {
   default_json: BudConfig
+  mcp_config: MCPBudConfig | null
 }
 
 // UI Types (actively used)

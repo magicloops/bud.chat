@@ -1,11 +1,36 @@
 // Core event types for vendor-agnostic message schema
 
+import { ProgressState } from '@/lib/types/progress';
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
   | { type: 'text'; text: string }
-  | { type: 'tool_call'; id: string; name: string; args: object }
-  | { type: 'tool_result'; id: string; output: object; error?: string };
+  | { 
+      type: 'tool_call'; 
+      id: string; 
+      name: string; 
+      args: object; 
+      server_label?: string;
+      display_name?: string; // Human-readable tool name for UI
+      server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
+      // Sequence metadata for OpenAI Responses API
+      output_index?: number;
+      sequence_number?: number;
+    }
+  | { type: 'tool_result'; id: string; output: object; error?: string }
+  | { 
+      type: 'reasoning'; 
+      id: string; // item_id from OpenAI
+      output_index: number;
+      sequence_number: number;
+      parts: ReasoningPart[];
+      combined_text?: string;
+      effort_level?: 'low' | 'medium' | 'high';
+      reasoning_tokens?: number;
+      // Streaming state (client-side only, not persisted)
+      streaming?: boolean;
+    };
 
 // Reasoning data types for OpenAI o-series models
 export interface ReasoningPart {
@@ -20,6 +45,7 @@ export interface ReasoningPart {
 export interface ReasoningData {
   item_id: string;
   output_index: number;
+  sequence_number?: number; // Sequence ordering from OpenAI Responses API
   
   // Parts are indexed and can stream independently
   parts: Record<number, ReasoningPart>; // Keyed by summary_index
@@ -35,11 +61,33 @@ export interface ReasoningData {
   streaming_part_index?: number; // Which part is currently streaming
 }
 
+// Response-level metadata for OpenAI Responses API
+export interface ResponseMetadata {
+  total_output_items?: number;
+  completion_status?: 'complete' | 'partial' | 'interrupted';
+  usage?: {
+    reasoning_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  // OpenAI-specific metadata
+  openai_response_id?: string;
+  model?: string;
+}
+
 export interface Event {
   id: string;           // uuid
   role: Role;
   segments: Segment[];  // ordered – may contain 1-N segments
   ts: number;          // unix millis
+  
+  // Response-level metadata (for Responses API)
+  response_metadata?: ResponseMetadata;
+  
+  // Progress state (client-side only, not persisted)
+  progressState?: ProgressState;
+  
+  // Legacy reasoning field - will be deprecated after migration
   reasoning?: ReasoningData; // Optional reasoning data for o-series models
 }
 
@@ -100,18 +148,15 @@ export class EventLog {
     for (const event of this.events) {
       for (const segment of event.segments) {
         if (segment.type === 'tool_call') {
-          console.log('🔍 Found tool call segment:', {
-            id: segment.id,
-            name: segment.name,
-            args: segment.args,
-            argsType: typeof segment.args
-          });
+          console.log('🔍 Found tool call segment:', segment.name, 'with id', segment.id);
+          
           toolCalls.set(segment.id, {
             id: segment.id,
             name: segment.name,
             args: segment.args
           });
         } else if (segment.type === 'tool_result') {
+          console.log('🔍 Found tool result segment for id', segment.id);
           resolvedIds.add(segment.id);
         }
       }
@@ -121,6 +166,14 @@ export class EventLog {
     const unresolvedCalls = Array.from(toolCalls.values())
       .filter(call => !resolvedIds.has(call.id));
     
+    console.log('🔧 Tool resolution summary:', {
+      totalToolCalls: toolCalls.size,
+      resolvedToolCalls: resolvedIds.size,
+      unresolvedCount: unresolvedCalls.length,
+      resolvedIds: Array.from(resolvedIds),
+      unresolvedIds: unresolvedCalls.map(call => call.id)
+    });
+    
     console.log('🔧 Unresolved tool calls:', unresolvedCalls.map(call => ({
       id: call.id,
       name: call.name,
@@ -128,8 +181,7 @@ export class EventLog {
       argsType: typeof call.args
     })));
     
-    return unresolvedCalls
-      .filter(call => !resolvedIds.has(call.id));
+    return unresolvedCalls;
   }
 
   getToolCallById(id: string): ToolCall | null {
@@ -245,7 +297,37 @@ export class EventLog {
   private toOpenAIMessages(): unknown[] {
     const messages: unknown[] = [];
     
-    for (const event of this.events) {
+    console.log('🔍 Converting events to OpenAI messages. Total events:', this.events.length);
+    
+    // Deduplicate events by ID to prevent duplicate assistant messages
+    const seenEventIds = new Set<string>();
+    const deduplicatedEvents = this.events.filter(event => {
+      if (seenEventIds.has(event.id)) {
+        console.warn('🚨 Duplicate event detected and filtered out:', {
+          id: event.id,
+          role: event.role,
+          segmentTypes: event.segments.map(s => s.type)
+        });
+        return false;
+      }
+      seenEventIds.add(event.id);
+      return true;
+    });
+    
+    console.log('🔍 After deduplication:', deduplicatedEvents.length, 'events (removed', this.events.length - deduplicatedEvents.length, 'duplicates)');
+    
+    for (let i = 0; i < deduplicatedEvents.length; i++) {
+      const event = deduplicatedEvents[i];
+      console.log(`🔍 Event ${i}:`, {
+        id: event.id,
+        role: event.role,
+        segmentCount: event.segments.length,
+        segmentTypes: event.segments.map(s => s.type),
+        toolCallIds: event.segments.filter(s => s.type === 'tool_call').map(s => s.id)
+      });
+    }
+    
+    for (const event of deduplicatedEvents) {
       if (event.role === 'tool') {
         // Tool results become separate tool messages in OpenAI
         for (const segment of event.segments) {
@@ -289,6 +371,12 @@ export class EventLog {
         }
       }
 
+      // Skip assistant messages that have no content and no tool calls (placeholders)
+      if (event.role === 'assistant' && !content && tool_calls.length === 0) {
+        console.log('🔍 Skipping empty assistant placeholder event:', { id: event.id });
+        continue;
+      }
+
       const message: Record<string, unknown> = {
         role: event.role,
         content: content || ''  // Use empty string instead of null
@@ -319,6 +407,21 @@ export class EventLog {
     }
 
     return systemTexts.join('\n\n');
+  }
+
+  updateEvent(event: Event): boolean {
+    const index = this.events.findIndex(e => e.id === event.id);
+    if (index >= 0) {
+      console.log('📝 Updating event in EventLog:', { 
+        id: event.id, 
+        role: event.role, 
+        segments_count: event.segments.length 
+      });
+      this.events[index] = event;
+      return true;
+    }
+    console.warn('⚠️ Event not found for update:', { id: event.id, role: event.role });
+    return false;
   }
 }
 
@@ -357,4 +460,38 @@ export function createMixedEvent(role: Role, segments: Segment[], timestamp?: nu
     segments,
     ts: timestamp || Date.now()
   };
+}
+
+export function createReasoningSegment(
+  id: string, 
+  output_index: number, 
+  sequence_number: number, 
+  parts: ReasoningPart[],
+  options?: {
+    combined_text?: string;
+    effort_level?: 'low' | 'medium' | 'high';
+    reasoning_tokens?: number;
+    streaming?: boolean;
+  }
+): Segment {
+  return {
+    type: 'reasoning',
+    id,
+    output_index,
+    sequence_number,
+    parts,
+    combined_text: options?.combined_text,
+    effort_level: options?.effort_level,
+    reasoning_tokens: options?.reasoning_tokens,
+    streaming: options?.streaming
+  };
+}
+
+// Helper to sort segments by sequence number
+export function sortSegmentsBySequence(segments: Segment[]): Segment[] {
+  return segments.sort((a, b) => {
+    const aSeq = 'sequence_number' in a ? a.sequence_number || 0 : 0;
+    const bSeq = 'sequence_number' in b ? b.sequence_number || 0 : 0;
+    return aSeq - bSeq;
+  });
 }
