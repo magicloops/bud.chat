@@ -33,6 +33,7 @@ export function MCPConfigurationPanel({
   description = 'Configure Model Context Protocol tools for this resource',
   className
 }: MCPConfigurationPanelProps) {
+  // Initialize state from config prop - these will be the "original" values
   const [selectedServers, setSelectedServers] = useState<string[]>(config.servers || []);
   const [toolChoice, setToolChoice] = useState<string>(
     typeof config.tool_choice === 'string' ? config.tool_choice : 'auto'

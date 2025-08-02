@@ -52,6 +52,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   // For active conversation mode, get bud from conversation's source_bud_id
   const urlBudId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('bud') : null;
   const targetBudId = isPreConversation ? urlBudId : conversation?.meta.source_bud_id;
+  
   const bud = useBud(targetBudId || '');
   
   const setConversation = useSetConversation();
@@ -70,6 +71,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const budConfig = bud?.default_json as unknown as BudConfig | undefined;
   const conversationOverrides = conversation?.meta.model_config_overrides as ConversationOverrides | undefined;
   const mcpOverrides = conversation?.meta.mcp_config_overrides as MCPConfiguration | undefined;
+  
+  // MCP config comes from top-level mcp_config field, not nested in default_json
+  const budMcpConfig = bud?.mcp_config as MCPConfiguration | undefined;
 
   // Form state with default values from bud config and overrides from conversation
   const [chatName, setChatName] = useState('');
@@ -134,7 +138,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalTemperature = budConfig?.temperature || 1;
       const finalMaxTokens = budConfig?.maxTokens || undefined;
       const finalAvatar = budConfig?.avatar || '';
-      const finalMcpConfig = budConfig?.mcpConfig || {};
+      const finalMcpConfig = budMcpConfig || {};
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -173,7 +177,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalTemperature = conversationOverrides?.temperature || budConfig?.temperature || 1;
       const finalMaxTokens = conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined;
       const finalAvatar = conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '';
-      const finalMcpConfig = mcpOverrides || budConfig?.mcpConfig || {};
+      const finalMcpConfig = mcpOverrides || budMcpConfig || {};
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -738,6 +742,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-4 space-y-6">
                     <MCPConfigurationPanel
+                      key={`mcp-config-${panelMode}-${conversationId || 'no-conv'}-${bud?.id || 'no-bud'}`}
                       workspaceId={conversation?.meta.workspace_id || bud?.workspace_id || ''}
                       config={mcpConfig}
                       onChange={handleMcpConfigChange}
