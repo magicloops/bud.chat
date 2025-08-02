@@ -69,9 +69,9 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   }
   
   // Special detailed logging for reasoning items (only when we need to debug)
-  if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') && (event as any).item?.type === 'reasoning') {
+  if ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') && (event as {item?: {type?: string}}).item?.type === 'reasoning') {
     // Only log reasoning items if they have unexpected structure (for debugging)
-    const item = (event as any).item;
+    const item = (event as {item?: unknown}).item as Record<string, unknown>;
     const hasUnexpectedStructure = !item.summary && !item.content;
     if (hasUnexpectedStructure) {
       console.log('🧠 [MCP-TRANSFORMER] UNEXPECTED REASONING STRUCTURE:', {
@@ -105,7 +105,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return {
         type: 'progress_update',
         activity: 'mcp_tool_listing',
-        server_label: (event as any).server_label,
+        server_label: (event as {server_label?: string}).server_label,
         sequence_number: event.sequence_number as number
       };
 
@@ -269,12 +269,15 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           sequence_number: event.sequence_number,
           has_summary: !!item.summary,
           summary_length: summaryData.length,
-          summary_preview: summaryData.slice(0, 2).map(part => ({
-            summary_index: part?.summary_index,
-            type: part?.type,
-            has_text: !!part?.text,
-            text_length: part?.text?.length || 0
-          }))
+          summary_preview: summaryData.slice(0, 2).map(part => {
+            const typedPart = part as Record<string, unknown>;
+            return {
+              summary_index: typedPart?.summary_index,
+              type: typedPart?.type,
+              has_text: !!typedPart?.text,
+              text_length: (typedPart?.text as string)?.length || 0
+            };
+          })
         });
         return {
           type: 'reasoning_start',

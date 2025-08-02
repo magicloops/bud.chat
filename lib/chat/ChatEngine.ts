@@ -477,7 +477,7 @@ export class ChatEngine {
       ...(tools.length > 0 && { tools })
     };
     
-    console.log('🔄 Sending request to Anthropic with', messages.length, 'messages');
+    console.log('🔄 Sending request to Anthropic with', anthropicMessages.length, 'messages');
     
     const stream = await this.anthropic.messages.stream(request);
     
@@ -547,7 +547,7 @@ export class ChatEngine {
           case 'message_stop':
             // Finalize the event and update in log
             const finalEvent = eventBuilder.finalize();
-            const updateSuccess = eventLog.updateEvent(finalEvent);
+            eventLog.updateEvent(finalEvent);
             
             // Stream finalized tool calls with complete arguments
             const toolCallSegments = finalEvent.segments.filter(s => s.type === 'tool_call');
@@ -605,7 +605,7 @@ export class ChatEngine {
       ...(tools.length > 0 && { tools })
     };
     
-    console.log('🔄 Sending request to OpenAI with', messages.length, 'messages');
+    console.log('🔄 Sending request to OpenAI with', openaiMessages.length, 'messages');
     
     const stream = await this.openai.chat.completions.create(request) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
     
@@ -675,14 +675,14 @@ export class ChatEngine {
         // Handle completion
         if (choice.finish_reason === 'stop' || choice.finish_reason === 'tool_calls') {
           // Finalize all active tool calls
-          for (const [index, toolCall] of activeToolCalls) {
+          for (const [, toolCall] of activeToolCalls) {
             eventBuilder.completeToolCall(toolCall.id);
             
             // Parse final arguments
             let parsedArgs = {};
             try {
               parsedArgs = JSON.parse(toolCall.args);
-            } catch (e) {
+            } catch (_e) {
               console.warn('Failed to parse tool call arguments:', toolCall.args);
             }
             
@@ -817,7 +817,7 @@ export class ChatEngine {
     
     // Create placeholder assistant event BEFORE streaming starts to ensure correct database ordering
     const placeholderAssistant = createTextEvent('assistant', '');
-    let assistantEventId = placeholderAssistant.id;
+    const assistantEventId = placeholderAssistant.id;
     let assistantEventCreated = false;
     
     // Save placeholder to database immediately (gets correct fractional index before tool results)

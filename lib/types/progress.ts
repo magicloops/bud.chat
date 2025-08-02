@@ -75,7 +75,7 @@ export const PROGRESS_HIDE_EVENTS = [
 /**
  * Determine activity type from event type and data
  */
-export function getActivityFromEvent(eventType: string, eventData: any): ActivityType | null {
+export function getActivityFromEvent(eventType: string, eventData: Record<string, unknown>): ActivityType | null {
   // MCP tool activities
   if (eventType.includes('mcp_list_tools') || eventType === 'mcp_list_tools') {
     return 'mcp_tool_listing';
@@ -101,7 +101,7 @@ export function getActivityFromEvent(eventType: string, eventData: any): Activit
   }
   
   // Unknown background activity
-  if (PROGRESS_TRIGGER_EVENTS.includes(eventType as any)) {
+  if ((PROGRESS_TRIGGER_EVENTS as readonly string[]).includes(eventType)) {
     return 'thinking';
   }
   
@@ -111,9 +111,9 @@ export function getActivityFromEvent(eventType: string, eventData: any): Activit
 /**
  * Check if event should hide progress indicator
  */
-export function shouldHideProgress(eventType: string, eventData: any): boolean {
+export function shouldHideProgress(eventType: string, eventData: Record<string, unknown>): boolean {
   // Hide when actual content appears
-  if (PROGRESS_HIDE_EVENTS.includes(eventType as any)) {
+  if ((PROGRESS_HIDE_EVENTS as readonly string[]).includes(eventType)) {
     return true;
   }
   
@@ -133,6 +133,6 @@ export function shouldHideProgress(eventType: string, eventData: any): boolean {
 /**
  * Extract server label from event data
  */
-export function getServerLabelFromEvent(eventData: any): string | undefined {
-  return eventData?.server_label || eventData?.serverLabel;
+export function getServerLabelFromEvent(eventData: Record<string, unknown>): string | undefined {
+  return (eventData?.server_label as string) || (eventData?.serverLabel as string);
 }

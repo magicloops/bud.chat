@@ -61,7 +61,6 @@ export interface StreamEvent {
   
   // Progress fields
   activity?: ActivityType;
-  server_label?: string;
   hideProgress?: boolean;
 }
 
@@ -688,12 +687,6 @@ export class FrontendEventHandler {
     }
   }
 
-  /**
-   * Check if we're in local state mode (optimistic flow)
-   */
-  private isLocalState(): boolean {
-    return this.localStateUpdater !== null;
-  }
 
   /**
    * LOCAL STATE UPDATES (for optimistic /chat/new flow)
@@ -1059,10 +1052,13 @@ export class FrontendEventHandler {
       .find(event => event.role === 'assistant');
 
     if (lastAssistantEvent) {
-      this.storeInstance.getState().updateEvent({
-        ...lastAssistantEvent,
-        progressState: { ...this.progressState }
-      });
+      this.storeInstance.getState().updateEvent(
+        this.conversationId!,
+        lastAssistantEvent.id,
+        {
+          progressState: { ...this.progressState }
+        }
+      );
     }
   }
 
