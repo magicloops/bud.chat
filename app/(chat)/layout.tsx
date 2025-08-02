@@ -14,6 +14,7 @@ import {
   useUnsubscribeFromWorkspace,
   useCleanup 
 } from '@/state/eventChatStore';
+import { useLoadWorkspaceBuds } from '@/state/budStore';
 
 export default function ChatLayout({
   children,
@@ -29,6 +30,9 @@ export default function ChatLayout({
   const subscribeToWorkspace = useSubscribeToWorkspace();
   const unsubscribeFromWorkspace = useUnsubscribeFromWorkspace();
   const cleanup = useCleanup();
+  
+  // Bud loading
+  const loadWorkspaceBuds = useLoadWorkspaceBuds();
 
   // Load sidebar state from localStorage on mount
   useEffect(() => {
@@ -53,7 +57,7 @@ export default function ChatLayout({
     };
   }, []);
 
-  // Manage realtime subscriptions based on selected workspace
+  // Manage realtime subscriptions and bud loading based on selected workspace
   useEffect(() => {
     if (!user || !selectedWorkspace) {
       return;
@@ -61,12 +65,15 @@ export default function ChatLayout({
 
     console.log('📡 Subscribing to workspace:', selectedWorkspace);
     subscribeToWorkspace(selectedWorkspace);
+    
+    console.log('🔄 Loading workspace buds for chat layout:', selectedWorkspace);
+    loadWorkspaceBuds(selectedWorkspace);
 
     return () => {
       console.log('📡 Unsubscribing from workspace:', selectedWorkspace);
       unsubscribeFromWorkspace(selectedWorkspace);
     };
-  }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace]);
+  }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace, loadWorkspaceBuds]);
 
   // Cleanup all subscriptions on unmount
   useEffect(() => {
