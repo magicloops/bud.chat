@@ -25,6 +25,7 @@ async function getBudWithAccessCheck(
       workspaces!inner(id)
     `)
     .eq('id', budId)
+    .is('deleted_at', null)
     .single();
 
   if (budError || !bud) {
@@ -189,10 +190,10 @@ export async function DELETE(
       );
     }
 
-    // Delete the bud
+    // Soft delete the bud
     const { error: deleteError } = await supabase
       .from('buds')
-      .delete()
+      .update({ deleted_at: new Date().toISOString() })
       .eq('id', budId);
 
     if (deleteError) {

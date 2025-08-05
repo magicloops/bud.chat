@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
       .from('buds')
       .select('*')
       .eq('workspace_id', validatedWorkspaceId)
+      .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (budsError) {

@@ -151,8 +151,6 @@ export class EventLog {
     for (const event of this.events) {
       for (const segment of event.segments) {
         if (segment.type === 'tool_call') {
-          console.log('🔍 Found tool call segment:', segment.name, 'with id', segment.id);
-          
           toolCalls.set(segment.id, {
             id: segment.id,
             name: segment.name,
@@ -161,11 +159,9 @@ export class EventLog {
           
           // For Responses API, tool calls may have output directly on them
           if (segment.output !== undefined) {
-            console.log('🔍 Tool call has output, marking as resolved');
             resolvedIds.add(segment.id);
           }
         } else if (segment.type === 'tool_result') {
-          console.log('🔍 Found tool result segment for id', segment.id);
           resolvedIds.add(segment.id);
         }
       }
@@ -352,7 +348,6 @@ export class EventLog {
 
       // Skip assistant messages that have no content and no tool calls (placeholders)
       if (event.role === 'assistant' && !content && tool_calls.length === 0) {
-        console.log('🔍 Skipping empty assistant placeholder event:', { id: event.id });
         continue;
       }
 
@@ -391,11 +386,6 @@ export class EventLog {
   updateEvent(event: Event): boolean {
     const index = this.events.findIndex(e => e.id === event.id);
     if (index >= 0) {
-      console.log('📝 Updating event in EventLog:', { 
-        id: event.id, 
-        role: event.role, 
-        segments_count: event.segments.length 
-      });
       this.events[index] = event;
       return true;
     }
