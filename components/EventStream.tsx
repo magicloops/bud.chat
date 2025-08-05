@@ -90,11 +90,13 @@ const EventStreamComponent = function EventStream({
     
     // Use unified frontend event handler for existing conversations
     try {
-      const response = await fetch(`/api/chat/${conversationId}`, {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          message: content,  // The existing API expects 'message', not 'content'
+          mode: 'continue',
+          conversationId,
+          message: content,
           workspaceId: conversation.meta.workspace_id
           // Let the API determine the model from conversation config -> bud config -> default
         })

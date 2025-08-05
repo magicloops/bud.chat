@@ -31,6 +31,7 @@ export function createUserEvent(content: string): Event {
  * Create an assistant placeholder event for streaming
  */
 export function createAssistantPlaceholderEvent(): Event {
+  // Don't show any progress indicator initially - let the stream decide
   return createTextEvent('assistant', '');
 }
 

@@ -4,13 +4,10 @@
 import { StreamingEventBuilder } from '@/lib/eventMessageHelpers';
 import { MCPToolExecutor } from '@/lib/tools/mcpToolExecutor';
 import { EventLog, createTextEvent, createToolResultEvent, Event, ReasoningPart } from '@/lib/types/events';
-import { eventsToAnthropicMessages } from '@/lib/providers/anthropic';
-import { eventsToOpenAIMessages } from '@/lib/providers/openai';
-import { processResponsesAPIStream } from '@/lib/providers/openaiResponses';
 import { getApiModelName, isClaudeModel, isReasoningModel, supportsReasoningEffort } from '@/lib/modelMapping';
+import { ProviderFactory } from '@/lib/providers/unified/ProviderFactory';
+import { EventConverter } from '@/lib/events/EventConverter';
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
 
 export interface ChatEngineConfig {
   // Event management
@@ -46,9 +43,7 @@ export interface ValidatedChatRequest {
 export class ChatEngine {
   constructor(
     private config: ChatEngineConfig,
-    private supabase: SupabaseClient,
-    private openai: OpenAI,
-    private anthropic: Anthropic
+    private supabase: SupabaseClient
   ) {}
 
   async processChat(request: ChatRequest): Promise<ReadableStream> {

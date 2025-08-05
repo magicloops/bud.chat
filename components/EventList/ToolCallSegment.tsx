@@ -18,12 +18,21 @@ interface ToolCallSegmentProps {
     id: string;
     name: string;
     args: object;
+    metadata?: {
+      server_label?: string;
+      display_name?: string;
+      server_type?: string;
+    };
     server_label?: string;
     display_name?: string;
     server_type?: string;
     output_index?: number;
     sequence_number?: number;
+    // For Responses API, output is stored directly on tool_call
+    output?: object;
+    error?: string;
   };
+  event?: Event; // Parent event to find tool results in same event
   allEvents?: Event[]; // To find corresponding tool results
   isStreaming?: boolean;
   className?: string;
@@ -31,6 +40,7 @@ interface ToolCallSegmentProps {
 
 export function ToolCallSegment({ 
   segment, 
+  event,
   allEvents,
   isStreaming = false,
   className 
@@ -38,28 +48,49 @@ export function ToolCallSegment({
   const [isExpanded, setIsExpanded] = useState(false);
   
   // Find the corresponding tool result
-  const toolResult = allEvents?.find(event => 
-    event.segments.some(seg => 
-      seg.type === 'tool_result' && seg.id === segment.id
-    )
-  );
+  // For Responses API, check if output is directly on the tool_call segment
+  let hasResult = segment.output !== undefined;
+  let hasError = segment.error !== undefined;
+  let resultOutput = segment.output;
+  let resultError = segment.error;
   
-  const resultSegment = toolResult?.segments.find(seg => 
-    seg.type === 'tool_result' && seg.id === segment.id
-  ) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
-
-  const hasResult = resultSegment !== undefined;
-  const hasError = resultSegment && resultSegment.error;
+  // If not on the segment itself, look for separate tool_result segment
+  if (!hasResult) {
+    // First check in the same event
+    let resultSegment = event?.segments.find(seg => 
+      seg.type === 'tool_result' && seg.id === segment.id
+    ) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
+    
+    // If not found in same event, check other events (for traditional tool calls)
+    if (!resultSegment && allEvents) {
+      const toolResult = allEvents.find(e => 
+        e.segments.some(seg => 
+          seg.type === 'tool_result' && seg.id === segment.id
+        )
+      );
+      
+      resultSegment = toolResult?.segments.find(seg => 
+        seg.type === 'tool_result' && seg.id === segment.id
+      ) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
+    }
+    
+    if (resultSegment) {
+      hasResult = true;
+      hasError = resultSegment.error !== undefined;
+      resultOutput = resultSegment.output;
+      resultError = resultSegment.error;
+    }
+  }
   
   // Get result content
   const resultContent = hasError 
-    ? resultSegment.error 
-    : resultSegment ? (
-        typeof resultSegment.output === 'object' && 
-        resultSegment.output !== null && 
-        'content' in resultSegment.output
-          ? (resultSegment.output as { content: string }).content
-          : JSON.stringify(resultSegment.output, null, 2)
+    ? resultError 
+    : resultOutput ? (
+        typeof resultOutput === 'object' && 
+        resultOutput !== null && 
+        'content' in resultOutput
+          ? (resultOutput as { content: string }).content
+          : JSON.stringify(resultOutput, null, 2)
       ) : null;
 
   const toggleExpanded = () => {
@@ -79,13 +110,13 @@ export function ToolCallSegment({
         <div className="flex items-center gap-2">
           <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-            Tool Call: {segment.display_name || segment.name}
+            Tool Call: {segment.metadata?.display_name || segment.display_name || segment.name}
           </span>
           
           {/* Server label for MCP tools */}
-          {segment.server_label && (
+          {(segment.metadata?.server_label || segment.server_label) && (
             <span className="text-xs text-muted-foreground px-2 py-1 bg-muted rounded">
-              {segment.server_label}
+              {segment.metadata?.server_label || segment.server_label}
             </span>
           )}
           

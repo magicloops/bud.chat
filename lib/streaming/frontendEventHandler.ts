@@ -153,6 +153,10 @@ export class FrontendEventHandler {
         break;
       case 'tool_start':
         await this.handleToolStartEvent(data);
+        // Hide progress when tool starts
+        if (data.hideProgress) {
+          this.updateProgressState(null, false);
+        }
         break;
       case 'tool_finalized':
         await this.handleToolFinalizedEvent(data);
@@ -833,8 +837,15 @@ export class FrontendEventHandler {
                   id: data.tool_id!,
                   name: data.tool_name!,
                   args: {},
+                  // Add sequence_number and output_index for proper ordering
+                  sequence_number: data.sequence_number,
+                  output_index: data.output_index,
                   // Add MCP-specific metadata if available
-                  server_label: data.server_label
+                  metadata: {
+                    server_label: data.server_label,
+                    server_type: data.server_type,
+                    display_name: data.display_name
+                  }
                 }
               ],
               ts: Date.now()
@@ -864,10 +875,31 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateLocalStateMCPToolComplete(_data: StreamEvent): void {
-    // For remote MCP tools, the results are included in the text response by OpenAI
-    // No separate tool result events are needed
-    // This is mainly for cleanup and state tracking
+  private updateLocalStateMCPToolComplete(data: StreamEvent): void {
+    // For Responses API, tool results are included as segments in the assistant event
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: [
+                ...event.segments,
+                {
+                  type: 'tool_result' as const,
+                  id: data.tool_id!,
+                  output: data.output || {},
+                  error: data.error,
+                  sequence_number: data.sequence_number,
+                  output_index: data.output_index
+                }
+              ],
+              ts: Date.now()
+            }
+          : event
+      );
+    });
   }
 
   /**

@@ -1,6 +1,7 @@
 // Core event types for vendor-agnostic message schema
 
 import { ProgressState } from '@/lib/types/progress';
+import { EventId, ToolCallId, ConversationId, generateEventId, generateToolCallId } from '@/lib/types/branded';
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -8,7 +9,7 @@ export type Segment =
   | { type: 'text'; text: string }
   | { 
       type: 'tool_call'; 
-      id: string; 
+      id: ToolCallId; 
       name: string; 
       args: object; 
       server_label?: string;
@@ -17,8 +18,11 @@ export type Segment =
       // Sequence metadata for OpenAI Responses API
       output_index?: number;
       sequence_number?: number;
+      // For Responses API, tool results are stored directly on the tool_call
+      output?: object;
+      error?: string;
     }
-  | { type: 'tool_result'; id: string; output: object; error?: string }
+  | { type: 'tool_result'; id: ToolCallId; output: object; error?: string }
   | { 
       type: 'reasoning'; 
       id: string; // item_id from OpenAI
@@ -76,7 +80,7 @@ export interface ResponseMetadata {
 }
 
 export interface Event {
-  id: string;           // uuid
+  id: EventId;           // uuid
   role: Role;
   segments: Segment[];  // ordered – may contain 1-N segments
   ts: number;          // unix millis
@@ -92,19 +96,19 @@ export interface Event {
 }
 
 export interface DatabaseEvent extends Event {
-  conversation_id: string;
+  conversation_id: ConversationId;
   order_key: string;
   created_at: string;
 }
 
 export interface ToolCall {
-  id: string;
+  id: ToolCallId;
   name: string;
   args: object;
 }
 
 export interface ToolResult {
-  id: string;
+  id: ToolCallId;
   output: object;
   error?: string;
 }
@@ -128,7 +132,6 @@ export class EventLog {
       });
     }
     
-    console.log('📝 Adding event to EventLog:', { id: event.id, role: event.role, totalEvents: this.events.length + 1 });
     this.events.push(event);
   }
 
@@ -155,6 +158,12 @@ export class EventLog {
             name: segment.name,
             args: segment.args
           });
+          
+          // For Responses API, tool calls may have output directly on them
+          if (segment.output !== undefined) {
+            console.log('🔍 Tool call has output, marking as resolved');
+            resolvedIds.add(segment.id);
+          }
         } else if (segment.type === 'tool_result') {
           console.log('🔍 Found tool result segment for id', segment.id);
           resolvedIds.add(segment.id);
@@ -165,21 +174,6 @@ export class EventLog {
     // Return tool calls that don't have results
     const unresolvedCalls = Array.from(toolCalls.values())
       .filter(call => !resolvedIds.has(call.id));
-    
-    console.log('🔧 Tool resolution summary:', {
-      totalToolCalls: toolCalls.size,
-      resolvedToolCalls: resolvedIds.size,
-      unresolvedCount: unresolvedCalls.length,
-      resolvedIds: Array.from(resolvedIds),
-      unresolvedIds: unresolvedCalls.map(call => call.id)
-    });
-    
-    console.log('🔧 Unresolved tool calls:', unresolvedCalls.map(call => ({
-      id: call.id,
-      name: call.name,
-      args: call.args,
-      argsType: typeof call.args
-    })));
     
     return unresolvedCalls;
   }
@@ -297,8 +291,6 @@ export class EventLog {
   private toOpenAIMessages(): unknown[] {
     const messages: unknown[] = [];
     
-    console.log('🔍 Converting events to OpenAI messages. Total events:', this.events.length);
-    
     // Deduplicate events by ID to prevent duplicate assistant messages
     const seenEventIds = new Set<string>();
     const deduplicatedEvents = this.events.filter(event => {
@@ -313,19 +305,6 @@ export class EventLog {
       seenEventIds.add(event.id);
       return true;
     });
-    
-    console.log('🔍 After deduplication:', deduplicatedEvents.length, 'events (removed', this.events.length - deduplicatedEvents.length, 'duplicates)');
-    
-    for (let i = 0; i < deduplicatedEvents.length; i++) {
-      const event = deduplicatedEvents[i];
-      console.log(`🔍 Event ${i}:`, {
-        id: event.id,
-        role: event.role,
-        segmentCount: event.segments.length,
-        segmentTypes: event.segments.map(s => s.type),
-        toolCallIds: event.segments.filter(s => s.type === 'tool_call').map(s => s.id)
-      });
-    }
     
     for (const event of deduplicatedEvents) {
       if (event.role === 'tool') {
@@ -428,25 +407,25 @@ export class EventLog {
 // Helper functions for creating events
 export function createTextEvent(role: Role, text: string, timestamp?: number): Event {
   return {
-    id: crypto.randomUUID(),
+    id: generateEventId(),
     role,
     segments: [{ type: 'text', text }],
     ts: timestamp || Date.now()
   };
 }
 
-export function createToolCallEvent(id: string, name: string, args: object, timestamp?: number): Event {
+export function createToolCallEvent(id: ToolCallId, name: string, args: object, timestamp?: number): Event {
   return {
-    id: crypto.randomUUID(),
+    id: generateEventId(),
     role: 'assistant',
     segments: [{ type: 'tool_call', id, name, args }],
     ts: timestamp || Date.now()
   };
 }
 
-export function createToolResultEvent(id: string, output: object, timestamp?: number): Event {
+export function createToolResultEvent(id: ToolCallId, output: object, timestamp?: number): Event {
   return {
-    id: crypto.randomUUID(),
+    id: generateEventId(),
     role: 'tool',
     segments: [{ type: 'tool_result', id, output }],
     ts: timestamp || Date.now()
@@ -455,7 +434,7 @@ export function createToolResultEvent(id: string, output: object, timestamp?: nu
 
 export function createMixedEvent(role: Role, segments: Segment[], timestamp?: number): Event {
   return {
-    id: crypto.randomUUID(),
+    id: generateEventId(),
     role,
     segments,
     ts: timestamp || Date.now()

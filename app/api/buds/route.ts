@@ -1,5 +1,8 @@
+// Buds API - Using new abstractions
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
+import { WorkspaceId, BudId, toWorkspaceId, generateBudId } from '@/lib/types/branded';
 import { BudConfig } from '@/lib/types';
 
 export interface CreateBudRequest {
@@ -7,6 +10,30 @@ export interface CreateBudRequest {
   config: BudConfig
   workspaceId: string
   isPublic?: boolean
+}
+
+// Helper to validate workspace membership
+async function validateWorkspaceMembership(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  workspaceId: string,
+  userId: string
+): Promise<WorkspaceId> {
+  const { data: membership, error } = await supabase
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', userId)
+    .single();
+
+  if (error || !membership) {
+    throw new AppError(
+      ErrorCode.FORBIDDEN,
+      'Access denied to workspace',
+      { statusCode: 403 }
+    );
+  }
+
+  return toWorkspaceId(workspaceId);
 }
 
 // GET /api/buds - Get buds for a workspace
@@ -17,58 +44,41 @@ export async function GET(request: NextRequest) {
     const workspaceId = searchParams.get('workspaceId');
 
     if (!workspaceId) {
-      return NextResponse.json(
-        { error: 'workspaceId is required' },
-        { status: 400 }
-      );
+      throw AppError.validation('workspaceId is required');
     }
 
-    // Get current user
+    // Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      throw AppError.unauthorized();
     }
 
-    // Check if user has access to the workspace
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', workspaceId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (memberError || !membership) {
-      return NextResponse.json(
-        { error: 'Access denied to workspace' },
-        { status: 403 }
-      );
-    }
+    // Validate workspace access
+    const validatedWorkspaceId = await validateWorkspaceMembership(
+      supabase,
+      workspaceId,
+      user.id
+    );
 
     // Get buds for the workspace
     const { data: buds, error: budsError } = await supabase
       .from('buds')
       .select('*')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', validatedWorkspaceId)
       .order('created_at', { ascending: false });
 
     if (budsError) {
-      console.error('Error fetching buds:', budsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch buds' },
-        { status: 500 }
+      throw new AppError(
+        ErrorCode.DB_QUERY_ERROR,
+        'Failed to fetch buds',
+        { originalError: budsError }
       );
     }
 
     return NextResponse.json({ buds });
+    
   } catch (error) {
-    console.error('GET /api/buds error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }
 
@@ -80,74 +90,57 @@ export async function POST(request: NextRequest) {
 
     const { name, config, workspaceId } = body;
 
+    // Validate required fields
     if (!name || !config || !workspaceId) {
-      return NextResponse.json(
-        { error: 'name, config, and workspaceId are required' },
-        { status: 400 }
-      );
+      throw AppError.validation('name, config, and workspaceId are required');
     }
 
     if (!config.systemPrompt || !config.model) {
-      return NextResponse.json(
-        { error: 'config.systemPrompt and config.model are required' },
-        { status: 400 }
-      );
+      throw AppError.validation('config.systemPrompt and config.model are required');
     }
 
-    // Get current user
+    // Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      throw AppError.unauthorized();
     }
 
-    // Check if user has access to the workspace
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', workspaceId)
-      .eq('user_id', user.id)
-      .single();
-
-    if (memberError || !membership) {
-      return NextResponse.json(
-        { error: 'Access denied to workspace' },
-        { status: 403 }
-      );
-    }
+    // Validate workspace access
+    const validatedWorkspaceId = await validateWorkspaceMembership(
+      supabase,
+      workspaceId,
+      user.id
+    );
 
     // Extract MCP config from the main config
     const { mcpConfig, ...budConfig } = config;
     
-    // Create the bud
+    // Create the bud with a generated ID
+    const budId = generateBudId();
     const { data: bud, error: createError } = await supabase
       .from('buds')
       .insert({
+        id: budId,
         name,
         default_json: budConfig,
         mcp_config: mcpConfig || {},
-        workspace_id: workspaceId,
+        workspace_id: validatedWorkspaceId,
         owner_user_id: user.id
       })
       .select()
       .single();
 
     if (createError) {
-      console.error('Error creating bud:', createError);
-      return NextResponse.json(
-        { error: 'Failed to create bud' },
-        { status: 500 }
+      throw new AppError(
+        ErrorCode.DB_QUERY_ERROR,
+        'Failed to create bud',
+        { originalError: createError }
       );
     }
 
     return NextResponse.json({ bud }, { status: 201 });
+    
   } catch (error) {
-    console.error('POST /api/buds error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }

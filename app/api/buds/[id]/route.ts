@@ -1,11 +1,53 @@
+// Bud management API - Using new abstractions
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { BudConfig } from '@/lib/types';
+import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
+import { BudId, toBudId } from '@/lib/types/branded';
+import { BudConfig, Bud } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 
 export interface UpdateBudRequest {
   name?: string
   config?: Partial<BudConfig>
+}
+
+// Helper to get bud with access check
+async function getBudWithAccessCheck(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  budId: BudId,
+  userId: string
+): Promise<{ bud: Bud; membership: { role: string } }> {
+  // Get the bud with workspace info
+  const { data: bud, error: budError } = await supabase
+    .from('buds')
+    .select(`
+      *,
+      workspaces!inner(id)
+    `)
+    .eq('id', budId)
+    .single();
+
+  if (budError || !bud) {
+    throw AppError.notFound('Bud');
+  }
+
+  // Check workspace membership
+  const { data: membership, error: memberError } = await supabase
+    .from('workspace_members')
+    .select('role')
+    .eq('workspace_id', bud.workspace_id)
+    .eq('user_id', userId)
+    .single();
+
+  if (memberError || !membership) {
+    throw new AppError(
+      ErrorCode.FORBIDDEN,
+      'Access denied',
+      { statusCode: 403 }
+    );
+  }
+
+  return { bud: bud as Bud, membership };
 }
 
 // GET /api/buds/[id] - Get a specific bud
@@ -15,56 +57,22 @@ export async function GET(
 ) {
   try {
     const supabase = await createClient();
-    const { id: budId } = await params;
+    const { id } = await params;
+    const budId = toBudId(id);
 
-    // Get current user
+    // Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      throw AppError.unauthorized();
     }
 
-    // Get the bud with workspace access check
-    const { data: bud, error: budError } = await supabase
-      .from('buds')
-      .select(`
-        *,
-        workspaces!inner(id)
-      `)
-      .eq('id', budId)
-      .single();
-
-    if (budError || !bud) {
-      return NextResponse.json(
-        { error: 'Bud not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if user has access to the workspace
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', bud.workspace_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (memberError || !membership) {
-      return NextResponse.json(
-        { error: 'Access denied' },
-        { status: 403 }
-      );
-    }
+    // Get bud with access check
+    const { bud } = await getBudWithAccessCheck(supabase, budId, user.id);
 
     return NextResponse.json({ bud });
+    
   } catch (error) {
-    console.error('GET /api/buds/[id] error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }
 
@@ -75,52 +83,29 @@ export async function PUT(
 ) {
   try {
     const supabase = await createClient();
-    const { id: budId } = await params;
+    const { id } = await params;
+    const budId = toBudId(id);
     const body: UpdateBudRequest = await request.json();
 
-    // Get current user
+    // Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      throw AppError.unauthorized();
     }
 
-    // Get the existing bud to check permissions
-    const { data: existingBud, error: fetchError } = await supabase
-      .from('buds')
-      .select('*, workspaces!inner(id)')
-      .eq('id', budId)
-      .single();
-
-    if (fetchError || !existingBud) {
-      return NextResponse.json(
-        { error: 'Bud not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if user is the owner or has admin access to workspace
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', existingBud.workspace_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (memberError || !membership) {
-      return NextResponse.json(
-        { error: 'Access denied' },
-        { status: 403 }
-      );
-    }
+    // Get bud with access check
+    const { bud: existingBud, membership } = await getBudWithAccessCheck(
+      supabase, 
+      budId, 
+      user.id
+    );
 
     // Only owner or admin can edit
     if (existingBud.owner_user_id !== user.id && membership.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Only the owner or workspace admin can edit this bud' },
-        { status: 403 }
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Only the owner or workspace admin can edit this bud',
+        { statusCode: 403 }
       );
     }
 
@@ -137,8 +122,11 @@ export async function PUT(
       const { mcpConfig, ...budConfig } = fullConfig;
       
       // Merge with existing config (excluding MCP config)
-      const currentConfig = existingBud.default_json as BudConfig;
-      updateData.default_json = { ...currentConfig, ...budConfig } as unknown as Database['public']['Tables']['buds']['Update']['default_json'];
+      const currentConfig = existingBud.default_json;
+      updateData.default_json = { 
+        ...currentConfig, 
+        ...budConfig 
+      } as unknown as Database['public']['Tables']['buds']['Update']['default_json'];
       
       // Update MCP config separately if provided
       if (mcpConfig !== undefined) {
@@ -155,20 +143,17 @@ export async function PUT(
       .single();
 
     if (updateError) {
-      console.error('Error updating bud:', updateError);
-      return NextResponse.json(
-        { error: 'Failed to update bud' },
-        { status: 500 }
+      throw new AppError(
+        ErrorCode.DB_QUERY_ERROR,
+        'Failed to update bud',
+        { originalError: updateError }
       );
     }
 
     return NextResponse.json({ bud: updatedBud });
+    
   } catch (error) {
-    console.error('PUT /api/buds/[id] error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }
 
@@ -179,51 +164,28 @@ export async function DELETE(
 ) {
   try {
     const supabase = await createClient();
-    const { id: budId } = await params;
+    const { id } = await params;
+    const budId = toBudId(id);
 
-    // Get current user
+    // Authenticate user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      throw AppError.unauthorized();
     }
 
-    // Get the existing bud to check permissions
-    const { data: existingBud, error: fetchError } = await supabase
-      .from('buds')
-      .select('*, workspaces!inner(id)')
-      .eq('id', budId)
-      .single();
-
-    if (fetchError || !existingBud) {
-      return NextResponse.json(
-        { error: 'Bud not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if user is the owner or has admin access to workspace
-    const { data: membership, error: memberError } = await supabase
-      .from('workspace_members')
-      .select('role')
-      .eq('workspace_id', existingBud.workspace_id)
-      .eq('user_id', user.id)
-      .single();
-
-    if (memberError || !membership) {
-      return NextResponse.json(
-        { error: 'Access denied' },
-        { status: 403 }
-      );
-    }
+    // Get bud with access check
+    const { bud: existingBud, membership } = await getBudWithAccessCheck(
+      supabase, 
+      budId, 
+      user.id
+    );
 
     // Only owner or admin can delete
     if (existingBud.owner_user_id !== user.id && membership.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Only the owner or workspace admin can delete this bud' },
-        { status: 403 }
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Only the owner or workspace admin can delete this bud',
+        { statusCode: 403 }
       );
     }
 
@@ -234,19 +196,16 @@ export async function DELETE(
       .eq('id', budId);
 
     if (deleteError) {
-      console.error('Error deleting bud:', deleteError);
-      return NextResponse.json(
-        { error: 'Failed to delete bud' },
-        { status: 500 }
+      throw new AppError(
+        ErrorCode.DB_QUERY_ERROR,
+        'Failed to delete bud',
+        { originalError: deleteError }
       );
     }
 
     return NextResponse.json({ success: true });
+    
   } catch (error) {
-    console.error('DELETE /api/buds/[id] error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error);
   }
 }

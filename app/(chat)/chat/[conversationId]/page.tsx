@@ -309,10 +309,11 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
 
     try {
-      const response = await fetch('/api/chat-new', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          mode: 'new',
           messages: [...currentEvents, userEvent],
           workspaceId: selectedWorkspace,
           budId: bud?.id,

@@ -17,7 +17,6 @@ export async function generateConversationTitleInBackground(
   supabase: Awaited<ReturnType<typeof createClient>>
 ) {
   try {
-    console.log('🏷️ Generating title for conversation:', conversationId);
     
     // Only generate title if we have enough events (user + assistant)
     if (events.length < 2) return;
