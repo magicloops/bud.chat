@@ -1,5 +1,5 @@
 // MCP Tool Call Message Helpers
-import { createClient } from '@/lib/supabase/server';
+// import { createClient } from '@/lib/supabase/server'; // Not currently used
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateKeyBetween } from 'fractional-indexing';
 import type { MessageRole, ToolCallMetadata } from '@/lib/types';
@@ -180,7 +180,7 @@ export function formatToolCallForDisplay(toolCall: {
   try {
     const args = JSON.parse(toolCall.function.arguments);
     return `🔧 **${toolCall.function.name}**\n\`\`\`json\n${JSON.stringify(args, null, 2)}\n\`\`\``;
-  } catch (error) {
+  } catch (_error) {
     return `🔧 **${toolCall.function.name}**\n\`\`\`\n${toolCall.function.arguments}\n\`\`\``;
   }
 }

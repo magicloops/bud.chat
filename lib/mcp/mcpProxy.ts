@@ -1,8 +1,8 @@
 // MCP Proxy - communicate with MCP servers via external process
-import { spawn } from 'child_process';
+// import { spawn } from 'child_process'; // Not currently used
 import type {
   MCPServerConfig,
-  MCPToolCall,
+  // MCPToolCall, // Not currently used
   MCPToolResult,
   OpenAITool,
   OpenAIToolCall

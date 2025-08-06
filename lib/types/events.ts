@@ -105,6 +105,7 @@ export interface ToolCall {
   id: ToolCallId;
   name: string;
   args: object;
+  _rawArgs?: string; // Internal: for accumulating streaming arguments
 }
 
 export interface ToolResult {

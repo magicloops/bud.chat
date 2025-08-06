@@ -278,8 +278,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             key={conversationMeta.id}
             href={`/chat/${conversationMeta.id}`}
             prefetch={true}
-            onMouseEnter={() => handleConversationHover(conversationMeta.id)}
-            onClick={(e) => handleConversationClick(conversationMeta.id, e)}
+            onMouseEnter={() => handleConversationHover(conversationMeta.id as ConversationId)}
+            onClick={(e) => handleConversationClick(conversationMeta.id as ConversationId, e)}
             className={cn(
               'group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden block',
               isSelected && 'bg-muted'
@@ -303,13 +303,13 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => handleConversationBranch(conversationMeta.id, e)}>
+                      <DropdownMenuItem onClick={(e) => handleConversationBranch(conversationMeta.id as ConversationId, e)}>
                         <GitBranch className="h-3 w-3 mr-2" />
                         Branch
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem 
-                        onClick={(e) => handleConversationDelete(conversationMeta.id, e)}
+                        onClick={(e) => handleConversationDelete(conversationMeta.id as ConversationId, e)}
                         className="text-destructive"
                       >
                         <Trash2 className="h-3 w-3 mr-2" />

@@ -1,39 +1,98 @@
 // OpenAI Responses API Provider (for reasoning models)
-import OpenAI from 'openai';
 import { OpenAIBaseProvider } from './OpenAIBaseProvider';
 import { 
   UnifiedChatRequest, 
   UnifiedChatResponse, 
   StreamEvent,
-  ProviderFeature 
+  ProviderFeature,
+  ValidationResult 
 } from './types';
 import { 
   Event, 
-  EventLog,
+  // EventLog, // Not currently used
   ReasoningPart,
   Segment
 } from '@/lib/types/events';
-import { generateToolCallId } from '@/lib/types/branded';
+import { generateEventId, ToolCallId, generateToolCallId } from '@/lib/types/branded';
 import { processResponsesAPIStream } from './utils/openaiResponsesUtils';
+
+// Extended stream event for custom event types
+interface ExtendedStreamEvent {
+  type: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+// Type definitions for OpenAI Responses API
+interface ResponsesCreateParams {
+  model: string;
+  input: ResponsesInputItem[];
+  max_output_tokens: number;
+  reasoning?: {
+    effort: 'low' | 'medium' | 'high';
+    summary: 'auto' | 'none';
+  };
+  tools?: ResponsesMCPTool[];
+}
+
+interface ResponsesInputItem {
+  id?: string;
+  type: 'message' | 'text' | 'mcp_call' | 'reasoning';
+  role?: 'user' | 'assistant' | 'system';
+  content?: string | Array<{ type: string; text: string }>;
+  text?: string;
+  name?: string;
+  output?: string;
+  error?: string;
+  summary?: Array<{ index: number; type: string; text: string }>;
+}
+
+interface ResponsesMCPTool {
+  type: 'mcp';
+  server_label: string;
+  server_url: string;
+  require_approval: 'never' | 'always' | { never?: { tool_names: string[] }; always?: { tool_names: string[] } };
+  allowed_tools?: string[];
+  headers?: Record<string, string>;
+}
 
 export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   name = 'openai-responses' as const;
+  provider = 'openai' as const;
   
   supportsFeature(feature: ProviderFeature): boolean {
     const responsesFeatures = [
       ProviderFeature.REASONING,
       ProviderFeature.REASONING_EFFORT,
-      ProviderFeature.MCP_TOOLS,
+      ProviderFeature.TOOL_CALLING,
     ];
     
     return super.supportsFeature(feature) || responsesFeatures.includes(feature);
+  }
+  
+  protected validateProviderSpecific(_config: Partial<UnifiedChatRequest>): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    
+    // Add any OpenAI Responses-specific validations here
+    
+    return { valid: errors.length === 0, errors, warnings };
+  }
+  
+  protected getFeatureSupport(): Partial<Record<ProviderFeature, boolean>> {
+    return {
+      [ProviderFeature.REASONING]: true,
+      [ProviderFeature.REASONING_EFFORT]: true,
+      [ProviderFeature.TOOL_CALLING]: true,
+      [ProviderFeature.STREAMING]: true,
+    };
   }
   
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
       const inputItems = this.convertEventsToInputItems(request.events);
       
-      const params: OpenAI.Responses.CreateParams = {
+      const params: ResponsesCreateParams = {
         model: this.getModelName(request.model),
         input: inputItems,
         max_output_tokens: request.maxTokens || 8000,
@@ -41,7 +100,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       
       // Add remote MCP tools if configured
       if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        (params as any).tools = request.mcpConfig.remote_servers.map(server => ({
+        params.tools = request.mcpConfig.remote_servers.map(server => ({
           type: 'mcp' as const,
           server_label: server.server_label,
           server_url: server.server_url,
@@ -52,23 +111,28 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       }
       
       // Add reasoning configuration
-      (params as any).reasoning = {
+      params.reasoning = {
         effort: request.reasoningEffort || 'medium',
         summary: 'auto'
       };
       
-      const response = await this.client.responses.create(params);
+      // Use the OpenAI SDK's responses API
+      // Note: The SDK types may not be fully aligned with our custom types
+      const response = await this.client.responses.create(params as Parameters<typeof this.client.responses.create>[0]);
       
       // Convert response output to Event
       const event = this.convertResponseToEvent(response);
       
+      // Check if response has usage data (non-streaming response)
+      const usage = 'usage' in response && response.usage ? {
+        promptTokens: response.usage.input_tokens,
+        completionTokens: response.usage.output_tokens,
+        totalTokens: response.usage.total_tokens
+      } : undefined;
+      
       return {
         event,
-        usage: response.usage ? {
-          promptTokens: response.usage.input_tokens,
-          completionTokens: response.usage.output_tokens,
-          totalTokens: response.usage.total_tokens
-        } : undefined
+        usage
       };
     } catch (error) {
       throw this.handleProviderError(error);
@@ -89,7 +153,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       })));
       
       
-      const params: OpenAI.Responses.CreateParams = {
+      const params: ResponsesCreateParams & { stream: true } = {
         model: this.getModelName(request.model),
         input: inputItems,
         max_output_tokens: request.maxTokens || 8000,
@@ -98,7 +162,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       
       // Add remote MCP tools if configured
       if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        (params as any).tools = request.mcpConfig.remote_servers.map(server => ({
+        params.tools = request.mcpConfig.remote_servers.map(server => ({
           type: 'mcp' as const,
           server_label: server.server_label,
           server_url: server.server_url,
@@ -109,20 +173,23 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       }
       
       // Add reasoning configuration
-      (params as any).reasoning = {
+      params.reasoning = {
         effort: request.reasoningEffort || 'medium',
         summary: 'auto'
       };
       
       console.log('📤 [Responses API] Sending request with params:', JSON.stringify(params, null, 2));
       
-      const stream = await this.client.responses.create(params);
-      
+      // Use the OpenAI SDK's responses API with streaming
+      // Note: The SDK types may not be fully aligned with our custom types
+      const streamResponse = await this.client.responses.create(params as Parameters<typeof this.client.responses.create>[0]);
+
       // Process the stream using our utils
-      const processedStream = processResponsesAPIStream(stream);
+      // When stream: true is passed, the response is a Stream object that implements AsyncIterable
+      const processedStream = processResponsesAPIStream(streamResponse as AsyncIterable<unknown>);
       
-      let currentEvent: Event = {
-        id: crypto.randomUUID(),
+      const currentEvent: Event = {
+        id: generateEventId(),
         role: 'assistant',
         segments: [],
         ts: Date.now()
@@ -131,7 +198,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       let hasStarted = false;
       
       // Transform the processed stream to our unified format
-      for await (const streamEvent of processedStream) {
+      for await (const streamEvent of processedStream as AsyncGenerator<ExtendedStreamEvent>) {
         // Log unhandled events
         const handledTypes = [
           'token', 'reasoning_start', 'reasoning_summary_text_delta', 
@@ -162,7 +229,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         
         switch (streamEvent.type) {
           case 'token':
-            if (streamEvent.content) {
+            if (streamEvent.content && typeof streamEvent.content === 'string') {
               // Find or create text segment
               let textSegment = currentEvent.segments.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
               if (!textSegment) {
@@ -185,9 +252,9 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             // Create a reasoning segment
             const reasoningSegment = {
               type: 'reasoning' as const,
-              id: streamEvent.item_id || crypto.randomUUID(),
-              output_index: streamEvent.output_index || 0,
-              sequence_number: streamEvent.sequence_number || 0,
+              id: typeof streamEvent.item_id === 'string' ? streamEvent.item_id : crypto.randomUUID(),
+              output_index: typeof streamEvent.output_index === 'number' ? streamEvent.output_index : 0,
+              sequence_number: typeof streamEvent.sequence_number === 'number' ? streamEvent.sequence_number : 0,
               parts: [],
               streaming: true // Mark as streaming
             };
@@ -208,30 +275,32 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'reasoning' && s.id === streamEvent.item_id
             );
             if (reasoningIdxForAdd >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const reasoningSegForAdd = currentEvent.segments[reasoningIdxForAdd] as any;
               
               // Extract initial text from the part if available
-              const partData = streamEvent.part || {};
+              const partData = (streamEvent.part || {}) as { type?: string; text?: string };
               const newPart = {
-                summary_index: streamEvent.summary_index || 0,
-                type: partData.type || 'summary_text',
-                text: partData.text || '',
-                sequence_number: streamEvent.sequence_number || 0,
+                summary_index: typeof streamEvent.summary_index === 'number' ? streamEvent.summary_index : 0,
+                type: (partData.type || 'summary_text') as 'summary_text',
+                text: typeof partData.text === 'string' ? partData.text : '',
+                sequence_number: typeof streamEvent.sequence_number === 'number' ? streamEvent.sequence_number : 0,
                 is_complete: false,
                 created_at: Date.now()
               };
               reasoningSegForAdd.parts.push(newPart);
               
-              // Yield the raw event
+              // Yield as a generic event that the route handler will process
               yield {
-                type: 'reasoning_summary_part_added' as any,
+                type: 'reasoning_summary_part_added',
                 data: {
                   item_id: streamEvent.item_id,
                   summary_index: streamEvent.summary_index,
                   part: partData,
                   sequence_number: streamEvent.sequence_number
                 }
-              };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any;
             }
             break;
             
@@ -242,10 +311,11 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'reasoning' && s.id === streamEvent.item_id
             );
             if (reasoningIndex >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const reasoningSeg = currentEvent.segments[reasoningIndex] as any;
               
-              const summaryIdx = streamEvent.summary_index ?? 0;
-              const textContent = streamEvent.delta || '';
+              const summaryIdx = typeof streamEvent.summary_index === 'number' ? streamEvent.summary_index : 0;
+              const textContent = typeof streamEvent.delta === 'string' ? streamEvent.delta : '';
               
               // Find or create the part
               let part = reasoningSeg.parts.find((p: ReasoningPart) => p.summary_index === summaryIdx);
@@ -254,7 +324,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                   summary_index: summaryIdx,
                   type: 'summary_text',
                   text: '',
-                  sequence_number: streamEvent.sequence_number || 0,
+                  sequence_number: typeof streamEvent.sequence_number === 'number' ? streamEvent.sequence_number : 0,
                   is_complete: false,
                   created_at: Date.now()
                 };
@@ -263,16 +333,17 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               
               part.text += textContent;
               
-              // Yield the raw reasoning delta event so it can be properly handled by the route
+              // Yield as a generic event that the route handler will process
               yield {
-                type: 'reasoning_summary_text_delta' as any,
+                type: 'reasoning_summary_text_delta',
                 data: {
                   item_id: streamEvent.item_id,
                   summary_index: summaryIdx,
                   delta: textContent,
                   sequence_number: streamEvent.sequence_number
                 }
-              };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any;
             }
             break;
             
@@ -284,14 +355,15 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'reasoning' && s.id === streamEvent.item_id
             );
             if (reasoningIdxDone >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const reasoningSegDone = currentEvent.segments[reasoningIdxDone] as any;
-              const summaryIdxDone = streamEvent.summary_index ?? 0;
+              const summaryIdxDone = typeof streamEvent.summary_index === 'number' ? streamEvent.summary_index : 0;
               const partIdxDone = reasoningSegDone.parts.findIndex(
                 (p: ReasoningPart) => p.summary_index === summaryIdxDone
               );
               if (partIdxDone >= 0) {
                 reasoningSegDone.parts[partIdxDone].is_complete = true;
-                if (streamEvent.text) {
+                if (typeof streamEvent.text === 'string') {
                   reasoningSegDone.parts[partIdxDone].text = streamEvent.text;
                 }
               }
@@ -299,13 +371,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               // Yield the proper event type
               if (streamEvent.type === 'reasoning_summary_part_done') {
                 yield {
-                  type: 'reasoning_summary_part_done' as any,
+                  type: 'reasoning_summary_part_done',
                   data: {
                     item_id: streamEvent.item_id,
                     summary_index: summaryIdxDone,
                     sequence_number: streamEvent.sequence_number
                   }
-                };
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any;
               }
             }
             break;
@@ -316,17 +389,18 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'reasoning' && s.id === streamEvent.item_id
             );
             if (reasoningIdxComplete >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const reasoningSegComplete = currentEvent.segments[reasoningIdxComplete] as any;
               reasoningSegComplete.streaming = false;
               
               // If we have combined text, update the segment
-              if (streamEvent.combined_text) {
+              if (typeof streamEvent.combined_text === 'string') {
                 reasoningSegComplete.combined_text = streamEvent.combined_text;
               }
               
               // Yield the reasoning complete event
               yield {
-                type: 'reasoning_complete' as any,
+                type: 'reasoning_complete',
                 data: {
                   item_id: streamEvent.item_id,
                   parts: reasoningSegComplete.parts,
@@ -334,32 +408,32 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                   output_index: streamEvent.output_index,
                   sequence_number: streamEvent.sequence_number
                 }
-              };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any;
             }
             break;
             
           case 'mcp_tool_start':
             // For MCP tools, use the tool ID from the stream directly
-            const mcpToolId = streamEvent.tool_id;
+            const mcpToolId = (streamEvent.tool_id || generateToolCallId()) as ToolCallId;
             const mcpToolSegment: Segment = {
               type: 'tool_call',
               id: mcpToolId, // Use the MCP tool ID directly
-              name: streamEvent.tool_name,
+              name: typeof streamEvent.tool_name === 'string' ? streamEvent.tool_name : 'unknown',
               args: {},
-              sequence_number: streamEvent.sequence_number,
-              output_index: streamEvent.output_index,
-              metadata: {
-                server_label: streamEvent.server_label,
-                server_type: streamEvent.server_type || 'remote_mcp',
-                display_name: streamEvent.display_name || streamEvent.tool_name
-              }
+              sequence_number: typeof streamEvent.sequence_number === 'number' ? streamEvent.sequence_number : undefined,
+              output_index: typeof streamEvent.output_index === 'number' ? streamEvent.output_index : undefined,
+              server_label: typeof streamEvent.server_label === 'string' ? streamEvent.server_label : undefined,
+              display_name: typeof streamEvent.display_name === 'string' ? streamEvent.display_name : 
+                           (typeof streamEvent.tool_name === 'string' ? streamEvent.tool_name : undefined),
+              server_type: typeof streamEvent.server_type === 'string' ? streamEvent.server_type : 'remote_mcp'
             };
             // No need to map since we're using the original ID
             currentEvent.segments.push(mcpToolSegment);
             
             // Yield the proper MCP tool start event for frontend
             yield {
-              type: 'mcp_tool_start' as any,
+              type: 'mcp_tool_start',
               data: {
                 tool_id: mcpToolId,
                 tool_name: streamEvent.tool_name,
@@ -369,7 +443,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                 output_index: streamEvent.output_index,
                 sequence_number: streamEvent.sequence_number
               }
-            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
             break;
             
           case 'mcp_tool_finalized':
@@ -378,16 +453,18 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'tool_call' && s.id === streamEvent.tool_id
             );
             if (mcpToolIndex >= 0) {
-              (currentEvent.segments[mcpToolIndex] as any).args = streamEvent.args;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (currentEvent.segments[mcpToolIndex] as any).args = streamEvent.args || {};
               
               // Yield the MCP tool finalized event
               yield {
-                type: 'mcp_tool_finalized' as any,
+                type: 'mcp_tool_finalized',
                 data: {
                   tool_id: streamEvent.tool_id,
                   args: streamEvent.args
                 }
-              };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any;
             }
             break;
             
@@ -397,6 +474,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'tool_call' && s.id === streamEvent.tool_id
             );
             if (toolCallIndex >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const toolCallSegment = currentEvent.segments[toolCallIndex] as any;
               toolCallSegment.output = streamEvent.output || {};
               if (streamEvent.error) {
@@ -406,7 +484,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             
             // Yield the MCP tool complete event
             yield {
-              type: 'mcp_tool_complete' as any,
+              type: 'mcp_tool_complete',
               data: {
                 tool_id: streamEvent.tool_id,
                 output: streamEvent.output,
@@ -414,13 +492,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                 sequence_number: streamEvent.sequence_number,
                 output_index: streamEvent.output_index
               }
-            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
             break;
             
           case 'error':
             yield {
               type: 'error',
-              data: { error: streamEvent.error || 'Unknown error' }
+              data: { error: typeof streamEvent.error === 'string' ? streamEvent.error : 'Unknown error' }
             };
             return;
             
@@ -430,6 +509,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               s => s.type === 'tool_call' && s.id === streamEvent.tool_id
             );
             if (toolIndex >= 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const toolSegment = currentEvent.segments[toolIndex] as any;
               if (!toolSegment.args._raw) {
                 toolSegment.args._raw = '';
@@ -438,12 +518,13 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               
               // Yield the MCP tool arguments delta event
               yield {
-                type: 'mcp_tool_arguments_delta' as any,
+                type: 'mcp_tool_arguments_delta',
                 data: {
                   tool_id: streamEvent.tool_id,
                   delta: streamEvent.delta
                 }
-              };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              } as any;
             }
             break;
             
@@ -463,23 +544,25 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'progress_update':
             // Pass through progress updates to frontend
             yield {
-              type: 'progress_update' as any,
+              type: 'progress_update',
               data: {
                 activity: streamEvent.activity,
                 server_label: streamEvent.server_label,
                 sequence_number: streamEvent.sequence_number
               }
-            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
             break;
             
           case 'progress_hide':
             // Pass through progress hide events to frontend
             yield {
-              type: 'progress_hide' as any,
+              type: 'progress_hide',
               data: {
                 sequence_number: streamEvent.sequence_number
               }
-            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
             break;
             
           case 'complete':
@@ -504,8 +587,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     }
   }
   
-  private convertEventsToInputItems(events: Event[]): any[] {
-    const items: any[] = [];
+  private convertEventsToInputItems(events: Event[]): ResponsesInputItem[] {
+    const items: ResponsesInputItem[] = [];
     let messageIndex = 0;
     
     for (const event of events) {
@@ -519,7 +602,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             .filter(seg => seg.type === 'text')
             .map(seg => ({ 
               type: 'input_text',
-              text: seg.text 
+              text: (seg as { type: 'text'; text: string }).text 
             }))
         });
       } else if (event.role === 'assistant') {
@@ -532,13 +615,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             role: 'assistant',
             content: textSegments.map(seg => ({ 
               type: 'output_text',
-              text: seg.text 
+              text: (seg as { type: 'text'; text: string }).text 
             }))
           });
         }
         
         // Process segments in their original order
         // Build a list of items while tracking if reasoning should be kept
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const segmentItems: any[] = [];
         
         for (let i = 0; i < event.segments.length; i++) {
@@ -579,6 +663,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               });
             }
           } else if (segment.type === 'tool_call') {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const mcpCall: any = {
               id: segment.id,
               type: 'mcp_call',
@@ -622,6 +707,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     return items;
   }
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private convertResponseToEvent(response: any): Event {
     const segments: Event['segments'] = [];
     
@@ -633,12 +719,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         } else if (output.type === 'mcp_call') {
           segments.push({
             type: 'tool_call',
-            id: output.id || crypto.randomUUID(),
+            id: (output.id || crypto.randomUUID()) as ToolCallId,
             name: output.name,
             args: output.arguments ? JSON.parse(output.arguments) : {},
-            metadata: {
-              server_label: output.server_label
-            }
+            server_label: output.server_label
           });
         }
       }
@@ -666,13 +750,11 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       id: response.id,
       role: 'assistant',
       segments,
-      ts: Date.now(),
-      response_metadata: {
-        reasoning_content: response.reasoning_content
-      }
+      ts: Date.now()
     };
   }
   
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private getItemPreview(item: any): string {
     if (item.type === 'message' && item.content?.[0]?.text) {
       return item.content[0].text.substring(0, 100) + '...';
@@ -681,5 +763,16 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       return `${item.name}(${item.arguments?.substring(0, 50)}...)`;
     }
     return '';
+  }
+
+  // Make a request to the OpenAI Responses API
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // Helper method to handle SDK errors
+  private handleSDKError(error: unknown): never {
+    if (error instanceof Error) {
+      console.error('OpenAI SDK error:', error.message);
+      throw new Error(`OpenAI Responses API error: ${error.message}`);
+    }
+    throw error;
   }
 }

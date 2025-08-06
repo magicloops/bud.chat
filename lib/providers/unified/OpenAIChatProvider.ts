@@ -5,29 +5,48 @@ import {
   UnifiedChatRequest, 
   UnifiedChatResponse, 
   StreamEvent,
-  ProviderFeature 
+  ProviderFeature,
+  UnifiedTool,
+  ValidationResult 
 } from './types';
 import { 
   Event, 
   EventLog,
   ToolCall,
-  Segment
+  Segment,
 } from '@/lib/types/events';
-import { generateToolCallId } from '@/lib/types/branded';
+import { generateToolCallId, generateEventId, ToolCallId } from '@/lib/types/branded';
 
 export class OpenAIChatProvider extends OpenAIBaseProvider {
   name = 'openai-chat' as const;
+  provider = 'openai' as const;
   
   supportsFeature(feature: ProviderFeature): boolean {
     const chatFeatures = [
-      ProviderFeature.FUNCTION_CALLING,
-      ProviderFeature.TOOL_STREAMING,
+      ProviderFeature.TOOL_CALLING,
       ProviderFeature.TEMPERATURE,
-      ProviderFeature.MAX_TOKENS,
-      ProviderFeature.TOP_P,
+      ProviderFeature.STREAMING,
     ];
     
     return super.supportsFeature(feature) || chatFeatures.includes(feature);
+  }
+  
+  protected validateProviderSpecific(_config: Partial<UnifiedChatRequest>): ValidationResult {
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    
+    // Add any OpenAI Chat-specific validations here
+    
+    return { valid: errors.length === 0, errors, warnings };
+  }
+  
+  protected getFeatureSupport(): Partial<Record<ProviderFeature, boolean>> {
+    return {
+      [ProviderFeature.TOOL_CALLING]: true,
+      [ProviderFeature.TEMPERATURE]: true,
+      [ProviderFeature.STREAMING]: true,
+      [ProviderFeature.SYSTEM_MESSAGE]: true,
+    };
   }
   
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
@@ -39,7 +58,6 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
         messages,
         temperature: request.temperature,
         max_tokens: request.maxTokens,
-        top_p: request.topP,
         tools: request.tools ? this.convertTools(request.tools) : undefined,
         tool_choice: request.toolChoice
       });
@@ -73,14 +91,13 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
         messages,
         temperature: request.temperature,
         max_tokens: request.maxTokens,
-        top_p: request.topP,
         tools: request.tools ? this.convertTools(request.tools) : undefined,
         tool_choice: request.toolChoice,
         stream: true
       });
       
-      let currentEvent: Event = {
-        id: crypto.randomUUID(),
+      const currentEvent: Event = {
+        id: generateEventId(),
         role: 'assistant',
         segments: [],
         ts: Date.now(),
@@ -128,19 +145,26 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
             const index = toolCallDelta.index!;
             
             if (!toolCalls.has(index)) {
+              const toolCallId = (toolCallDelta.id || generateToolCallId()) as ToolCallId;
               const toolCall: ToolCall = {
-                type: 'tool_call',
-                id: toolCallDelta.id || generateToolCallId(),
+                id: toolCallId,
                 name: toolCallDelta.function?.name || '',
                 args: {}
               };
               toolCalls.set(index, toolCall);
-              currentEvent.segments.push(toolCall);
+              
+              const segment: Segment = {
+                type: 'tool_call',
+                id: toolCallId,
+                name: toolCall.name,
+                args: toolCall.args
+              };
+              currentEvent.segments.push(segment);
               
               yield {
                 type: 'segment',
                 data: {
-                  segment: toolCall,
+                  segment: segment,
                   segmentIndex: currentEvent.segments.length - 1
                 }
               };
@@ -150,19 +174,52 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
             
             if (toolCallDelta.function?.name) {
               toolCall.name = toolCallDelta.function.name;
+              
+              // Also update the segment's name
+              const segmentIndex = currentEvent.segments.findIndex(
+                s => s.type === 'tool_call' && s.id === toolCall.id
+              );
+              if (segmentIndex >= 0) {
+                const segment = currentEvent.segments[segmentIndex];
+                if (segment.type === 'tool_call') {
+                  segment.name = toolCall.name;
+                }
+              }
             }
             
             if (toolCallDelta.function?.arguments) {
-              // Accumulate arguments string
-              if (!toolCall.args._raw) {
-                toolCall.args._raw = '';
+              // Store raw accumulator separately to avoid overwriting it
+              if (!toolCall._rawArgs) {
+                toolCall._rawArgs = '';
               }
-              toolCall.args._raw += toolCallDelta.function.arguments;
+              toolCall._rawArgs += toolCallDelta.function.arguments;
+              
               
               // Try to parse accumulated arguments
               try {
-                const parsed = JSON.parse(toolCall.args._raw);
+                const parsed = JSON.parse(toolCall._rawArgs);
                 toolCall.args = parsed;
+                
+                
+                // Update the segment in currentEvent
+                const segmentIndex = currentEvent.segments.findIndex(
+                  s => s.type === 'tool_call' && s.id === toolCall.id
+                );
+                if (segmentIndex >= 0) {
+                  const segment = currentEvent.segments[segmentIndex];
+                  if (segment.type === 'tool_call') {
+                    segment.args = parsed;
+                    
+                    // Yield updated segment with args
+                    yield {
+                      type: 'segment',
+                      data: {
+                        segment: segment,
+                        segmentIndex: segmentIndex
+                      }
+                    };
+                  }
+                }
               } catch {
                 // Not yet valid JSON, continue accumulating
               }
@@ -183,10 +240,10 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
   
   private convertEventsToMessages(events: Event[]): OpenAI.ChatCompletionMessageParam[] {
     const eventLog = new EventLog(events);
-    return eventLog.toOpenAIMessages();
+    return eventLog.toProviderMessages('openai') as OpenAI.ChatCompletionMessageParam[];
   }
   
-  private convertTools(tools: any[]): OpenAI.ChatCompletionTool[] {
+  private convertTools(tools: UnifiedTool[]): OpenAI.ChatCompletionTool[] {
     return tools.map(tool => ({
       type: 'function' as const,
       function: {
@@ -210,7 +267,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
           const args = JSON.parse(toolCall.function.arguments);
           segments.push({
             type: 'tool_call',
-            id: toolCall.id,
+            id: toolCall.id as ToolCallId,
             name: toolCall.function.name,
             args
           });
@@ -221,7 +278,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
     }
     
     return {
-      id: crypto.randomUUID(),
+      id: generateEventId(),
       role: message.role as Event['role'],
       segments,
       ts: Date.now()

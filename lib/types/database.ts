@@ -139,7 +139,7 @@ export type Database = {
           id: string
           workspace_id: string
           root_msg_id: string | null
-          bud_id: string | null
+          source_bud_id: string | null
           title: string | null
           assistant_name: string | null
           assistant_avatar: string | null
@@ -152,7 +152,7 @@ export type Database = {
           id?: string
           workspace_id: string
           root_msg_id?: string | null
-          bud_id?: string | null
+          source_bud_id?: string | null
           title?: string | null
           assistant_name?: string | null
           assistant_avatar?: string | null
@@ -165,7 +165,7 @@ export type Database = {
           id?: string
           workspace_id?: string
           root_msg_id?: string | null
-          bud_id?: string | null
+          source_bud_id?: string | null
           title?: string | null
           assistant_name?: string | null
           assistant_avatar?: string | null
@@ -184,7 +184,7 @@ export type Database = {
           },
           {
             foreignKeyName: 'conversations_bud_id_fkey'
-            columns: ['bud_id']
+            columns: ['source_bud_id']
             isOneToOne: false
             referencedRelation: 'buds'
             referencedColumns: ['id']

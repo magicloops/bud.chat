@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { createClient } from '@/lib/supabase/client';
 import { Event, Role } from '@/lib/types/events';
+import { EventId, ToolCallId } from '@/lib/types/branded';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // Properly typed Supabase realtime payload
@@ -562,13 +563,13 @@ export function legacyMessagesToEvents(messages: unknown[]): Event[] {
       };
     }; // Type assertion for legacy message structure
     return {
-      id: msg.id,
+      id: msg.id as EventId,
       role: msg.role as Role,
       segments: [
         ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
         ...(msg.json_meta?.tool_calls || []).map((toolCall: { id: string; function: { name: string; arguments: string } }) => ({
           type: 'tool_call' as const,
-          id: toolCall.id,
+          id: toolCall.id as ToolCallId,
           name: toolCall.function.name,
           args: JSON.parse(toolCall.function.arguments || '{}')
         }))

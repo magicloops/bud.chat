@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event, Conversation } from '@/state/eventChatStore';
+import { ToolCallId } from '@/lib/types/branded';
 import { cn } from '@/lib/utils';
 import {
   Copy,
@@ -73,7 +74,7 @@ export const EventItem = memo(function EventItem({
   const [showReasoning, setShowReasoning] = useState(false);
   // Error handling - check if any segments have errors
   const error = useMemo(() => {
-    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: string; output: object; error: string } => 
+    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: ToolCallId; output: object; error: string } => 
       segment.type === 'tool_result' && 'error' in segment && !!segment.error
     );
     return errorSegments.length > 0 ? { error: errorSegments[0].error } : null;

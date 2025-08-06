@@ -4,6 +4,7 @@ import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Event, Conversation } from '@/state/eventChatStore';
+import { ToolCallId } from '@/lib/types/branded';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
@@ -14,7 +15,7 @@ import {
   GitBranch,
   MoreHorizontal,
   AlertCircle,
-  Wrench,
+  // Wrench, // Not currently used
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -66,7 +67,7 @@ export const EventItemSequential = memo(function EventItemSequential({
   
   // Error handling - check if any segments have errors
   const error = useMemo(() => {
-    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: string; output: object; error: string } => 
+    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: ToolCallId; output: object; error: string } => 
       segment.type === 'tool_result' && 'error' in segment && !!segment.error
     );
     return errorSegments.length > 0 ? { error: errorSegments[0].error } : null;

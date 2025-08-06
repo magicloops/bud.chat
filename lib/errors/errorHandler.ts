@@ -102,6 +102,7 @@ export function handleStreamError(error: unknown): string {
 /**
  * Wrap async functions with error handling
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function withErrorHandling<T extends (...args: any[]) => Promise<any>>(
   fn: T,
   errorTransformer?: (error: unknown) => AppError

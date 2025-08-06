@@ -73,6 +73,7 @@ export interface UnifiedTool {
   name: string;
   description?: string;
   parameters?: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>; // MCP tools use inputSchema
   serverId?: string;
   serverType?: 'local' | 'remote';
 }

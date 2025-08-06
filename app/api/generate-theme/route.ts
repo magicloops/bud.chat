@@ -64,11 +64,14 @@ The theme should be cohesive and match the user's description.`;
     const response = await provider.chat({
       events,
       model: 'o3',
-      maxTokens: 8000,
-      responseFormat: { type: 'json_object' }
+      maxTokens: 8000
+      // Note: responseFormat is not supported in UnifiedChatRequest
     });
 
-    const themeJson = response.content;
+    // Extract text content from the response event
+    const responseEvent = response.event;
+    const textSegments = responseEvent.segments.filter(s => s.type === 'text');
+    const themeJson = textSegments.map(s => s.text).join('');
     if (!themeJson) {
       throw new Error('No theme generated');
     }

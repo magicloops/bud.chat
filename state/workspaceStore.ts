@@ -70,7 +70,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         }),
         
         addWorkspace: (workspace) => set((state) => {
-          state.workspaces[workspace.id] = workspace;
+          state.workspaces[workspace.id as WorkspaceId] = workspace;
         }),
         
         updateWorkspace: (id, updates) => set((state) => {
@@ -129,24 +129,24 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           const workspaceId = bud.workspace_id;
           if (!workspaceId) return; // Personal buds not supported yet
           
-          if (!state.buds[workspaceId]) {
-            state.buds[workspaceId] = [];
+          if (!state.buds[workspaceId as WorkspaceId]) {
+            state.buds[workspaceId as WorkspaceId] = [];
           }
           
-          state.buds[workspaceId].push(bud);
-          state.buds[workspaceId].sort((a, b) => a.name.localeCompare(b.name));
+          state.buds[workspaceId as WorkspaceId].push(bud);
+          state.buds[workspaceId as WorkspaceId].sort((a: Bud, b: Bud) => a.name.localeCompare(b.name));
         }),
         
         updateBud: (id, updates) => set((state) => {
           // Find bud across all workspaces
           for (const workspaceId in state.buds) {
-            const buds = state.buds[workspaceId];
-            const index = buds.findIndex(b => b.id === id);
+            const buds = state.buds[workspaceId as WorkspaceId];
+            const index = buds.findIndex((b: Bud) => b.id === id);
             if (index >= 0) {
               Object.assign(buds[index], updates);
               // Re-sort if name changed
               if (updates.name) {
-                buds.sort((a, b) => a.name.localeCompare(b.name));
+                buds.sort((a: Bud, b: Bud) => a.name.localeCompare(b.name));
               }
               break;
             }
@@ -156,7 +156,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         removeBud: (id) => set((state) => {
           // Remove bud from all workspaces
           for (const workspaceId in state.buds) {
-            state.buds[workspaceId] = state.buds[workspaceId].filter(b => b.id !== id);
+            state.buds[workspaceId as WorkspaceId] = state.buds[workspaceId as WorkspaceId].filter((b: Bud) => b.id !== id);
           }
         }),
         

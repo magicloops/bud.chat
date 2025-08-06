@@ -8,8 +8,19 @@ import {
   ValidationResult, 
   ProviderFeature 
 } from './types';
-import { Event, EventLog, createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events';
+import { Event, EventLog } from '@/lib/types/events';
+import { generateEventId, ToolCallId } from '@/lib/types/branded';
+// import { createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events'; // Not currently used
 import { getApiModelName } from '@/lib/modelMapping';
+
+// Type for Anthropic tool input schema that matches the SDK requirements
+interface AnthropicInputSchema {
+  type: 'object';
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+  [key: string]: unknown;
+}
 
 export class AnthropicProvider extends BaseProvider {
   readonly name = 'Anthropic';
@@ -62,11 +73,17 @@ export class AnthropicProvider extends BaseProvider {
       
       // Add tools if provided
       if (request.tools && request.tools.length > 0) {
-        anthropicRequest.tools = request.tools.map(tool => ({
-          name: tool.name,
-          description: tool.description || '',
-          input_schema: tool.parameters || tool.inputSchema || { type: 'object', properties: {} }
-        }));
+        anthropicRequest.tools = request.tools.map(tool => {
+          // Use inputSchema if available (MCP tools), fallback to parameters
+          const schema = tool.inputSchema || tool.parameters;
+          return {
+            name: tool.name,
+            description: tool.description || '',
+            input_schema: (schema && typeof schema === 'object' && 'type' in schema) 
+              ? schema as AnthropicInputSchema
+              : { type: 'object' as const, properties: schema || {} } as AnthropicInputSchema
+          };
+        });
         
         if (request.toolChoice) {
           if (request.toolChoice === 'required') {
@@ -124,16 +141,20 @@ export class AnthropicProvider extends BaseProvider {
         });
         
         anthropicRequest.tools = request.tools.map(tool => {
+          // Use inputSchema if available (MCP tools), fallback to parameters
+          const schema = tool.inputSchema || tool.parameters;
           const anthropicTool = {
             name: tool.name,
             description: tool.description || '',
-            input_schema: tool.parameters || tool.inputSchema || { type: 'object', properties: {} }
+            input_schema: (schema && typeof schema === 'object' && 'type' in schema) 
+              ? schema 
+              : { type: 'object' as const, properties: schema || {} }
           };
           console.log('🔧 [AnthropicProvider] Converted tool:', {
             original: tool,
             converted: anthropicTool
           });
-          return anthropicTool;
+          return anthropicTool as Anthropic.Tool;
         });
         
         if (request.toolChoice) {
@@ -154,12 +175,12 @@ export class AnthropicProvider extends BaseProvider {
       
       let currentEvent: Event | null = null;
       let currentText = '';
-      let currentToolCalls: Array<{ id: string; name: string; input: string }> = [];
+      const currentToolCalls: Array<{ id: string; name: string; input: string }> = [];
       
       for await (const chunk of stream) {
         if (chunk.type === 'message_start') {
           currentEvent = {
-            id: crypto.randomUUID(),
+            id: generateEventId(),
             role: 'assistant',
             segments: [],
             ts: Date.now()
@@ -228,7 +249,7 @@ export class AnthropicProvider extends BaseProvider {
                 // Only add to event segments, don't emit again
                 currentEvent.segments.push({
                   type: 'tool_call',
-                  id: lastToolCall.id,
+                  id: lastToolCall.id as ToolCallId,
                   name: lastToolCall.name,
                   args
                 });
@@ -277,7 +298,7 @@ export class AnthropicProvider extends BaseProvider {
     }).filter(Boolean) as Event['segments'];
     
     return {
-      id: response.id,
+      id: generateEventId(),
       role: 'assistant',
       segments,
       ts: Date.now()

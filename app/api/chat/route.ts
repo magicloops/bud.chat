@@ -1,30 +1,31 @@
 // Unified Chat API - Consolidates all chat endpoints using new abstractions
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { ProviderFactory, UnifiedChatRequest } from '@/lib/providers/unified';
-import { StreamingFormat, EventConverter } from '@/lib/events';
+import { ProviderFactory, UnifiedChatRequest, UnifiedTool } from '@/lib/providers/unified';
+import { StreamingFormat } from '@/lib/events';
+// import { EventConverter } from '@/lib/events'; // Not currently used
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
 import { 
   EventLog, 
   createTextEvent, 
   createToolResultEvent,
-  createMixedEvent,
+  // createMixedEvent, // Not currently used
   Event,
   DatabaseEvent,
   ToolCall
 } from '@/lib/types/events';
 import { 
   WorkspaceId, 
-  BudId, 
+  BudId, // Used in getToolsForBud function 
   ConversationId,
   toWorkspaceId,
   toBudIdOrNull,
   toConversationIdOrNull,
   generateConversationId,
-  generateEventId,
+  // generateEventId, // Not currently used
   ToolCallId
 } from '@/lib/types/branded';
-import { Bud } from '@/lib/types';
+import { Bud, Database } from '@/lib/types';
 import { generateKeyBetween } from 'fractional-indexing';
 import { generateConversationTitleInBackground } from '@/lib/chat/shared';
 
@@ -86,7 +87,7 @@ async function validateConversationAccess(
   supabase: Awaited<ReturnType<typeof createClient>>,
   conversationId: string,
   userId: string
-): Promise<{ conversation: any; workspaceId: WorkspaceId }> {
+): Promise<{ conversation: Database['public']['Tables']['conversations']['Row'] & { workspace: Database['public']['Tables']['workspaces']['Row'] }; workspaceId: WorkspaceId }> {
   const { data: conversation, error } = await supabase
     .from('conversations')
     .select('*, workspace:workspaces!inner(*)')
@@ -173,7 +174,7 @@ async function saveEvents(
     }
   }
   
-  return orderKey;
+  return orderKey ?? null;
 }
 
 // Helper to create a new conversation
@@ -223,7 +224,7 @@ async function getToolsForBud(
   supabase: Awaited<ReturnType<typeof createClient>>,
   budId: BudId,
   workspaceId: WorkspaceId
-): Promise<{ tools: any[]; mcpAvailable: boolean }> {
+): Promise<{ tools: UnifiedTool[]; mcpAvailable: boolean }> {
   try {
     const { data: bud, error } = await supabase
       .from('buds')
@@ -319,10 +320,11 @@ async function executeMCPToolCalls(
     
     const results: Array<{ id: ToolCallId; output: object; error?: string }> = [];
     for (const toolCall of toolCalls) {
+      
       try {
         const result = await mcpClient.callTool({
           name: toolCall.name,
-          arguments: toolCall.args
+          arguments: toolCall.args as Record<string, unknown>
         });
         
         let output = result.content;
@@ -419,19 +421,9 @@ export async function POST(request: NextRequest) {
       for (const message of newChatBody.messages) {
         // Check if message is already an Event object
         if ('segments' in message && Array.isArray(message.segments)) {
-          console.log('🔍 [CHAT API] Message is already an Event:', {
-            role: message.role,
-            segmentCount: message.segments.length,
-            segments: message.segments
-          });
-          eventLog.addEvent(message as Event);
+          eventLog.addEvent(message as unknown as Event);
         } else {
           // Traditional message format
-          console.log('🔍 [CHAT API] Converting message to event:', {
-            role: message.role,
-            contentLength: message.content?.length,
-            contentPreview: message.content?.substring(0, 100) + '...'
-          });
           
           if (message.role === 'system' || message.role === 'user') {
             eventLog.addEvent(createTextEvent(message.role, message.content));
@@ -467,8 +459,9 @@ export async function POST(request: NextRequest) {
       model = 'gpt-4o'; // Default fallback
       
       // Check if conversation has model override
-      if (conversation.model_config_overrides?.model) {
-        model = conversation.model_config_overrides.model;
+      const modelOverrides = conversation.model_config_overrides as { model?: string } | null;
+      if (modelOverrides?.model) {
+        model = modelOverrides.model;
       } else if (budId) {
         // Check bud's default model
         const { data: bud } = await supabase
@@ -514,9 +507,9 @@ export async function POST(request: NextRequest) {
     }
     
     // Get tools if bud is configured
-    let tools: any[] = [];
+    let tools: UnifiedTool[] = [];
     if (budId) {
-      const { tools: budTools, mcpAvailable } = await getToolsForBud(supabase, budId, workspaceId);
+      const { tools: budTools } = await getToolsForBud(supabase, budId, workspaceId);
       tools = budTools;
     }
     
@@ -652,53 +645,60 @@ export async function POST(request: NextRequest) {
             let currentEvent: Event | null = null;
             let hasToolCalls = false;
             let eventStarted = false;
+            const startedTools = new Set<string>(); // Track which tools we've already started
             
             for await (const streamEvent of provider.stream(chatRequest)) {
-              switch (streamEvent.type) {
+              // Cast to any to handle extended event types from OpenAI Responses API
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const extendedEvent = streamEvent as any;
+              switch (extendedEvent.type) {
                 case 'event':
-                  if (streamEvent.data?.event) {
-                    currentEvent = streamEvent.data.event;
-                    eventLog.addEvent(currentEvent);
-                    allNewEvents.push(currentEvent);
-                    hasToolCalls = currentEvent.segments.some(s => s.type === 'tool_call');
-                    
-                    // Send event start
-                    if (!eventStarted) {
-                      controller.enqueue(encoder.encode(
-                        streamingFormat.formatSSE(
-                          streamingFormat.eventStart(currentEvent)
-                        )
-                      ));
-                      eventStarted = true;
-                    }
-                    
-                    // Process segments from the event
-                    for (const segment of currentEvent.segments) {
-                      if (segment.type === 'tool_call') {
-                        // Emit tool_start
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                          type: 'tool_start',
-                          tool_id: segment.id,
-                          tool_name: segment.name,
-                          content: `🔧 *Using tool: ${segment.name}*\n`,
-                          hideProgress: true
-                        })}\n\n`));
-                        
-                        // Emit tool_finalized with args
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                          type: 'tool_finalized',
-                          tool_id: segment.id,
-                          tool_name: segment.name,
-                          args: segment.args
-                        })}\n\n`));
+                  if (extendedEvent.data?.event) {
+                    currentEvent = extendedEvent.data.event;
+                    if (currentEvent) {
+                      eventLog.addEvent(currentEvent);
+                      allNewEvents.push(currentEvent);
+                      hasToolCalls = currentEvent.segments.some(s => s.type === 'tool_call');
+                      
+                      // Send event start
+                      if (!eventStarted) {
+                        controller.enqueue(encoder.encode(
+                          streamingFormat.formatSSE(
+                            streamingFormat.eventStart(currentEvent)
+                          )
+                        ));
+                        eventStarted = true;
+                      }
+                      
+                      // Process segments from the event
+                      for (const segment of currentEvent.segments) {
+                        if (segment.type === 'tool_call') {
+                          
+                          // Emit tool_start
+                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'tool_start',
+                            tool_id: segment.id,
+                            tool_name: segment.name,
+                            content: `🔧 *Using tool: ${segment.name}*\n`,
+                            hideProgress: true
+                          })}\n\n`));
+                          
+                          // Emit tool_finalized with args
+                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                            type: 'tool_finalized',
+                            tool_id: segment.id,
+                            tool_name: segment.name,
+                            args: segment.args
+                          })}\n\n`));
+                        }
                       }
                     }
                   }
                   break;
                   
                 case 'segment':
-                  if (streamEvent.data?.segment) {
-                    const segment = streamEvent.data.segment;
+                  if (extendedEvent.data?.segment) {
+                    const segment = extendedEvent.data.segment;
                     
                     if (segment.type === 'text' && segment.text) {
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({
@@ -708,6 +708,7 @@ export async function POST(request: NextRequest) {
                       })}\n\n`));
                     } else if (segment.type === 'tool_call') {
                       hasToolCalls = true;
+                      
                       
                       // Check if this is a partial tool call (during streaming) or complete
                       const hasCompleteArgs = segment.args && Object.keys(segment.args).length > 0;
@@ -764,132 +765,132 @@ export async function POST(request: NextRequest) {
                   
                 case 'reasoning_summary_part_added':
                   // Handle reasoning part added events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'reasoning_summary_part_added',
-                      item_id: streamEvent.data.item_id,
-                      summary_index: streamEvent.data.summary_index,
-                      part: streamEvent.data.part,
-                      sequence_number: streamEvent.data.sequence_number
+                      item_id: extendedEvent.data.item_id,
+                      summary_index: extendedEvent.data.summary_index,
+                      part: extendedEvent.data.part,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'reasoning_summary_text_delta':
                   // Handle reasoning text delta events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'reasoning_summary_text_delta',
-                      item_id: streamEvent.data.item_id,
-                      summary_index: streamEvent.data.summary_index,
-                      delta: streamEvent.data.delta,
-                      sequence_number: streamEvent.data.sequence_number
+                      item_id: extendedEvent.data.item_id,
+                      summary_index: extendedEvent.data.summary_index,
+                      delta: extendedEvent.data.delta,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'reasoning_summary_part_done':
                   // Handle reasoning part done events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'reasoning_summary_part_done',
-                      item_id: streamEvent.data.item_id,
-                      summary_index: streamEvent.data.summary_index,
-                      sequence_number: streamEvent.data.sequence_number
+                      item_id: extendedEvent.data.item_id,
+                      summary_index: extendedEvent.data.summary_index,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'reasoning_complete':
                   // Handle reasoning complete events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'reasoning_complete',
-                      item_id: streamEvent.data.item_id,
-                      parts: streamEvent.data.parts,
-                      combined_text: streamEvent.data.combined_text,
-                      output_index: streamEvent.data.output_index,
-                      sequence_number: streamEvent.data.sequence_number
+                      item_id: extendedEvent.data.item_id,
+                      parts: extendedEvent.data.parts,
+                      combined_text: extendedEvent.data.combined_text,
+                      output_index: extendedEvent.data.output_index,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'mcp_tool_start':
                   // Handle MCP tool start events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'mcp_tool_start',
-                      tool_id: streamEvent.data.tool_id,
-                      tool_name: streamEvent.data.tool_name,
-                      server_label: streamEvent.data.server_label,
-                      display_name: streamEvent.data.display_name,
-                      server_type: streamEvent.data.server_type,
-                      output_index: streamEvent.data.output_index,
-                      sequence_number: streamEvent.data.sequence_number
+                      tool_id: extendedEvent.data.tool_id,
+                      tool_name: extendedEvent.data.tool_name,
+                      server_label: extendedEvent.data.server_label,
+                      display_name: extendedEvent.data.display_name,
+                      server_type: extendedEvent.data.server_type,
+                      output_index: extendedEvent.data.output_index,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'mcp_tool_arguments_delta':
                   // Handle MCP tool arguments delta events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'mcp_tool_arguments_delta',
-                      tool_id: streamEvent.data.tool_id,
-                      delta: streamEvent.data.delta
+                      tool_id: extendedEvent.data.tool_id,
+                      delta: extendedEvent.data.delta
                     })}\n\n`));
                   }
                   break;
                   
                 case 'mcp_tool_finalized':
                   // Handle MCP tool finalized events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'mcp_tool_finalized',
-                      tool_id: streamEvent.data.tool_id,
-                      args: streamEvent.data.args
+                      tool_id: extendedEvent.data.tool_id,
+                      args: extendedEvent.data.args
                     })}\n\n`));
                   }
                   break;
                   
                 case 'mcp_tool_complete':
                   // Handle MCP tool complete events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'mcp_tool_complete',
-                      tool_id: streamEvent.data.tool_id,
-                      output: streamEvent.data.output,
-                      error: streamEvent.data.error,
-                      sequence_number: streamEvent.data.sequence_number,
-                      output_index: streamEvent.data.output_index
+                      tool_id: extendedEvent.data.tool_id,
+                      output: extendedEvent.data.output,
+                      error: extendedEvent.data.error,
+                      sequence_number: extendedEvent.data.sequence_number,
+                      output_index: extendedEvent.data.output_index
                     })}\n\n`));
                   }
                   break;
                   
                 case 'progress_update':
                   // Handle progress update events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'progress_update',
-                      activity: streamEvent.data.activity,
-                      server_label: streamEvent.data.server_label,
-                      sequence_number: streamEvent.data.sequence_number
+                      activity: extendedEvent.data.activity,
+                      server_label: extendedEvent.data.server_label,
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'progress_hide':
                   // Handle progress hide events
-                  if (streamEvent.data) {
+                  if (extendedEvent.data) {
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'progress_hide',
-                      sequence_number: streamEvent.data.sequence_number
+                      sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
                   break;
                   
                 case 'error':
-                  throw new Error(streamEvent.data?.error || 'Stream error');
+                  throw new Error(extendedEvent.data?.error || 'Stream error');
                   
                 case 'done':
                   if (currentEvent && !isNewConversation) {
@@ -929,7 +930,7 @@ export async function POST(request: NextRequest) {
             .filter(e => e.role === 'assistant')
             .flatMap(e => e.segments)
             .filter(s => s.type === 'text')
-            .map(s => (s as any).text)
+            .map(s => s.type === 'text' ? s.text : '')
             .join('');
           
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({

@@ -14,7 +14,7 @@ export abstract class OpenAIBaseProvider extends BaseProvider {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new AppError(
-        ErrorCode.CONFIGURATION_ERROR,
+        ErrorCode.PROVIDER_INVALID_KEY,
         'OpenAI API key not configured'
       );
     }
@@ -69,7 +69,7 @@ export abstract class OpenAIBaseProvider extends BaseProvider {
   supportsFeature(feature: ProviderFeature): boolean {
     const commonFeatures = [
       ProviderFeature.STREAMING,
-      ProviderFeature.SYSTEM_MESSAGES,
+      ProviderFeature.SYSTEM_MESSAGE,
     ];
     
     return commonFeatures.includes(feature);

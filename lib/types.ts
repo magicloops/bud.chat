@@ -1,8 +1,13 @@
 import { Database } from './types/database';
-import { ConversationId, WorkspaceId, BudId, UserId } from './types/branded';
+import { ConversationId, WorkspaceId } from './types/branded';
+// import { BudId, UserId } from './types/branded'; // Not currently used
 
 // Re-export branded types for convenience
-export { ConversationId, WorkspaceId, BudId, UserId } from './types/branded';
+export type { ConversationId, WorkspaceId } from './types/branded';
+export type { BudId, UserId } from './types/branded';
+
+// Re-export Database type
+export type { Database } from './types/database';
 
 // Bud Configuration (actively used) - defined first for type dependency
 export interface BudConfig {

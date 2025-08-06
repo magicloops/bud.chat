@@ -2,7 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
-import { WorkspaceId, BudId, toWorkspaceId, generateBudId } from '@/lib/types/branded';
+import { WorkspaceId, toWorkspaceId, generateBudId } from '@/lib/types/branded';
+// import { BudId } from '@/lib/types/branded'; // Type not currently used
 import { BudConfig } from '@/lib/types';
 
 export interface CreateBudRequest {

@@ -2,7 +2,9 @@ import { Event, useEventChatStore } from '@/state/eventChatStore';
 import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
-import { ProgressState, ActivityType, getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress';
+import { ProgressState, ActivityType } from '@/lib/types/progress';
+import { ToolCallId, generateEventId } from '@/lib/types/branded';
+// import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
   type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
@@ -80,6 +82,7 @@ export class FrontendEventHandler {
   // For local state updates (optimistic flow)
   private localStateUpdater: LocalStateUpdater | null = null;
   private assistantPlaceholder: Event | null = null;
+  private hasCreatedPostToolPlaceholder: boolean = false;
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -96,6 +99,7 @@ export class FrontendEventHandler {
   setLocalStateUpdater(updater: LocalStateUpdater, placeholder: Event): void {
     this.localStateUpdater = updater;
     this.assistantPlaceholder = placeholder;
+    this.hasCreatedPostToolPlaceholder = false; // Reset flag for new stream
   }
 
   /**
@@ -334,7 +338,6 @@ export class FrontendEventHandler {
    */
   private async handleMCPListToolsEvent(data: StreamEvent): Promise<void> {
     const { server_label, tools } = data;
-    console.log('🔍 MCP tools discovered:', { server_label, tool_count: (tools as unknown[])?.length || 0 });
     // This is informational only - no UI updates needed
   }
 
@@ -343,7 +346,6 @@ export class FrontendEventHandler {
    */
   private async handleMCPApprovalRequestEvent(data: StreamEvent): Promise<void> {
     const { approval_request_id, tool_name, server_label } = data;
-    console.log('⚠️ MCP approval requested:', { approval_request_id, tool_name, server_label });
     // Future implementation: show approval dialog to user
     // For now, just log the event
   }
@@ -363,8 +365,6 @@ export class FrontendEventHandler {
    * Handle error events
    */
   private async handleErrorEvent(data: StreamEvent): Promise<void> {
-    console.error('❌ Stream error:', data.error);
-
     if (this.isLocalState()) {
       this.updateLocalStateError(data);
     } else {
@@ -718,23 +718,34 @@ export class FrontendEventHandler {
     if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
 
     this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
+      return events.map(event => {
+        if (event.id === this.assistantPlaceholder!.id) {
+          // Check if tool already exists
+          const toolExists = event.segments.some(
+            s => s.type === 'tool_call' && s.id === data.tool_id
+          );
+          
+          if (!toolExists) {
+            // Only add new tool if it doesn't exist
+            const newSegment = {
+              type: 'tool_call' as const,
+              id: data.tool_id! as ToolCallId,
+              name: data.tool_name!,
+              args: {}
+            };
+            
+            return {
               ...event,
               segments: [
                 ...event.segments,
-                {
-                  type: 'tool_call' as const,
-                  id: data.tool_id!,
-                  name: data.tool_name!,
-                  args: {}
-                }
+                newSegment
               ],
               ts: Date.now()
-            }
-          : event
-      );
+            };
+          }
+        }
+        return event;
+      });
     });
   }
 
@@ -746,11 +757,12 @@ export class FrontendEventHandler {
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
-              segments: event.segments.map(segment => 
-                segment.type === 'tool_call' && segment.id === data.tool_id
-                  ? { ...segment, args: data.args! }
-                  : segment
-              ),
+              segments: event.segments.map(segment => {
+                if (segment.type === 'tool_call' && segment.id === data.tool_id) {
+                  return { ...segment, args: data.args! };
+                }
+                return segment;
+              }),
               ts: Date.now()
             }
           : event
@@ -762,11 +774,11 @@ export class FrontendEventHandler {
     if (!this.localStateUpdater || !data.tool_id || !data.output) return;
 
     const toolResultEvent: Event = {
-      id: crypto.randomUUID(),
+      id: generateEventId(),
       role: 'tool',
       segments: [{
         type: 'tool_result',
-        id: data.tool_id,
+        id: data.tool_id as ToolCallId,
         output: typeof data.output === 'object' && data.output !== null ? data.output : { result: data.output }
       }],
       ts: Date.now()
@@ -777,10 +789,13 @@ export class FrontendEventHandler {
 
   private updateLocalStateToolComplete(_data: StreamEvent): void {
     // Create a new assistant placeholder for the next streaming response
-    if (!this.localStateUpdater) return;
+    // But only create it once, even if there are multiple tool calls
+    if (!this.localStateUpdater || this.hasCreatedPostToolPlaceholder) {
+      return;
+    }
     
     const newAssistantPlaceholder: Event = {
-      id: crypto.randomUUID(),
+      id: generateEventId(),
       role: 'assistant',
       segments: [{ type: 'text', text: '' }],
       ts: Date.now()
@@ -792,11 +807,14 @@ export class FrontendEventHandler {
     
     // Update the assistant placeholder reference for future token updates
     this.assistantPlaceholder = newAssistantPlaceholder;
+    this.hasCreatedPostToolPlaceholder = true;
   }
 
   private updateLocalStateComplete(_data: StreamEvent): void {
     // Mark streaming as complete in local state
     // This is typically handled by the parent component
+    // Reset the flag for next stream
+    this.hasCreatedPostToolPlaceholder = false;
   }
 
   private updateLocalStateError(_data: StreamEvent): void {
@@ -814,44 +832,44 @@ export class FrontendEventHandler {
    */
 
   private updateLocalStateMCPToolStart(data: StreamEvent): void {
-    
     if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) {
-      console.error('🚨 [FRONTEND-HANDLER] Missing required data for MCP tool start update:', {
-        has_updater: !!this.localStateUpdater,
-        has_placeholder: !!this.assistantPlaceholder,
-        has_tool_id: !!data.tool_id,
-        has_tool_name: !!data.tool_name
-      });
       return;
     }
 
     this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
+      return events.map(event => {
+        if (event.id === this.assistantPlaceholder!.id) {
+          // Check if tool already exists
+          const toolExists = event.segments.some(
+            s => s.type === 'tool_call' && s.id === data.tool_id
+          );
+          
+          if (!toolExists) {
+            // Only add new tool if it doesn't exist
+            return {
               ...event,
               segments: [
                 ...event.segments,
                 {
                   type: 'tool_call' as const,
-                  id: data.tool_id!,
+                  id: data.tool_id! as ToolCallId,
                   name: data.tool_name!,
                   args: {},
                   // Add sequence_number and output_index for proper ordering
                   sequence_number: data.sequence_number,
                   output_index: data.output_index,
-                  // Add MCP-specific metadata if available
-                  metadata: {
-                    server_label: data.server_label,
-                    server_type: data.server_type,
-                    display_name: data.display_name
-                  }
+                  // Add MCP-specific fields directly
+                  server_label: data.server_label,
+                  server_type: data.server_type,
+                  display_name: data.display_name
                 }
               ],
               ts: Date.now()
-            }
-          : event
-      );
+            };
+          }
+        }
+        return event;
+      });
     });
   }
 
@@ -863,11 +881,12 @@ export class FrontendEventHandler {
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
-              segments: event.segments.map(segment => 
-                segment.type === 'tool_call' && segment.id === data.tool_id
-                  ? { ...segment, args: data.args! }
-                  : segment
-              ),
+              segments: event.segments.map(segment => {
+                if (segment.type === 'tool_call' && segment.id === data.tool_id) {
+                  return { ...segment, args: data.args! };
+                }
+                return segment;
+              }),
               ts: Date.now()
             }
           : event
@@ -888,11 +907,9 @@ export class FrontendEventHandler {
                 ...event.segments,
                 {
                   type: 'tool_result' as const,
-                  id: data.tool_id!,
-                  output: data.output || {},
-                  error: data.error,
-                  sequence_number: data.sequence_number,
-                  output_index: data.output_index
+                  id: data.tool_id! as ToolCallId,
+                  output: typeof data.output === 'object' && data.output !== null ? data.output : {},
+                  error: data.error
                 }
               ],
               ts: Date.now()

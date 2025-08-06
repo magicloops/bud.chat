@@ -42,7 +42,7 @@ export function ToolCallSegment({
   segment, 
   event,
   allEvents,
-  isStreaming = false,
+  isStreaming = false, // eslint-disable-line @typescript-eslint/no-unused-vars
   className 
 }: ToolCallSegmentProps) {
   const [isExpanded, setIsExpanded] = useState(false);

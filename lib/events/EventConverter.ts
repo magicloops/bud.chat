@@ -1,6 +1,7 @@
 // Unified event conversion utilities
 import { Event, Segment, EventLog, ToolCall, ToolResult } from '@/lib/types/events';
-import { ToolCallId, generateToolCallId } from '@/lib/types/branded';
+import { ToolCallId } from '@/lib/types/branded';
+// import { generateToolCallId } from '@/lib/types/branded'; // Not currently used
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -134,12 +135,14 @@ export class EventConverter {
       
       switch (segment.type) {
         case 'text':
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (typeof (segment as any).text !== 'string') {
             errors.push('Text segments must have a string text property');
           }
           break;
           
         case 'tool_call':
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const toolCall = segment as any;
           if (!toolCall.id || !toolCall.name || !toolCall.args) {
             errors.push('Tool call segments must have id, name, and args');
@@ -147,6 +150,7 @@ export class EventConverter {
           break;
           
         case 'tool_result':
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const toolResult = segment as any;
           if (!toolResult.id || toolResult.output === undefined) {
             errors.push('Tool result segments must have id and output');
@@ -154,6 +158,7 @@ export class EventConverter {
           break;
           
         case 'reasoning':
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const reasoning = segment as any;
           if (!reasoning.id || typeof reasoning.output_index !== 'number' || !Array.isArray(reasoning.parts)) {
             errors.push('Reasoning segments must have id, output_index, and parts array');
@@ -161,7 +166,8 @@ export class EventConverter {
           break;
           
         default:
-          errors.push(`Unknown segment type: ${segment.type}`);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          errors.push(`Unknown segment type: ${(segment as any).type}`);
       }
     }
     
@@ -205,6 +211,7 @@ export class EventConverter {
       
       if (segments.length > 0) {
         events.push({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           id: crypto.randomUUID() as any, // Will be replaced with generateEventId()
           role: message.role as Event['role'],
           segments,
@@ -266,6 +273,7 @@ export class EventConverter {
       
       if (segments.length > 0) {
         events.push({
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           id: crypto.randomUUID() as any, // Will be replaced with generateEventId()
           role,
           segments,

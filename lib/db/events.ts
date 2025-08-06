@@ -2,10 +2,11 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { Event, DatabaseEvent } from '@/lib/types/events';
+import { ConversationId } from '@/lib/types/branded';
 import { generateKeyBetween } from 'fractional-indexing';
 
 export interface SaveEventOptions {
-  conversationId: string;
+  conversationId: ConversationId;
   orderKey?: string;
 }
 

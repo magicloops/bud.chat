@@ -8,7 +8,7 @@ import {
   generateOrderKeysForToolSequence,
   formatToolResultForDisplay 
 } from './messageHelpers';
-import { parseToolName } from './helpers';
+// import { parseToolName } from './helpers'; // Not currently used
 
 export interface StreamingContext {
   conversationId: string
@@ -49,7 +49,7 @@ export class MCPStreamingHandler {
     for (const toolCallDelta of toolCallsChunk) {
       if (toolCallDelta.index === undefined) continue;
 
-      const index = toolCallDelta.index;
+      const _index = toolCallDelta.index;
       const toolCallId = toolCallDelta.id;
 
       // Initialize or update tool call

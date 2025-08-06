@@ -2,6 +2,7 @@
 // These maintain compatibility with existing patterns while using events
 
 import { Event, createTextEvent, Segment, ReasoningPart, ResponseMetadata, createReasoningSegment, sortSegmentsBySequence } from '@/lib/types/events';
+import { ToolCallId, generateEventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
 import { BudConfig } from '@/lib/types';
@@ -236,7 +237,7 @@ export class StreamingEventBuilder {
   ) {
     const toolCallSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args,
       server_label: options?.server_label,
@@ -254,7 +255,7 @@ export class StreamingEventBuilder {
   addToolResult(id: string, output: object, error?: string) {
     this.event.segments.push({
       type: 'tool_result',
-      id,
+      id: id as ToolCallId,
       output,
       error
     });
@@ -351,7 +352,7 @@ export class StreamingEventBuilder {
     // This will be replaced when the tool call is completed
     const placeholderSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args: {}, // Empty args initially
       // Add visual indicator that this is still building
@@ -374,7 +375,7 @@ export class StreamingEventBuilder {
     // This will be replaced when the tool call is completed
     const placeholderSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args: {}, // Empty args initially
       // Add visual indicator that this is still building
@@ -431,7 +432,7 @@ export class StreamingEventBuilder {
           // Replace placeholder with complete tool call
           this.event.segments[segmentIndex] = {
             type: 'tool_call',
-            id: pending.id,
+            id: pending.id as ToolCallId,
             name: pending.name,
             args: parsedArgs,
             display_name: pending.name // Remove the "building..." indicator
@@ -519,7 +520,7 @@ export class StreamingEventBuilder {
   reset(role: 'assistant' | 'user' | 'system' | 'tool'): void {
     // Create a new empty event for the next iteration
     this.event = {
-      id: crypto.randomUUID(),
+      id: generateEventId(),
       role,
       segments: role === 'assistant' ? [{ type: 'text', text: '' }] : [],
       ts: Date.now(),

@@ -189,8 +189,20 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
       console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
+      
+      // TODO: Extract usage data from event.response when StreamEvent interface is extended
+      // const response = event.response as {
+      //   usage?: {
+      //     input_tokens: number;
+      //     output_tokens: number;
+      //     total_tokens: number;
+      //   };
+      // };
+      
+      // For now, just return the complete event. 
+      // Usage data will need to be handled differently since StreamEvent doesn't support a data field
       return {
-        type: 'finalize_only' // Finalize event but don't send complete to frontend yet
+        type: 'complete'
       };
 
     // Note: response.created and response.in_progress are handled earlier in the switch
@@ -423,8 +435,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       } else if (doneItem?.type === 'message') {
         // Handle message completion - this should trigger completion
         return {
-          type: 'complete',
-          finalize: true
+          type: 'complete'
         };
       }
       return null;
