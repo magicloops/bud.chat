@@ -332,6 +332,13 @@ async function executeMCPToolCalls(
           ).join('\n');
         }
         
+        // Truncate extremely large outputs to prevent context overflow
+        const MAX_TOOL_OUTPUT_LENGTH = 50000; // ~12.5k tokens
+        if (typeof output === 'string' && output.length > MAX_TOOL_OUTPUT_LENGTH) {
+          console.warn(`⚠️ Tool output truncated from ${output.length} to ${MAX_TOOL_OUTPUT_LENGTH} characters`);
+          output = output.substring(0, MAX_TOOL_OUTPUT_LENGTH) + '\n\n[... Output truncated due to length ...]';
+        }
+        
         results.push({
           id: toolCall.id,
           output: { content: output }
@@ -556,6 +563,14 @@ export async function POST(request: NextRequest) {
                 toolResultEvents.push(event);
                 allNewEvents.push(event);
                 
+                // Stream tool result
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  type: 'tool_result',
+                  tool_id: result.id,
+                  output: result.output,
+                  error: result.error || null
+                })}\n\n`));
+                
                 // Stream tool completion
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                   type: 'tool_complete',
@@ -656,6 +671,28 @@ export async function POST(request: NextRequest) {
                       ));
                       eventStarted = true;
                     }
+                    
+                    // Process segments from the event
+                    for (const segment of currentEvent.segments) {
+                      if (segment.type === 'tool_call') {
+                        // Emit tool_start
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_start',
+                          tool_id: segment.id,
+                          tool_name: segment.name,
+                          content: `🔧 *Using tool: ${segment.name}*\n`,
+                          hideProgress: true
+                        })}\n\n`));
+                        
+                        // Emit tool_finalized with args
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_finalized',
+                          tool_id: segment.id,
+                          tool_name: segment.name,
+                          args: segment.args
+                        })}\n\n`));
+                      }
+                    }
                   }
                   break;
                   
@@ -671,13 +708,36 @@ export async function POST(request: NextRequest) {
                       })}\n\n`));
                     } else if (segment.type === 'tool_call') {
                       hasToolCalls = true;
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-                        type: 'tool_start',
-                        tool_id: segment.id,
-                        tool_name: segment.name,
-                        content: `🔧 *Using tool: ${segment.name}*\n`,
-                        hideProgress: true
-                      })}\n\n`));
+                      
+                      // Check if this is a partial tool call (during streaming) or complete
+                      const hasCompleteArgs = segment.args && Object.keys(segment.args).length > 0;
+                      
+                      if (!hasCompleteArgs) {
+                        // Tool just started - emit tool_start
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_start',
+                          tool_id: segment.id,
+                          tool_name: segment.name,
+                          content: `🔧 *Using tool: ${segment.name}*\n`,
+                          hideProgress: true
+                        })}\n\n`));
+                      } else {
+                        // Tool is complete - emit both start and finalized
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_start',
+                          tool_id: segment.id,
+                          tool_name: segment.name,
+                          content: `🔧 *Using tool: ${segment.name}*\n`,
+                          hideProgress: true
+                        })}\n\n`));
+                        
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          type: 'tool_finalized',
+                          tool_id: segment.id,
+                          tool_name: segment.name,
+                          args: segment.args
+                        })}\n\n`));
+                      }
                     } else if (segment.type === 'reasoning') {
                       // Send reasoning segment
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({

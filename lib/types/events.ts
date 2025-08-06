@@ -261,12 +261,21 @@ export class EventLog {
             break;
           case 'tool_result':
             // Tool results become separate messages in Anthropic
+            let toolContent = JSON.stringify(segment.output);
+            
+            // Truncate extremely large tool outputs to prevent context overflow
+            const MAX_TOOL_RESULT_LENGTH = 30000; // ~7.5k tokens
+            if (toolContent.length > MAX_TOOL_RESULT_LENGTH) {
+              console.warn(`⚠️ [EventLog] Tool result truncated for Anthropic from ${toolContent.length} to ${MAX_TOOL_RESULT_LENGTH} characters`);
+              toolContent = toolContent.substring(0, MAX_TOOL_RESULT_LENGTH) + '... [truncated]';
+            }
+            
             messages.push({
               role: 'user',
               content: [{
                 type: 'tool_result',
                 tool_use_id: segment.id,
-                content: JSON.stringify(segment.output)
+                content: toolContent
               }]
             });
             break;
@@ -307,10 +316,19 @@ export class EventLog {
         // Tool results become separate tool messages in OpenAI
         for (const segment of event.segments) {
           if (segment.type === 'tool_result') {
+            let toolContent = JSON.stringify(segment.output);
+            
+            // Truncate extremely large tool outputs to prevent context overflow
+            const MAX_TOOL_RESULT_LENGTH = 30000; // ~7.5k tokens
+            if (toolContent.length > MAX_TOOL_RESULT_LENGTH) {
+              console.warn(`⚠️ [EventLog] Tool result truncated for OpenAI from ${toolContent.length} to ${MAX_TOOL_RESULT_LENGTH} characters`);
+              toolContent = toolContent.substring(0, MAX_TOOL_RESULT_LENGTH) + '... [truncated]';
+            }
+            
             messages.push({
               role: 'tool',
               tool_call_id: segment.id,
-              content: JSON.stringify(segment.output)
+              content: toolContent
             });
           }
         }

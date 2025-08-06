@@ -65,7 +65,7 @@ export class AnthropicProvider extends BaseProvider {
         anthropicRequest.tools = request.tools.map(tool => ({
           name: tool.name,
           description: tool.description || '',
-          input_schema: tool.parameters || { type: 'object', properties: {} }
+          input_schema: tool.parameters || tool.inputSchema || { type: 'object', properties: {} }
         }));
         
         if (request.toolChoice) {
@@ -118,11 +118,23 @@ export class AnthropicProvider extends BaseProvider {
       
       // Add tools if provided
       if (request.tools && request.tools.length > 0) {
-        anthropicRequest.tools = request.tools.map(tool => ({
-          name: tool.name,
-          description: tool.description || '',
-          input_schema: tool.parameters || { type: 'object', properties: {} }
-        }));
+        console.log('🔧 [AnthropicProvider] Converting tools for request:', {
+          toolCount: request.tools.length,
+          tools: request.tools.map(t => ({ name: t.name, hasDescription: !!t.description, hasParameters: !!t.parameters }))
+        });
+        
+        anthropicRequest.tools = request.tools.map(tool => {
+          const anthropicTool = {
+            name: tool.name,
+            description: tool.description || '',
+            input_schema: tool.parameters || tool.inputSchema || { type: 'object', properties: {} }
+          };
+          console.log('🔧 [AnthropicProvider] Converted tool:', {
+            original: tool,
+            converted: anthropicTool
+          });
+          return anthropicTool;
+        });
         
         if (request.toolChoice) {
           if (request.toolChoice === 'required') {
@@ -158,11 +170,17 @@ export class AnthropicProvider extends BaseProvider {
           if (chunk.content_block.type === 'text') {
             currentText = '';
           } else if (chunk.content_block.type === 'tool_use') {
+            console.log('🔧 [AnthropicProvider] Tool use started:', {
+              id: chunk.content_block.id,
+              name: chunk.content_block.name
+            });
             currentToolCalls.push({
               id: chunk.content_block.id,
               name: chunk.content_block.name,
               input: ''
             });
+            
+            // Don't emit segment events - let the route handler convert to proper events
           }
         }
         
@@ -170,12 +188,12 @@ export class AnthropicProvider extends BaseProvider {
           if (chunk.delta.type === 'text_delta') {
             currentText += chunk.delta.text;
             
-            // Emit text segment update
-            if (currentEvent) {
+            // Emit ONLY the delta text, not the accumulated text
+            if (currentEvent && chunk.delta.text) {
               yield {
                 type: 'segment',
                 data: {
-                  segment: { type: 'text', text: currentText },
+                  segment: { type: 'text', text: chunk.delta.text },
                   segmentIndex: 0 // TODO: Track actual segment index
                 }
               };
@@ -202,6 +220,12 @@ export class AnthropicProvider extends BaseProvider {
             if (lastToolCall && lastToolCall.input) {
               try {
                 const args = JSON.parse(lastToolCall.input);
+                console.log('🔧 [AnthropicProvider] Tool call completed:', {
+                  id: lastToolCall.id,
+                  name: lastToolCall.name,
+                  args
+                });
+                // Only add to event segments, don't emit again
                 currentEvent.segments.push({
                   type: 'tool_call',
                   id: lastToolCall.id,
@@ -209,7 +233,7 @@ export class AnthropicProvider extends BaseProvider {
                   args
                 });
               } catch (e) {
-                console.error('Failed to parse tool call input:', e);
+                console.error('Failed to parse tool call input:', e, 'Raw input:', lastToolCall.input);
               }
             }
           }
