@@ -4,6 +4,7 @@ import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Event, Conversation } from '@/state/eventChatStore';
+import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import {
@@ -81,9 +82,20 @@ export const EventItemSequential = memo(function EventItemSequential({
   const hasReasoningSegments = event.segments.some(s => s.type === 'reasoning');
   const hasToolCalls = event.segments.some(s => s.type === 'tool_call');
   
-  // Get assistant identity
-  const assistantName = conversation?.meta?.assistant_name || 'Assistant';
-  const assistantAvatar = conversation?.meta?.assistant_avatar || '🤖';
+  // Load bud data if conversation has a source_bud_id
+  const bud = useBud(conversation?.meta?.source_bud_id || '');
+  const budConfig = bud?.default_json;
+  
+  // Get assistant identity with proper hierarchy:
+  // 1. Conversation overrides (if explicitly set)
+  // 2. Bud configuration
+  // 3. Default values
+  const assistantName = conversation?.meta?.assistant_name || 
+                       (budConfig && typeof budConfig === 'object' && 'name' in budConfig ? budConfig.name as string : null) || 
+                       'Assistant';
+  const assistantAvatar = conversation?.meta?.assistant_avatar || 
+                         (budConfig && typeof budConfig === 'object' && 'avatar' in budConfig ? budConfig.avatar as string : null) || 
+                         '🤖';
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(textContent);

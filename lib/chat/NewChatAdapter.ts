@@ -73,8 +73,10 @@ async function createConversationInBackground(
       .insert({
         workspace_id: workspaceId,
         source_bud_id: budId,
-        assistant_name: bud?.assistant_name || budConfig?.name || 'Assistant',
-        assistant_avatar: bud?.assistant_avatar || budConfig?.avatar || '🤖',
+        // Only store assistant name/avatar if they're explicitly overridden
+        // Otherwise, let the frontend derive them from the bud configuration
+        assistant_name: null,
+        assistant_avatar: null,
         model_config_overrides: modelConfigOverrides,
         mcp_config_overrides: budConfig?.mcpConfig,
         created_at: new Date().toISOString()

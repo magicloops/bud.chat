@@ -111,6 +111,9 @@ export default function ChatPage({ params }: ChatPageProps) {
   const existingConversation = useConversation(workingConversationId);
 
 
+  // Check if we have the conversation under the real ID (after transition)
+  const realConversation = useConversation(conversationId);
+  
   // Fetch conversation from server if not in store
   const { data: conversationData, isLoading, error } = useQuery({
     queryKey: ['conversation', conversationId],
@@ -123,7 +126,8 @@ export default function ChatPage({ params }: ChatPageProps) {
       const data = await response.json();
       return data;
     },
-    enabled: !isNewConversation && !isTempConversation && !!conversationId && !existingConversation,
+    // Only fetch if we don't have the conversation in store under either the working ID or real ID
+    enabled: !isNewConversation && !isTempConversation && !!conversationId && !existingConversation && !realConversation,
     staleTime: 5 * 60 * 1000, // 5 minutes - allow periodic refresh for title updates
     gcTime: Infinity,
   });
@@ -138,9 +142,9 @@ export default function ChatPage({ params }: ChatPageProps) {
         title: conversationData.title || 'Chat',
         workspace_id: conversationData.workspace_id,
         source_bud_id: conversationData.source_bud_id,
-        // Use the effective identity computed by the server, with fallbacks
-        assistant_name: conversationData.effective_assistant_name || 'Assistant',
-        assistant_avatar: conversationData.effective_assistant_avatar || '🤖',
+        // Only set assistant identity if explicitly provided (not derived from bud)
+        assistant_name: conversationData.assistant_name || undefined,
+        assistant_avatar: conversationData.assistant_avatar || undefined,
         model_config_overrides: conversationData.model_config_overrides,
         mcp_config_overrides: conversationData.mcp_config_overrides,
         created_at: conversationData.created_at
@@ -221,8 +225,7 @@ export default function ChatPage({ params }: ChatPageProps) {
             title: 'New Chat',
             workspace_id: selectedWorkspace || '',
             source_bud_id: loadedBud.id,
-            assistant_name: budConfig?.name || 'Assistant',
-            assistant_avatar: budConfig?.avatar || '🤖',
+            // Don't set assistant name/avatar - let the UI derive from bud config
             created_at: new Date().toISOString()
           }
         };
@@ -378,7 +381,10 @@ export default function ChatPage({ params }: ChatPageProps) {
                       events: finalStreamingEvents, // Use final streaming events
                       isStreaming: false,
                       streamingEventId: undefined,
-                      meta: { ...tempConv.meta, id: realConversationId }
+                      meta: { 
+                        ...tempConv.meta, 
+                        id: realConversationId
+                      }
                     };
                     
                     store.setConversation(realConversationId, realConv);

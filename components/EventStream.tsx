@@ -57,8 +57,7 @@ const EventStreamComponent = function EventStream({
       title: 'New Chat',
       workspace_id: 'temp',
       source_bud_id: budData.id,
-      assistant_name: budData.default_json?.name || 'Assistant',
-      assistant_avatar: budData.default_json?.avatar || '🤖',
+      // Don't set assistant name/avatar - let the UI derive from bud config
       created_at: new Date().toISOString()
     }
   } : null;
