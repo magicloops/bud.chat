@@ -335,12 +335,12 @@ export class StreamingEventBuilder {
   
   // =============================================================================
   // LEGACY COMPATIBILITY METHODS
-  // These methods provide backward compatibility with ChatStreamHandler
+  // These methods provide backward compatibility
   // =============================================================================
   
   /**
    * Start a tool call (legacy compatibility)
-   * Used by ChatStreamHandler for incremental tool call building
+   * Used for incremental tool call building
    */
   startToolCall(id: string, name: string): void {
     // Try to determine the index based on current tool calls
@@ -387,7 +387,7 @@ export class StreamingEventBuilder {
   
   /**
    * Add arguments to a pending tool call (legacy compatibility)
-   * Used by ChatStreamHandler for streaming tool call arguments
+   * Used for streaming tool call arguments
    */
   addToolCallArguments(id: string, args: string): void {
     const pending = this.pendingToolCalls.get(id);
@@ -413,7 +413,7 @@ export class StreamingEventBuilder {
   
   /**
    * Complete a tool call by parsing arguments (legacy compatibility)
-   * Used by ChatStreamHandler when tool call arguments are fully received
+   * Used when tool call arguments are fully received
    */
   completeToolCall(id: string): void {
     const pending = this.pendingToolCalls.get(id);
@@ -469,7 +469,7 @@ export class StreamingEventBuilder {
   
   /**
    * Get tool call ID by index (legacy compatibility)
-   * Used by ChatStreamHandler to map streaming events to tool calls
+   * Used to map streaming events to tool calls
    */
   getToolCallIdAtIndex(index: number): string | null {
     console.log('🔍 [EventBuilder] getToolCallIdAtIndex lookup:', {

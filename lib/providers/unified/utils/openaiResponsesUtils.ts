@@ -1,8 +1,7 @@
-// OpenAI Responses API integration for o-series reasoning models
+// OpenAI Responses API utility functions for o-series reasoning models
 // Handles the transformation of reasoning events from OpenAI's Responses API
 
 import { StreamEvent } from '@/lib/streaming/frontendEventHandler';
-import OpenAI from 'openai';
 
 /**
  * Transform OpenAI Responses API reasoning events to our internal format
@@ -456,52 +455,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   }
 
   return null;
-}
-
-/**
- * Check if an OpenAI Responses API event is a reasoning-related event
- */
-export function isReasoningEvent(eventType: string): boolean {
-  const reasoningEventTypes = [
-    'response.reasoning_summary_part.added',
-    'response.reasoning_summary_part.done', 
-    'response.reasoning_summary_text.delta',
-    'response.reasoning_summary_text.done',
-    'response.reasoning_summary.delta',
-    'response.reasoning_summary.done'
-  ];
-  
-  return reasoningEventTypes.includes(eventType);
-}
-
-/**
- * Create OpenAI Responses API request for o-series models
- */
-export function createResponsesAPIRequest(
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-  model: string,
-  options: {
-    temperature?: number;
-    max_tokens?: number;
-    tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
-    reasoning_effort?: 'low' | 'medium' | 'high';
-  } = {}
-): unknown {
-  const request: Record<string, unknown> = {
-    model,
-    messages,
-    stream: true,
-    ...(options.temperature !== undefined && { temperature: options.temperature }),
-    ...(options.max_tokens && { max_completion_tokens: options.max_tokens }),
-    ...(options.tools && options.tools.length > 0 && { tools: options.tools }),
-    // Add reasoning configuration for o-series models
-    reasoning: {
-      effort: options.reasoning_effort || 'medium',
-      summary: 'auto' // This enables reasoning summaries
-    }
-  };
-
-  return request;
 }
 
 /**

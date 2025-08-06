@@ -1,8 +1,6 @@
 // Shared utilities for chat routes
-// Common functions used by both new and existing chat routes
 
 import { createClient } from '@/lib/supabase/server';
-import { NextRequest } from 'next/server';
 import { Event, Segment } from '@/lib/types/events';
 import OpenAI from 'openai';
 
@@ -68,40 +66,3 @@ Title:`;
     console.error('❌ Error generating conversation title:', error);
   }
 }
-
-// Common validation for chat requests
-export async function validateChatRequest(
-  request: NextRequest,
-  supabase: Awaited<ReturnType<typeof createClient>>
-) {
-  // Get the authenticated user
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-  if (authError || !user) {
-    throw new Error('Unauthorized');
-  }
-
-  const body = await request.json();
-  
-  return {
-    user,
-    body
-  };
-}
-
-// Common error response formatting
-export function createErrorResponse(message: string, status: number = 500) {
-  return new Response(
-    JSON.stringify({ error: message }),
-    { 
-      status, 
-      headers: { 'Content-Type': 'application/json' } 
-    }
-  );
-}
-
-// Common streaming response headers
-export const STREAMING_HEADERS = {
-  'Content-Type': 'text/plain',
-  'Cache-Control': 'no-cache',
-  'Connection': 'keep-alive',
-};

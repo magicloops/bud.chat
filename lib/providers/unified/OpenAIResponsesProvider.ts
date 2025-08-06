@@ -14,6 +14,7 @@ import {
   Segment
 } from '@/lib/types/events';
 import { generateToolCallId } from '@/lib/types/branded';
+import { processResponsesAPIStream } from './utils/openaiResponsesUtils';
 
 export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   name = 'openai-responses' as const;
@@ -76,9 +77,6 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   
   async *stream(request: UnifiedChatRequest): AsyncGenerator<StreamEvent> {
     try {
-      // Import the Responses API stream processor
-      const { processResponsesAPIStream } = await import('@/lib/providers/openaiResponses');
-      
       const inputItems = this.convertEventsToInputItems(request.events);
       
       console.log('📋 [Responses API] Input items:', inputItems.map((item, idx) => ({
@@ -120,7 +118,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       
       const stream = await this.client.responses.create(params);
       
-      // Process the stream using the existing processor
+      // Process the stream using our utils
       const processedStream = processResponsesAPIStream(stream);
       
       let currentEvent: Event = {
