@@ -700,17 +700,32 @@ export class FrontendEventHandler {
     if (!this.localStateUpdater || !this.assistantPlaceholder || !data.content) return;
 
     this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
-              ...event,
-              segments: event.segments.map(s => 
-                s.type === 'text' ? { ...s, text: s.text + data.content } : s
-              )
-              // Don't update ts on every token to prevent infinite re-renders
-            }
-          : event
-      );
+      // Find the event to update
+      const eventIndex = events.findIndex(e => e.id === this.assistantPlaceholder!.id);
+      if (eventIndex === -1) return events; // Return same reference if no changes
+      
+      const event = events[eventIndex];
+      // Find the text segment to update
+      const textSegmentIndex = event.segments.findIndex(s => s.type === 'text');
+      if (textSegmentIndex === -1) return events; // Return same reference if no text segment
+      
+      // Only create new objects for what actually changed
+      const newEvents = [...events];
+      const newEvent = { ...event };
+      const newSegments = [...event.segments];
+      const textSegment = newSegments[textSegmentIndex];
+      
+      // Update only the text segment
+      const typedTextSegment = textSegment as { type: 'text'; text: string; id?: string; sequence_number?: number; output_index?: number };
+      newSegments[textSegmentIndex] = {
+        ...typedTextSegment,
+        text: typedTextSegment.text + data.content
+      };
+      
+      newEvent.segments = newSegments;
+      newEvents[eventIndex] = newEvent;
+      
+      return newEvents;
     });
   }
 

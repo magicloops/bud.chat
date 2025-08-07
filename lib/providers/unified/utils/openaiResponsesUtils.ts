@@ -188,37 +188,37 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
-      console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
+      // console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
       
       // Log the complete response structure for debugging
-      const response = event.response as Record<string, unknown>;
-      if (response) {
-        console.log('📦 [COMPLETE RESPONSE] Full structure from OpenAI:', {
-          id: response.id,
-          object: response.object,
-          model: response.model,
-          created: response.created,
-          input: JSON.stringify(response.input, null, 2),
-          output: JSON.stringify(response.output, null, 2),
-          usage: response.usage,
-          all_keys: Object.keys(response)
-        });
-        
-        // Log detailed output structure
-        if (Array.isArray(response.output)) {
-          console.log('📋 [RESPONSE OUTPUT] Detailed output items:');
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          response.output.forEach((item: any, index: number) => {
-            console.log(`  Item ${index}:`, {
-              type: item.type,
-              id: item.id,
-              ...(item.type === 'text' ? { content: item.content?.substring(0, 100) + '...' } : {}),
-              ...(item.type === 'reasoning' ? { summary_count: item.summary?.length } : {}),
-              all_keys: Object.keys(item)
-            });
-          });
-        }
-      }
+      // const response = event.response as Record<string, unknown>;
+      // if (response) {
+      //   console.log('📦 [COMPLETE RESPONSE] Full structure from OpenAI:', {
+      //     id: response.id,
+      //     object: response.object,
+      //     model: response.model,
+      //     created: response.created,
+      //     input: JSON.stringify(response.input, null, 2),
+      //     output: JSON.stringify(response.output, null, 2),
+      //     usage: response.usage,
+      //     all_keys: Object.keys(response)
+      //   });
+      //   
+      //   // Log detailed output structure
+      //   if (Array.isArray(response.output)) {
+      //     console.log('📋 [RESPONSE OUTPUT] Detailed output items:');
+      //     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      //     response.output.forEach((item: any, index: number) => {
+      //       console.log(`  Item ${index}:`, {
+      //         type: item.type,
+      //         id: item.id,
+      //         ...(item.type === 'text' ? { content: item.content?.substring(0, 100) + '...' } : {}),
+      //         ...(item.type === 'reasoning' ? { summary_count: item.summary?.length } : {}),
+      //         all_keys: Object.keys(item)
+      //       });
+      //     });
+      //   }
+      // }
       
       // TODO: Extract usage data from event.response when StreamEvent interface is extended
       // const response = event.response as {
@@ -260,11 +260,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       
       // Handle message items (which contain the actual assistant response)
       if (item?.type === 'message') {
-        console.log('📨 [Responses API] Message item added:', {
-          id: item.id,
-          role: item.role,
-          output_index: event.output_index
-        });
+        // console.log('📨 [Responses API] Message item added:', {
+        //   id: item.id,
+        //   role: item.role,
+        //   output_index: event.output_index
+        // });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return {
           type: 'message_start',

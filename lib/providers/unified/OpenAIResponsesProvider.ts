@@ -143,16 +143,6 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     try {
       const inputItems = this.convertEventsToInputItems(request.events);
       
-      console.log('📋 [Responses API] Input items:', inputItems.map((item, idx) => ({
-        index: idx,
-        type: item.type,
-        id: item.id,
-        ...(item.type === 'message' ? { role: item.role, contentLength: item.content?.length } : {}),
-        ...(item.type === 'reasoning' ? { summaryCount: item.summary?.length } : {}),
-        ...(item.type === 'mcp_call' ? { name: item.name, hasOutput: !!item.output } : {})
-      })));
-      
-      
       const params: ResponsesCreateParams & { stream: true } = {
         model: this.getModelName(request.model),
         input: inputItems,
@@ -178,7 +168,6 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         summary: 'auto'
       };
       
-      console.log('📤 [Responses API] Sending request with params:', JSON.stringify(params, null, 2));
       
       // Use the OpenAI SDK's responses API with streaming
       // Note: The SDK types may not be fully aligned with our custom types
@@ -234,7 +223,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'message_start':
             // Capture the message ID for the text content that follows
             currentMessageId = streamEvent.item_id as string;
-            console.log('💬 [Responses Provider] Message started with ID:', currentMessageId);
+            // console.log('💬 [Responses Provider] Message started with ID:', currentMessageId);
             break;
             
           case 'text_start':
@@ -604,29 +593,29 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             
           case 'complete':
             // Log what we've collected in currentEvent before finishing
-            console.log('🔍 [Responses Provider] Final currentEvent structure:', {
-              id: currentEvent.id,
-              role: currentEvent.role,
-              segments_count: currentEvent.segments.length,
-              segments: currentEvent.segments.map((seg, idx) => ({
-                index: idx,
-                type: seg.type,
-                ...(seg.type === 'text' ? { 
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  id: (seg as any).id,
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  text_length: (seg as any).text?.length,
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  text_preview: (seg as any).text?.substring(0, 50) + '...'
-                } : {}),
-                ...(seg.type === 'reasoning' ? {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  id: (seg as any).id,
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  parts_count: (seg as any).parts?.length
-                } : {})
-              }))
-            });
+            // console.log('🔍 [Responses Provider] Final currentEvent structure:', {
+            //   id: currentEvent.id,
+            //   role: currentEvent.role,
+            //   segments_count: currentEvent.segments.length,
+            //   segments: currentEvent.segments.map((seg, idx) => ({
+            //     index: idx,
+            //     type: seg.type,
+            //     ...(seg.type === 'text' ? { 
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       id: (seg as any).id,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       text_length: (seg as any).text?.length,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       text_preview: (seg as any).text?.substring(0, 50) + '...'
+            //     } : {}),
+            //     ...(seg.type === 'reasoning' ? {
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       id: (seg as any).id,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       parts_count: (seg as any).parts?.length
+            //     } : {})
+            //   }))
+            // });
             
             yield { type: 'done' };
             return;
@@ -668,84 +657,58 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             }))
         });
       } else if (event.role === 'assistant') {
-        // Process reasoning FIRST (it comes before the output)
-        const reasoningSegments = event.segments.filter(seg => seg.type === 'reasoning');
-        const textSegments = event.segments.filter(seg => seg.type === 'text');
-        const toolCallSegments = event.segments.filter(seg => seg.type === 'tool_call');
-        
-        // Add reasoning segments that have valid output following them
-        for (const segment of reasoningSegments) {
-          // Convert reasoning parts to summary array
-          const summary = segment.parts?.map(part => ({
-            type: part.type,
-            text: part.text
-          })) || [];
-          
-          const hasContent = summary.some(s => s.text && s.text.trim().length > 0);
-          
-          // Check what follows this reasoning in the original segments array
-          const reasoningIndex = event.segments.indexOf(segment);
-          const nextSegment = event.segments[reasoningIndex + 1];
-          const hasFollowingOutput = nextSegment && (nextSegment.type === 'text' || nextSegment.type === 'tool_call');
-          
-          // Only include reasoning if it has content and valid output follows
-          if (hasContent && hasFollowingOutput) {
+        // Simply flatten segments in their original order - this preserves the reasoning->output relationship
+        for (const segment of event.segments) {
+          if (segment.type === 'reasoning') {
+            // Convert reasoning parts to summary array
+            const summary = segment.parts?.map(part => ({
+              type: part.type,
+              text: part.text
+            })) || [];
+            
+            // Include all reasoning segments, even with empty summaries
+            // They're required to maintain the reasoning->output relationship for tool calls
             items.push({
               id: segment.id,
               type: 'reasoning',
               summary: summary
             });
-          } else if (!hasFollowingOutput) {
-            console.log('🚫 [Responses API] Filtering out orphaned reasoning segment:', {
-              id: segment.id,
-              hasContent,
-              hasFollowingOutput
+          } else if (segment.type === 'text') {
+            // Add text as a message with the segment's ID if available
+            const messageId = segment.id || `msg_${messageIndex++}`;
+            
+            items.push({
+              id: messageId,
+              type: 'message',
+              role: 'assistant',
+              content: [{ 
+                type: 'output_text',
+                text: segment.text
+              }]
             });
+          } else if (segment.type === 'tool_call') {
+            // Add the tool call
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const mcpCall: any = {
+              id: segment.id,
+              type: 'mcp_call',
+              name: segment.name,
+              arguments: JSON.stringify(segment.args),
+              server_label: segment.server_label || 'default'
+            };
+            
+            // If this tool call has output (for Responses API), include it
+            if (segment.output !== undefined) {
+              mcpCall.output = typeof segment.output === 'string' 
+                ? segment.output 
+                : JSON.stringify(segment.output);
+            }
+            if (segment.error) {
+              mcpCall.error = segment.error;
+            }
+            
+            items.push(mcpCall);
           }
-        }
-        
-        // Then add the assistant message with text content
-        if (textSegments.length > 0) {
-          // Use the text segment's ID if available, otherwise generate one
-          const textSegment = textSegments[0];
-          const messageId = textSegment.id || `msg_${messageIndex++}`;
-          
-          items.push({
-            id: messageId,
-            type: 'message',
-            role: 'assistant',
-            content: textSegments.map(seg => ({ 
-              type: 'output_text',
-              text: (seg as { type: 'text'; text: string }).text 
-            }))
-          });
-        }
-        
-        // Process tool calls (reasoning before them is already handled above)
-        for (let i = 0; i < toolCallSegments.length; i++) {
-          const segment = toolCallSegments[i];
-          
-          // Add the tool call
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const mcpCall: any = {
-            id: segment.id,
-            type: 'mcp_call',
-            name: segment.name,
-            arguments: JSON.stringify(segment.args),
-            server_label: segment.server_label || 'default'
-          };
-          
-          // If this tool call has output (for Responses API), include it
-          if (segment.output !== undefined) {
-            mcpCall.output = typeof segment.output === 'string' 
-              ? segment.output 
-              : JSON.stringify(segment.output);
-          }
-          if (segment.error) {
-            mcpCall.error = segment.error;
-          }
-          
-          items.push(mcpCall);
         }
       } else if (event.role === 'tool') {
         // Convert tool results to mcp_call items with output
