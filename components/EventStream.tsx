@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo } from 'react';
+import { useState, memo, useRef } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
@@ -43,6 +43,9 @@ const EventStreamComponent = function EventStream({
   // Local streaming state for existing conversations during streaming (similar to new conversations)
   const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
+  
+  // Ref to track latest events during streaming without causing re-renders
+  const latestEventsRef = useRef<Event[]>([]);
   
   // Load current bud data if conversation has a source_bud_id
   const currentBudData = useBud(conversation?.meta?.source_bud_id || '');
@@ -88,6 +91,8 @@ const EventStreamComponent = function EventStream({
     store.setConversation(conversationId, updatedConversation);
     
     // Use unified frontend event handler for existing conversations
+    let updateInterval: NodeJS.Timeout | undefined;
+    
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -115,20 +120,32 @@ const EventStreamComponent = function EventStream({
       setLocalStreamingEvents(finalEvents);
       setIsLocalStreaming(true);
       
+      // Initialize the ref with the current events
+      latestEventsRef.current = finalEvents;
+      
+      // Set up periodic UI updates during streaming (30fps)
+      updateInterval = setInterval(() => {
+        setLocalStreamingEvents([...latestEventsRef.current]);
+      }, 33); // ~30fps
+      
       // Set up local state updater to track streaming events locally (NOT in store during streaming)
       eventHandler.setLocalStateUpdater(
         (updater) => {
-          // Update local tracking of events (not the store during streaming)
-          finalEvents = updater(finalEvents);
-          
-          // Update local streaming state for real-time UI display
-          setLocalStreamingEvents([...finalEvents]);
+          // Only update the ref - don't trigger state updates here
+          latestEventsRef.current = updater(latestEventsRef.current);
+          finalEvents = latestEventsRef.current;
         },
         assistantPlaceholder
       );
       
       // Process streaming response with unified handler
       await eventHandler.processStreamingResponse(response);
+      
+      // Clear the update interval
+      clearInterval(updateInterval);
+      
+      // Do one final update to ensure we have the latest state
+      setLocalStreamingEvents([...latestEventsRef.current]);
       
       // After streaming completes, update store with final events
       store.setConversation(conversationId, {
@@ -143,6 +160,12 @@ const EventStreamComponent = function EventStream({
       setIsLocalStreaming(false);
     } catch (error) {
       console.error('Error sending message:', error);
+      
+      // Clear the update interval if it exists
+      if (updateInterval) {
+        clearInterval(updateInterval);
+      }
+      
       // Clear local streaming state on error
       setLocalStreamingEvents(null);
       setIsLocalStreaming(false);
