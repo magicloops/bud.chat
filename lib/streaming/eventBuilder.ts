@@ -1,6 +1,7 @@
 // EventStreamBuilder for building events during streaming
 
 import { Event, Segment, Role, ReasoningData } from '@/lib/types/events';
+import { ToolCallId, EventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 
 export class EventStreamBuilder {
@@ -59,7 +60,7 @@ export class EventStreamBuilder {
     // Add completed tool call segment
     this.segments.push({
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args,
       ...(metadata?.server_label && { server_label: metadata.server_label }),
@@ -140,7 +141,7 @@ export class EventStreamBuilder {
   addToolResult(id: string, output: object): void {
     this.segments.push({
       type: 'tool_result',
-      id,
+      id: id as ToolCallId,
       output
     });
   }
@@ -171,7 +172,7 @@ export class EventStreamBuilder {
    */
   getCurrentEvent(): Event {
     return {
-      id: this.eventId,
+      id: this.eventId as EventId,
       role: this.role,
       segments: this.getCurrentSegments(),
       ts: this.ts,
@@ -210,7 +211,7 @@ export class EventStreamBuilder {
     console.log('🔧 [EVENTBUILDER] After cleanup - Final segments:', this.segments.length);
 
     return {
-      id: this.eventId,
+      id: this.eventId as EventId,
       role: this.role,
       segments: this.segments,
       ts: this.ts,

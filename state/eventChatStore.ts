@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { createClient } from '@/lib/supabase/client';
 import { Event, Role } from '@/lib/types/events';
+import { EventId, ToolCallId } from '@/lib/types/branded';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 // Properly typed Supabase realtime payload
@@ -299,11 +300,12 @@ export const useEventChatStore = create<EventChatStore>()(
                       const currentTitle = state.conversations[conversationId].meta.title;
                       state.conversations[conversationId].meta = {
                         ...state.conversations[conversationId].meta,
-                        title: 'title' in updatedConversation ? updatedConversation.title as string : state.conversations[conversationId].meta.title,
-                        assistant_name: 'assistant_name' in updatedConversation ? updatedConversation.assistant_name as string : state.conversations[conversationId].meta.assistant_name,
-                        assistant_avatar: 'assistant_avatar' in updatedConversation ? updatedConversation.assistant_avatar as string : state.conversations[conversationId].meta.assistant_avatar,
-                        model_config_overrides: 'model_config_overrides' in updatedConversation ? updatedConversation.model_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.model_config_overrides,
-                        mcp_config_overrides: 'mcp_config_overrides' in updatedConversation ? updatedConversation.mcp_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.mcp_config_overrides,
+                        title: 'title' in updatedConversation && updatedConversation.title != null ? updatedConversation.title as string : state.conversations[conversationId].meta.title,
+                        // Only update assistant identity if the values are explicitly provided and not null/undefined
+                        assistant_name: 'assistant_name' in updatedConversation && updatedConversation.assistant_name != null ? updatedConversation.assistant_name as string : state.conversations[conversationId].meta.assistant_name,
+                        assistant_avatar: 'assistant_avatar' in updatedConversation && updatedConversation.assistant_avatar != null ? updatedConversation.assistant_avatar as string : state.conversations[conversationId].meta.assistant_avatar,
+                        model_config_overrides: 'model_config_overrides' in updatedConversation && updatedConversation.model_config_overrides != null ? updatedConversation.model_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.model_config_overrides,
+                        mcp_config_overrides: 'mcp_config_overrides' in updatedConversation && updatedConversation.mcp_config_overrides != null ? updatedConversation.mcp_config_overrides as Record<string, unknown> : state.conversations[conversationId].meta.mcp_config_overrides,
                       };
                       
                       // Auto-sync: update conversation summary with new title
@@ -561,13 +563,13 @@ export function legacyMessagesToEvents(messages: unknown[]): Event[] {
       };
     }; // Type assertion for legacy message structure
     return {
-      id: msg.id,
+      id: msg.id as EventId,
       role: msg.role as Role,
       segments: [
         ...(msg.content ? [{ type: 'text' as const, text: msg.content }] : []),
         ...(msg.json_meta?.tool_calls || []).map((toolCall: { id: string; function: { name: string; arguments: string } }) => ({
           type: 'tool_call' as const,
-          id: toolCall.id,
+          id: toolCall.id as ToolCallId,
           name: toolCall.function.name,
           args: JSON.parse(toolCall.function.arguments || '{}')
         }))

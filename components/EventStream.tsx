@@ -57,8 +57,7 @@ const EventStreamComponent = function EventStream({
       title: 'New Chat',
       workspace_id: 'temp',
       source_bud_id: budData.id,
-      assistant_name: budData.default_json?.name || 'Assistant',
-      assistant_avatar: budData.default_json?.avatar || '🤖',
+      // Don't set assistant name/avatar - let the UI derive from bud config
       created_at: new Date().toISOString()
     }
   } : null;
@@ -90,11 +89,13 @@ const EventStreamComponent = function EventStream({
     
     // Use unified frontend event handler for existing conversations
     try {
-      const response = await fetch(`/api/chat/${conversationId}`, {
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          message: content,  // The existing API expects 'message', not 'content'
+          mode: 'continue',
+          conversationId,
+          message: content,
           workspaceId: conversation.meta.workspace_id
           // Let the API determine the model from conversation config -> bud config -> default
         })

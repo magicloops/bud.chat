@@ -32,6 +32,7 @@ interface ReasoningSegmentProps {
   };
   isStreaming?: boolean;
   autoExpanded?: boolean; // For streaming segments that should start expanded
+  isLastSegment?: boolean; // Whether this is the last segment in the event
   className?: string;
 }
 
@@ -39,10 +40,19 @@ export function ReasoningSegment({
   segment, 
   isStreaming = false,
   autoExpanded = false,
+  isLastSegment = false,
   className 
 }: ReasoningSegmentProps) {
   const [isExpanded, setIsExpanded] = useState(autoExpanded || isStreaming);
   const [wasManuallyToggled, setWasManuallyToggled] = useState(false);
+  const [wasStreaming, setWasStreaming] = useState(autoExpanded || isStreaming || segment.streaming);
+  
+  // Track if this segment was streaming
+  useEffect(() => {
+    if (segment.streaming || isStreaming) {
+      setWasStreaming(true);
+    }
+  }, [segment.streaming, isStreaming]);
   
   // Auto-collapse reasoning when streaming finishes
   useEffect(() => {
@@ -51,16 +61,16 @@ export function ReasoningSegment({
     // Only auto-collapse if:
     // 1. Not currently streaming
     // 2. Is expanded 
-    // 3. Was auto-expanded OR had streaming property (indicating it was streaming)
+    // 3. Was streaming at some point
     // 4. Was NOT manually toggled by user
-    if (!isCurrentlyStreaming && isExpanded && (autoExpanded || segment.streaming !== undefined) && !wasManuallyToggled) {
+    if (!isCurrentlyStreaming && isExpanded && wasStreaming && !wasManuallyToggled) {
       const timer = setTimeout(() => {
         setIsExpanded(false);
       }, 500); // Small delay to allow users to see the completion
       
       return () => clearTimeout(timer);
     }
-  }, [segment.streaming, isStreaming, autoExpanded, isExpanded, wasManuallyToggled]);
+  }, [segment.streaming, isStreaming, isExpanded, wasStreaming, wasManuallyToggled]);
   
   // Get reasoning content from segment
   const reasoningContent = segment.combined_text || 
@@ -77,7 +87,10 @@ export function ReasoningSegment({
   // );
   
   // Determine if this reasoning segment is currently streaming
-  const isReasoningStreaming = segment.streaming || isStreaming;
+  // Consider it streaming if:
+  // 1. The segment has streaming flag set, OR
+  // 2. The parent event is streaming AND this is the last segment (no content after it)
+  const isReasoningStreaming = segment.streaming || (isStreaming && isLastSegment);
   
   // Auto-show reasoning while streaming, otherwise user controls visibility
   const shouldShowReasoning = isReasoningStreaming || isExpanded;

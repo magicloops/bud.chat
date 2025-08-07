@@ -5,6 +5,7 @@ import { ReasoningSegment } from './ReasoningSegment';
 import { ToolCallSegment } from './ToolCallSegment';
 import { TextSegment } from './TextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
+import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
 
@@ -23,21 +24,22 @@ export function SequentialSegmentRenderer({
 }: SequentialSegmentRendererProps) {
   // Sort segments by sequence_number, falling back to array order for segments without sequence_number
   const sortedSegments = [...event.segments].sort((a, b) => {
-    // Get sequence numbers, defaulting to 0 for segments without them
-    const aSeq = 'sequence_number' in a ? a.sequence_number || 0 : 0;
-    const bSeq = 'sequence_number' in b ? b.sequence_number || 0 : 0;
+    // Get sequence numbers, using Infinity for segments without them to maintain array order
+    const aSeq = 'sequence_number' in a && a.sequence_number !== undefined ? a.sequence_number : Infinity;
+    const bSeq = 'sequence_number' in b && b.sequence_number !== undefined ? b.sequence_number : Infinity;
     
     // If both have sequence numbers, sort by them
-    if (aSeq !== 0 && bSeq !== 0) {
+    if (aSeq !== Infinity && bSeq !== Infinity) {
       return aSeq - bSeq;
     }
     
-    // If only one has a sequence number, prioritize it
-    if (aSeq !== 0) return -1;
-    if (bSeq !== 0) return 1;
+    // If neither has sequence numbers, maintain original array order
+    if (aSeq === Infinity && bSeq === Infinity) {
+      return event.segments.indexOf(a) - event.segments.indexOf(b);
+    }
     
-    // If neither has sequence numbers, maintain original order
-    return 0;
+    // If only one has a sequence number, prioritize it
+    return aSeq - bSeq;
   });
 
   const renderSegment = (segment: Segment, index: number) => {
@@ -53,6 +55,7 @@ export function SequentialSegmentRenderer({
             segment={segment}
             isStreaming={isStreaming}
             autoExpanded={segment.streaming || isStreaming}
+            isLastSegment={index === sortedSegments.length - 1}
           />
         );
         
@@ -61,6 +64,7 @@ export function SequentialSegmentRenderer({
           <ToolCallSegment
             key={key}
             segment={segment}
+            event={event}
             allEvents={allEvents}
             isStreaming={isStreaming}
           />
@@ -90,10 +94,26 @@ export function SequentialSegmentRenderer({
   const progressState = event.progressState;
   const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
   const hasContent = sortedSegments.length > 0;
+  
+  // Check if we should show typing indicator
+  // Only show if: assistant role, streaming, and only has empty text segment(s)
+  const shouldShowTypingIndicator = event.role === 'assistant' && 
+    isStreaming && 
+    sortedSegments.length > 0 &&
+    sortedSegments.every(seg => 
+      seg.type === 'text' && (!seg.text || !seg.text.trim())
+    );
 
   return (
     <div className={className}>
       {sortedSegments.map(renderSegment)}
+      
+      {/* Show typing indicator for empty assistant events */}
+      {shouldShowTypingIndicator && (
+        <div className="text-segment" data-testid="typing-indicator">
+          <MarkdownRenderer content="|" />
+        </div>
+      )}
       
       {/* Show progress indicator at the bottom of content (or top if no content) */}
       {shouldShowProgress && (

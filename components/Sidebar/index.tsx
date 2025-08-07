@@ -8,7 +8,7 @@ import { ConversationList } from './ConversationList';
 import { WorkspaceSelector } from './WorkspaceSelector';
 import { UserMenu } from './UserMenu';
 import { useSelectedWorkspace, useSetSelectedWorkspace } from '@/state/eventChatStore';
-import { Workspace } from '@/lib/types';
+import { Workspace, WorkspaceId } from '@/lib/types';
 import { 
   useWorkspaces, 
   useSetWorkspaces, 
@@ -151,7 +151,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
       <div className="flex-1 min-h-0">
         {selectedWorkspaceId ? (
           <ScrollArea className="h-full w-full max-w-full">
-            <ConversationList workspaceId={selectedWorkspaceId} />
+            <ConversationList workspaceId={selectedWorkspaceId as WorkspaceId} />
           </ScrollArea>
         ) : (
           <div className="flex items-center justify-center h-full">

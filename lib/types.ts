@@ -1,4 +1,13 @@
 import { Database } from './types/database';
+import { ConversationId, WorkspaceId } from './types/branded';
+// import { BudId, UserId } from './types/branded'; // Not currently used
+
+// Re-export branded types for convenience
+export type { ConversationId, WorkspaceId } from './types/branded';
+export type { BudId, UserId } from './types/branded';
+
+// Re-export Database type
+export type { Database } from './types/database';
 
 // Bud Configuration (actively used) - defined first for type dependency
 export interface BudConfig {
@@ -54,11 +63,6 @@ export type Bud = Omit<Database['public']['Tables']['buds']['Row'], 'default_jso
   default_json: BudConfig
   mcp_config: MCPBudConfig | null
 }
-
-// UI Types (actively used)
-export type ConversationId = string
-export type WorkspaceId = string
-export type BudId = string
 
 // Message Role (still used in MCP)
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'

@@ -1,8 +1,7 @@
-// OpenAI Responses API integration for o-series reasoning models
+// OpenAI Responses API utility functions for o-series reasoning models
 // Handles the transformation of reasoning events from OpenAI's Responses API
 
 import { StreamEvent } from '@/lib/streaming/frontendEventHandler';
-import OpenAI from 'openai';
 
 /**
  * Transform OpenAI Responses API reasoning events to our internal format
@@ -61,7 +60,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   // Only log events we're not already handling
   const isHandled = handledEventTypes.has(event.type);
   if (!isHandled && (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.'))) {
-    console.log('🚨 [MCP-TRANSFORMER] UNHANDLED RAW EVENT:', { 
+    console.log('🚨 [UNHANDLED] OpenAI Responses API EVENT:', {
       type: event.type, 
       keys: Object.keys(event),
       event: event
@@ -74,7 +73,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     const item = (event as {item?: unknown}).item as Record<string, unknown>;
     const hasUnexpectedStructure = !item.summary && !item.content;
     if (hasUnexpectedStructure) {
-      console.log('🧠 [MCP-TRANSFORMER] UNEXPECTED REASONING STRUCTURE:', {
+      console.log('🧠 [REASONING] UNEXPECTED STRUCTURE:', {
         event_type: event.type,
         all_item_keys: Object.keys(item || {}),
         raw_item_json: JSON.stringify(item, null, 2)
@@ -190,8 +189,20 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
       console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
+      
+      // TODO: Extract usage data from event.response when StreamEvent interface is extended
+      // const response = event.response as {
+      //   usage?: {
+      //     input_tokens: number;
+      //     output_tokens: number;
+      //     total_tokens: number;
+      //   };
+      // };
+      
+      // For now, just return the complete event. 
+      // Usage data will need to be handled differently since StreamEvent doesn't support a data field
       return {
-        type: 'finalize_only' // Finalize event but don't send complete to frontend yet
+        type: 'complete'
       };
 
     // Note: response.created and response.in_progress are handled earlier in the switch
@@ -210,23 +221,12 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     case 'response.content_part.done':
       // Content part is done - but this is just a lifecycle event, not final completion
-      console.log('📝 OpenAI Responses API: response.content_part.done - lifecycle event, ignoring');
       return null; // Just a lifecycle event, don't do anything
 
     // Handle tool call events - modern Responses API format
     case 'response.output_item.added':
       // Check if this is a function call, MCP call, or reasoning being added
       const item = event.item as { type?: string; id?: string; name?: string; server_label?: string; tools?: unknown[]; summary?: unknown[] };
-      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.ADDED EVENT RECEIVED:', { 
-        item_type: item?.type, 
-        item_id: item?.id, 
-        item_name: item?.name,
-        server_label: item?.server_label,
-        has_tools: !!item?.tools,
-        tools_count: Array.isArray(item?.tools) ? item.tools.length : 0,
-        all_keys: Object.keys(item || {}),
-        full_item: item
-      });
       if (item?.type === 'function_call') {
         return {
           type: 'tool_start',
@@ -234,11 +234,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tool_name: item.name as string
         };
       } else if (item?.type === 'mcp_call') {
-        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DETECTED (REAL TOOL NAME):', { 
-          tool_id: item.id, 
-          tool_name: item.name, 
-          server_label: item.server_label 
-        });
         return {
           type: 'mcp_tool_start',
           tool_id: item.id as string,
@@ -252,33 +247,12 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           server_type: 'remote_mcp'
         };
       } else if (item?.type === 'mcp_list_tools') {
-        console.log('🌐 [MCP-TRANSFORMER] MCP TOOLS LISTED:', { 
-          server_label: item.server_label, 
-          tool_count: (item as { tools?: unknown[] }).tools?.length 
-        });
         return {
           type: 'mcp_list_tools',
           server_label: item.server_label as string,
           tools: (item as { tools?: unknown[] }).tools || []
         };
       } else if (item?.type === 'reasoning') {
-        const summaryData = Array.isArray(item.summary) ? item.summary : [];
-        console.log('🧠 [MCP-TRANSFORMER] ✅ REASONING ITEM STARTED:', { 
-          item_id: item.id,
-          output_index: event.output_index,
-          sequence_number: event.sequence_number,
-          has_summary: !!item.summary,
-          summary_length: summaryData.length,
-          summary_preview: summaryData.slice(0, 2).map(part => {
-            const typedPart = part as Record<string, unknown>;
-            return {
-              summary_index: typedPart?.summary_index,
-              type: typedPart?.type,
-              has_text: !!typedPart?.text,
-              text_length: (typedPart?.text as string)?.length || 0
-            };
-          })
-        });
         return {
           type: 'reasoning_start',
           item_id: item.id as string,
@@ -322,11 +296,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     // Handle MCP lifecycle events
     case 'response.mcp_list_tools':
-      console.log('🌐 [MCP-TRANSFORMER] ✅ MCP TOOLS LIST RECEIVED:', { 
-        server_label: event.server_label, 
-        tools_count: (event.tools as unknown[])?.length,
-        tools: event.tools
-      });
       return {
         type: 'mcp_list_tools',
         server_label: event.server_label as string,
@@ -338,18 +307,8 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return null;
 
     case 'response.mcp_list_tools.completed':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_list_tools.completed:', { 
-        item_id: event.item_id, 
-        output_index: event.output_index,
-        full_event: event // Log the full event to see if it contains tools data
-      });
       // Check if this event contains the tools data
       if (event.tools && Array.isArray(event.tools)) {
-        console.log('🌐 [MCP-TRANSFORMER] ✅ TOOLS FOUND IN COMPLETED EVENT:', { 
-          server_label: event.server_label, 
-          tools_count: event.tools.length,
-          tools: event.tools
-        });
         return {
           type: 'mcp_list_tools',
           server_label: event.server_label as string || 'unknown_server',
@@ -374,10 +333,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
       return null;
 
     case 'response.mcp_call.failed':
-      console.log('🌐 [MCP-TRANSFORMER] mcp_call.failed:', { 
-        item_id: event.item_id, 
-        output_index: event.output_index 
-      });
       return {
         type: 'mcp_tool_complete',
         tool_id: event.item_id as string,
@@ -432,7 +387,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         }>;
       };
       
-      console.log('🌐 [MCP-TRANSFORMER] ✅ OUTPUT_ITEM.DONE EVENT RECEIVED:', doneItem?.type, 'for', doneItem?.server_label);
       
       if (doneItem?.type === 'function_call') {
         return {
@@ -440,12 +394,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           tool_id: doneItem.id as string
         };
       } else if (doneItem?.type === 'mcp_call') {
-        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP CALL DONE WITH OUTPUT:', { 
-          tool_id: doneItem.id, 
-          has_output: !!doneItem.output,
-          output_length: typeof doneItem.output === 'string' ? doneItem.output.length : 0,
-          has_error: !!doneItem.error
-        });
         return {
           type: 'mcp_tool_complete',
           tool_id: doneItem.id as string,
@@ -453,13 +401,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           error: doneItem.error || undefined
         };
       } else if (doneItem?.type === 'mcp_list_tools' && doneItem.tools) {
-        // Check if this is where the MCP tools data comes from
-        console.log('🌐 [MCP-TRANSFORMER] ✅ MCP TOOLS FOUND IN output_item.done:', { 
-          server_label: doneItem.server_label, 
-          tools_count: Array.isArray(doneItem.tools) ? doneItem.tools.length : 0,
-          tools: doneItem.tools
-        });
-        
         // Return both mcp_list_tools event and progress_hide
         return [
           {
@@ -473,18 +414,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           }
         ];
       } else if (doneItem?.type === 'reasoning' && doneItem.summary) {
-        console.log('🧠 [MCP-TRANSFORMER] ✅ REASONING ITEM COMPLETED:', { 
-          item_id: doneItem.id,
-          output_index: event.output_index,
-          sequence_number: event.sequence_number,
-          summary_count: doneItem.summary.length,
-          summary_parts: doneItem.summary.map(part => ({
-            summary_index: part.summary_index,
-            type: part.type,
-            text_length: part.text?.length || 0
-          }))
-        });
-        
         // Convert OpenAI reasoning parts to our format
         const reasoningParts = doneItem.summary.map(part => ({
           summary_index: part.summary_index,
@@ -502,6 +431,11 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           sequence_number: event.sequence_number as number,
           parts: reasoningParts,
           combined_text: reasoningParts.map(p => p.text).join('\n')
+        };
+      } else if (doneItem?.type === 'message') {
+        // Handle message completion - this should trigger completion
+        return {
+          type: 'complete'
         };
       }
       return null;
@@ -532,48 +466,6 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   }
 
   return null;
-}
-
-/**
- * Check if an OpenAI Responses API event is a reasoning-related event
- */
-export function isReasoningEvent(eventType: string): boolean {
-  const reasoningEventTypes = [
-    'response.reasoning_summary_part.added',
-    'response.reasoning_summary_part.done', 
-    'response.reasoning_summary_text.delta',
-    'response.reasoning_summary_text.done',
-    'response.reasoning_summary.delta',
-    'response.reasoning_summary.done'
-  ];
-  
-  return reasoningEventTypes.includes(eventType);
-}
-
-/**
- * Create OpenAI Responses API request for o-series models
- */
-export function createResponsesAPIRequest(
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-  model: string,
-  options: {
-    temperature?: number;
-    max_tokens?: number;
-    tools?: OpenAI.Chat.Completions.ChatCompletionTool[];
-    reasoning_effort?: 'low' | 'medium' | 'high';
-  } = {}
-): unknown {
-  const request: Record<string, unknown> = {
-    model,
-    messages,
-    stream: true,
-    ...(options.temperature !== undefined && { temperature: options.temperature }),
-    ...(options.max_tokens && { max_completion_tokens: options.max_tokens }),
-    ...(options.tools && options.tools.length > 0 && { tools: options.tools }),
-    ...(options.reasoning_effort && { reasoning_effort: options.reasoning_effort })
-  };
-
-  return request;
 }
 
 /**

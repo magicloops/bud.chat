@@ -4,6 +4,8 @@ import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Event, Conversation } from '@/state/eventChatStore';
+import { ToolCallId } from '@/lib/types/branded';
+import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import {
@@ -13,7 +15,7 @@ import {
   GitBranch,
   MoreHorizontal,
   AlertCircle,
-  Wrench,
+  // Wrench, // Not currently used
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -65,7 +67,7 @@ export const EventItemSequential = memo(function EventItemSequential({
   
   // Error handling - check if any segments have errors
   const error = useMemo(() => {
-    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: string; output: object; error: string } => 
+    const errorSegments = event.segments.filter((segment): segment is { type: 'tool_result'; id: ToolCallId; output: object; error: string } => 
       segment.type === 'tool_result' && 'error' in segment && !!segment.error
     );
     return errorSegments.length > 0 ? { error: errorSegments[0].error } : null;
@@ -81,9 +83,20 @@ export const EventItemSequential = memo(function EventItemSequential({
   const hasReasoningSegments = event.segments.some(s => s.type === 'reasoning');
   const hasToolCalls = event.segments.some(s => s.type === 'tool_call');
   
-  // Get assistant identity
-  const assistantName = conversation?.meta?.assistant_name || 'Assistant';
-  const assistantAvatar = conversation?.meta?.assistant_avatar || '🤖';
+  // Load bud data if conversation has a source_bud_id
+  const bud = useBud(conversation?.meta?.source_bud_id || '');
+  const budConfig = bud?.default_json;
+  
+  // Get assistant identity with proper hierarchy:
+  // 1. Conversation overrides (if explicitly set)
+  // 2. Bud configuration
+  // 3. Default values
+  const assistantName = conversation?.meta?.assistant_name || 
+                       (budConfig && typeof budConfig === 'object' && 'name' in budConfig ? budConfig.name as string : null) || 
+                       'Assistant';
+  const assistantAvatar = conversation?.meta?.assistant_avatar || 
+                         (budConfig && typeof budConfig === 'object' && 'avatar' in budConfig ? budConfig.avatar as string : null) || 
+                         '🤖';
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(textContent);

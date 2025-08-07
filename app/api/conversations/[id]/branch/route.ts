@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 import { getConversationEvents, saveEvent } from '@/lib/db/events';
+import { generateEventId } from '@/lib/types/branded';
 
 export async function POST(
   request: NextRequest,
@@ -186,7 +187,7 @@ export async function POST(
           // Convert DatabaseEvent back to Event (remove database-specific fields)
           // Generate new ID for the copied event to avoid duplicate key constraint
           const eventToSave = {
-            id: crypto.randomUUID(),
+            id: generateEventId(),
             role: event.role,
             segments: event.segments,
             ts: event.ts

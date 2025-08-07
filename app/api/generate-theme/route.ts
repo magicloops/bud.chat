@@ -1,10 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
-import { NextRequest } from 'next/server';
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { NextRequest, NextResponse } from 'next/server';
+import { ProviderFactory } from '@/lib/providers/unified/ProviderFactory';
+import { AppError, handleApiError } from '@/lib/errors';
+import { createTextEvent, Event } from '@/lib/types/events';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,23 +11,18 @@ export async function POST(request: NextRequest) {
     // Get the authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 });
+      throw AppError.unauthorized();
     }
 
     const body = await request.json();
     const { prompt } = body;
 
     if (!prompt) {
-      return new Response('Prompt is required', { status: 400 });
+      throw AppError.validation('Prompt is required');
     }
 
-    // Generate theme using o3
-    const response = await openai.chat.completions.create({
-      model: 'o3',
-      messages: [
-        {
-          role: 'system',
-          content: `Generate a complete UI theme based on the user's description. Return a JSON object with the following structure:
+    // Create events for theme generation
+    const systemPrompt = `Generate a complete UI theme based on the user's description. Return a JSON object with the following structure:
 {
   "name": "Theme Name",
   "description": "Brief description of the theme",
@@ -59,18 +52,26 @@ export async function POST(request: NextRequest) {
 
 All color values should be in HSL format without the "hsl()" wrapper (e.g., "220 14% 93%" not "hsl(220, 14%, 93%)").
 Ensure good contrast between foreground and background colors for accessibility.
-The theme should be cohesive and match the user's description.`
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      response_format: { type: 'json_object' },
-      max_completion_tokens: 8000
+The theme should be cohesive and match the user's description.`;
+
+    const events: Event[] = [
+      createTextEvent('system', systemPrompt),
+      createTextEvent('user', prompt)
+    ];
+
+    // Use the provider factory to generate theme
+    const provider = ProviderFactory.create('o3');
+    const response = await provider.chat({
+      events,
+      model: 'o3',
+      maxTokens: 8000
+      // Note: responseFormat is not supported in UnifiedChatRequest
     });
 
-    const themeJson = response.choices[0]?.message?.content;
+    // Extract text content from the response event
+    const responseEvent = response.event;
+    const textSegments = responseEvent.segments.filter(s => s.type === 'text');
+    const themeJson = textSegments.map(s => s.text).join('');
     if (!themeJson) {
       throw new Error('No theme generated');
     }
@@ -82,9 +83,8 @@ The theme should be cohesive and match the user's description.`
       throw new Error('Invalid theme structure');
     }
 
-    return Response.json(theme);
+    return NextResponse.json(theme);
   } catch (error) {
-    console.error('Theme generation error:', error);
-    return new Response('Failed to generate theme', { status: 500 });
+    return handleApiError(error);
   }
 }

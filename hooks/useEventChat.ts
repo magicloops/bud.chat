@@ -118,13 +118,14 @@ export function useEventChat({
       // Set up abort controller
       abortControllerRef.current = new AbortController();
 
-      // Make API call to event-based endpoint
-      const response = await fetch('/api/chat-events', {
+      // Make API call to unified chat endpoint
+      const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          mode: 'new',
           messages,
           workspaceId,
           budId,

@@ -2,6 +2,7 @@
 // These maintain compatibility with existing patterns while using events
 
 import { Event, createTextEvent, Segment, ReasoningPart, ResponseMetadata, createReasoningSegment, sortSegmentsBySequence } from '@/lib/types/events';
+import { ToolCallId, generateEventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';
 import { BudConfig } from '@/lib/types';
@@ -31,6 +32,7 @@ export function createUserEvent(content: string): Event {
  * Create an assistant placeholder event for streaming
  */
 export function createAssistantPlaceholderEvent(): Event {
+  // Don't show any progress indicator initially - let the stream decide
   return createTextEvent('assistant', '');
 }
 
@@ -235,7 +237,7 @@ export class StreamingEventBuilder {
   ) {
     const toolCallSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args,
       server_label: options?.server_label,
@@ -253,7 +255,7 @@ export class StreamingEventBuilder {
   addToolResult(id: string, output: object, error?: string) {
     this.event.segments.push({
       type: 'tool_result',
-      id,
+      id: id as ToolCallId,
       output,
       error
     });
@@ -334,12 +336,12 @@ export class StreamingEventBuilder {
   
   // =============================================================================
   // LEGACY COMPATIBILITY METHODS
-  // These methods provide backward compatibility with ChatStreamHandler
+  // These methods provide backward compatibility
   // =============================================================================
   
   /**
    * Start a tool call (legacy compatibility)
-   * Used by ChatStreamHandler for incremental tool call building
+   * Used for incremental tool call building
    */
   startToolCall(id: string, name: string): void {
     // Try to determine the index based on current tool calls
@@ -350,7 +352,7 @@ export class StreamingEventBuilder {
     // This will be replaced when the tool call is completed
     const placeholderSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args: {}, // Empty args initially
       // Add visual indicator that this is still building
@@ -373,7 +375,7 @@ export class StreamingEventBuilder {
     // This will be replaced when the tool call is completed
     const placeholderSegment: Segment = {
       type: 'tool_call',
-      id,
+      id: id as ToolCallId,
       name,
       args: {}, // Empty args initially
       // Add visual indicator that this is still building
@@ -386,7 +388,7 @@ export class StreamingEventBuilder {
   
   /**
    * Add arguments to a pending tool call (legacy compatibility)
-   * Used by ChatStreamHandler for streaming tool call arguments
+   * Used for streaming tool call arguments
    */
   addToolCallArguments(id: string, args: string): void {
     const pending = this.pendingToolCalls.get(id);
@@ -412,7 +414,7 @@ export class StreamingEventBuilder {
   
   /**
    * Complete a tool call by parsing arguments (legacy compatibility)
-   * Used by ChatStreamHandler when tool call arguments are fully received
+   * Used when tool call arguments are fully received
    */
   completeToolCall(id: string): void {
     const pending = this.pendingToolCalls.get(id);
@@ -430,7 +432,7 @@ export class StreamingEventBuilder {
           // Replace placeholder with complete tool call
           this.event.segments[segmentIndex] = {
             type: 'tool_call',
-            id: pending.id,
+            id: pending.id as ToolCallId,
             name: pending.name,
             args: parsedArgs,
             display_name: pending.name // Remove the "building..." indicator
@@ -468,7 +470,7 @@ export class StreamingEventBuilder {
   
   /**
    * Get tool call ID by index (legacy compatibility)
-   * Used by ChatStreamHandler to map streaming events to tool calls
+   * Used to map streaming events to tool calls
    */
   getToolCallIdAtIndex(index: number): string | null {
     console.log('🔍 [EventBuilder] getToolCallIdAtIndex lookup:', {
@@ -518,7 +520,7 @@ export class StreamingEventBuilder {
   reset(role: 'assistant' | 'user' | 'system' | 'tool'): void {
     // Create a new empty event for the next iteration
     this.event = {
-      id: crypto.randomUUID(),
+      id: generateEventId(),
       role,
       segments: role === 'assistant' ? [{ type: 'text', text: '' }] : [],
       ts: Date.now(),
