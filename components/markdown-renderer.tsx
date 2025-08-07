@@ -1,12 +1,14 @@
 'use client';
 
-import React, { memo } from 'react';
-import ReactMarkdown from 'react-markdown';
+import React, { FC, memo } from 'react';
+import ReactMarkdown, { Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
+import remarkMath from 'remark-math';
+import rehypeMathjax from 'rehype-mathjax';
+import { CodeBlock } from '@/components/CodeBlock';
 
-// Import highlight.js CSS
-import 'highlight.js/styles/github.css';
+// Memoize ReactMarkdown for better performance
+const MemoizedReactMarkdown: FC<Options> = memo(ReactMarkdown);
 
 interface MarkdownRendererProps {
   content: string
@@ -15,120 +17,80 @@ interface MarkdownRendererProps {
 
 const MarkdownRenderer = memo(function MarkdownRenderer({ 
   content, 
-  className = 'text-sm' 
+  className = 'prose dark:prose-invert max-w-none sm:pr-[20px]' 
 }: MarkdownRendererProps) {
   // Pre-process content to handle special formatting patterns
   const processedContent = React.useMemo(() => {
-    let txt = content
-      // Convert box-drawing character lines to horizontal rules
-      .replace(/^([─═━┅┄┉┈]{10,})$/gm, '\n---\n')
-      // Handle section headers that might have box characters around them
-      .replace(/^([─═━┅┄┉┈]+)\n(.+?)\n([─═━┅┄┉┈]+)$/gm, '\n---\n### $2\n---\n')
-      // Convert numbered sections with box characters to proper headers
-      .replace(/^(\d+)\.\s+(.+?)$/gm, (match, num, title) => {
-        return `\n### ${num}. ${title}\n`;
-      })
-      // A. / B. / C. -> sub-headers
-      .replace(/^([A-Z])\.\s+/gm, '#### $1. ')
-      // bullet "• something" -> "- something"
-      .replace(/^•\s+/gm, '- ')
-      // en-dash sub-items "– nested" -> "  - nested"
-      .replace(/^[–—]\s+/gm, '  - ')
-      // Ensure proper spacing around sections
-      .replace(/\n{3,}/g, '\n\n');
-
-      // NEW: convert 1‑3 leading spaces *inside* a paragraph line
-      // to hard spaces so the parser keeps them.
-      // • look for either BOM or newline, then 1‑3 plain spaces, then a non‑space char
-      // • replace each plain space with \u00A0 (NBSP)
-      txt = txt.replace(/(^|\n)( {1,3})(?=\S)/g, (_, brk, s) =>
-        brk + '\u00A0'.repeat(s.length)
-      );
-      return txt;
+    // Convert box-drawing character lines to horizontal rules
+    return content.replace(/^([─═━┅┄┉┈]{10,})$/gm, '\n---\n');
   }, [content]);
 
   return (
-    <div className={`prose prose-gray dark:prose-invert max-w-none ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+    <div className={className}>
+      <MemoizedReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeMathjax]}
         components={{
-        // Custom styling for different elements
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          code: (props: any) => {
-            const { node: _node, className, children, ...restProps } = props;
-            const inline = (props as { inline?: boolean })?.inline;
-            const match = /language-(\w+)/.exec(className || '');
-            return !inline && match ? (
-              <pre className="bg-muted rounded-md p-1 overflow-x-auto my-2 w-0 min-w-full">
-                <code className={`${className} block whitespace-pre`} {...restProps}>
-                  {children}
-                </code>
-              </pre>
-            ) : (
-              <code
-                className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono break-words"
-                {...restProps}
-              >
-                {children}
-              </code>
-            );
-          },
-          pre: ({ children }) => (
-            <div className="relative">
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        code({ node, inline, className, children, ...props }: any) {
+          const match = /language-(\w+)/.exec(className || '');
+
+          return !inline && match ? (
+            <CodeBlock
+              key={Math.random()}
+              language={(match && match[1]) || ''}
+              value={String(children).replace(/\n$/, '')}
+              {...props}
+            />
+          ) : (
+            <code className={`${className || ''} before:content-[''] after:content-['']`} {...props}>
               {children}
-            </div>
-          ),
-          blockquote: ({ children }) => (
-            <blockquote className="border-l-4 border-muted-foreground/20 pl-4 my-2 italic text-muted-foreground break-words">
+            </code>
+          );
+        },
+        // Override pre to remove padding when it contains a CodeBlock
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pre({ children, ...props }: any) {
+          // Check if children contains a CodeBlock (has language class)
+          if (React.isValidElement(children)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const codeChild = children.props as any;
+            const hasLanguage = codeChild?.className && typeof codeChild.className === 'string' && /language-\w+/.test(codeChild.className);
+            
+            if (hasLanguage) {
+              // For code blocks with language, render without padding
+              return <div className="p-0">{children}</div>;
+            }
+          }
+          
+          // For regular pre blocks without language
+          return <pre {...props}>{children}</pre>;
+        },
+        table({ children }) {
+          return (
+            <table className="border-collapse border border-black px-3 py-1 dark:border-white">
               {children}
-            </blockquote>
-          ),
-          // Let prose handle most styling, just override a few key elements
-          h3: ({ children }) => (
-            <h3 className="text-primary">{children}</h3>
-          ),
-          a: ({ href, children }) => (
-            <a 
-              href={href} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-blue-500 hover:text-blue-600 underline"
-            >
-              {children}
-            </a>
-          ),
-          table: ({ children }) => (
-            <div className="overflow-x-auto my-2">
-              <table className="min-w-full border-collapse border border-muted">
-                {children}
-              </table>
-            </div>
-          ),
-          th: ({ children }) => (
-            <th className="border border-muted bg-muted/50 px-3 py-2 text-left font-semibold">
+            </table>
+          );
+        },
+        th({ children }) {
+          return (
+            <th className="break-words border border-black bg-[#9ca3af] px-3 py-1 text-white dark:border-white">
               {children}
             </th>
-          ),
-          td: ({ children }) => (
-            <td className="border border-muted px-3 py-2">{children}</td>
-          ),
-          hr: () => (
-            <hr className="my-4 border-t border-muted-foreground/20" />
-          ),
-          // Handle text nodes to preserve formatting
-          text: ({ children }) => {
-            const text = children as string;
-            // If this is a line of special characters that wasn't caught by preprocessing
-            if (typeof text === 'string' && /^[─═━┅┄┉┈•–—]+$/.test(text.trim())) {
-              return <div className="my-2 text-muted-foreground font-mono text-xs">{text}</div>;
-            }
-            return <>{children}</>;
-          },
+          );
+        },
+        td({ children }) {
+          return (
+            <td className="break-words border border-black px-3 py-1 dark:border-white">
+              {children}
+            </td>
+          );
+        },
         }}
       >
         {processedContent}
-      </ReactMarkdown>
+      </MemoizedReactMarkdown>
     </div>
   );
 });
