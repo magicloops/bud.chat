@@ -11,6 +11,26 @@ export interface ModelInfo {
 
 // Mapping of friendly model names to actual API models
 export const MODEL_MAPPING: Record<string, ModelInfo> = {
+  // OpenAI Models (GPT-5 Series - Hybrid Reasoning)
+  'gpt-5': {
+    apiName: 'gpt-5',
+    provider: 'openai',
+    displayName: 'GPT-5',
+    description: 'Hybrid model with reasoning capabilities'
+  },
+  'gpt-5-mini': {
+    apiName: 'gpt-5-mini',
+    provider: 'openai',
+    displayName: 'GPT-5 Mini',
+    description: 'Efficient hybrid model with reasoning'
+  },
+  'gpt-5-nano': {
+    apiName: 'gpt-5-nano',
+    provider: 'openai',
+    displayName: 'GPT-5 Nano',
+    description: 'Ultra-efficient hybrid model'
+  },
+
   // OpenAI Models (Latest - Reasoning Models)
   'o3': {
     apiName: 'o3',
@@ -209,12 +229,12 @@ export function getModelsGroupedForUI() {
 }
 
 /**
- * Check if a model is an o-series reasoning model that should use the Responses API
+ * Check if a model is a reasoning model that should use the Responses API
  * @param friendlyName - The friendly model name
- * @returns true if it's an o-series model (o1, o3, o3-mini, o4-mini)
+ * @returns true if it's an o-series model or GPT-5 series (hybrid reasoning)
  */
 export function isReasoningModel(friendlyName: string): boolean {
-  const reasoningModels = ['o1', 'o1-mini', 'o3', 'o3-mini', 'o4-mini'];
+  const reasoningModels = ['o1', 'o1-mini', 'o3', 'o3-mini', 'o4-mini', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano'];
   return reasoningModels.includes(friendlyName);
 }
 
