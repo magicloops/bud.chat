@@ -280,7 +280,8 @@ export default function ChatPage({ params }: ChatPageProps) {
       setStreamingEvents(null);
       setIsLocalStreaming(false);
     }
-  }, [isNewConversation, existingConversation, streamingEvents]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNewConversation, existingConversation]); // Intentionally omit streamingEvents to prevent infinite loops
 
   // Message handler for new conversations
   const handleSendMessage = useCallback(async (content: string) => {
@@ -335,14 +336,19 @@ export default function ChatPage({ params }: ChatPageProps) {
       // Set up local state updater for streaming and track final events
       let finalStreamingEvents: Event[] = newEvents; // Track events outside React state
       
-      eventHandler.setLocalStateUpdater((updater) => {
+      // Create a stable updater that doesn't cause re-renders
+      const stableUpdater = (updater: (events: Event[]) => Event[]) => {
         setStreamingEvents(prevEvents => {
           if (!prevEvents) return prevEvents;
           const updated = updater(prevEvents);
+          // Only update if the events actually changed
+          if (updated === prevEvents) return prevEvents;
           finalStreamingEvents = updated; // Keep sync'd copy for transition
           return updated;
         });
-      }, assistantPlaceholder);
+      };
+      
+      eventHandler.setLocalStateUpdater(stableUpdater, assistantPlaceholder);
       
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');

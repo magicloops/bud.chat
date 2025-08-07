@@ -44,7 +44,7 @@ interface ResponsesInputItem {
   name?: string;
   output?: string;
   error?: string;
-  summary?: Array<{ index: number; type: string; text: string }>;
+  summary?: Array<{ type: string; text: string }>;
 }
 
 interface ResponsesMCPTool {
@@ -143,16 +143,6 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     try {
       const inputItems = this.convertEventsToInputItems(request.events);
       
-      console.log('📋 [Responses API] Input items:', inputItems.map((item, idx) => ({
-        index: idx,
-        type: item.type,
-        id: item.id,
-        ...(item.type === 'message' ? { role: item.role, contentLength: item.content?.length } : {}),
-        ...(item.type === 'reasoning' ? { summaryCount: item.summary?.length } : {}),
-        ...(item.type === 'mcp_call' ? { name: item.name, hasOutput: !!item.output } : {})
-      })));
-      
-      
       const params: ResponsesCreateParams & { stream: true } = {
         model: this.getModelName(request.model),
         input: inputItems,
@@ -178,7 +168,6 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         summary: 'auto'
       };
       
-      console.log('📤 [Responses API] Sending request with params:', JSON.stringify(params, null, 2));
       
       // Use the OpenAI SDK's responses API with streaming
       // Note: The SDK types may not be fully aligned with our custom types
@@ -197,11 +186,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       
       let hasStarted = false;
       
+      // Track the current message ID for text segments
+      let currentMessageId: string | undefined;
+      
       // Transform the processed stream to our unified format
       for await (const streamEvent of processedStream as AsyncGenerator<ExtendedStreamEvent>) {
         // Log unhandled events
         const handledTypes = [
-          'token', 'reasoning_start', 'reasoning_summary_text_delta', 
+          'token', 'text_start', 'message_start', 'reasoning_start', 'reasoning_summary_text_delta', 
           'reasoning_summary_delta', 'reasoning_summary_text_done',
           'reasoning_summary_done', 'reasoning_summary_part_added', 
           'reasoning_summary_part_done', 'reasoning_complete',
@@ -228,12 +220,46 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         }
         
         switch (streamEvent.type) {
+          case 'message_start':
+            // Capture the message ID for the text content that follows
+            currentMessageId = streamEvent.item_id as string;
+            // console.log('💬 [Responses Provider] Message started with ID:', currentMessageId);
+            break;
+            
+          case 'text_start':
+            // Create a text segment with the proper ID (fallback for legacy format)
+            const textSegmentWithId: Segment = {
+              type: 'text',
+              id: streamEvent.item_id as string,
+              text: streamEvent.content as string || '',
+              sequence_number: streamEvent.sequence_number as number | undefined,
+              output_index: streamEvent.output_index as number | undefined
+            };
+            currentEvent.segments.push(textSegmentWithId);
+            
+            // Yield initial text if present
+            if (streamEvent.content) {
+              yield {
+                type: 'segment',
+                data: {
+                  segment: { type: 'text', text: streamEvent.content as string },
+                  segmentIndex: currentEvent.segments.length - 1
+                }
+              };
+            }
+            break;
+            
           case 'token':
             if (streamEvent.content && typeof streamEvent.content === 'string') {
-              // Find or create text segment
-              let textSegment = currentEvent.segments.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
+              // Find existing text segment or create one with the message ID
+              let textSegment = currentEvent.segments.find(s => s.type === 'text') as { type: 'text'; text: string; id?: string } | undefined;
               if (!textSegment) {
-                textSegment = { type: 'text', text: '' };
+                // Create text segment with the message ID we captured
+                textSegment = { 
+                  type: 'text', 
+                  text: '',
+                  id: currentMessageId // Use the message ID from message_start event
+                };
                 currentEvent.segments.push(textSegment);
               }
               textSegment.text += streamEvent.content;
@@ -566,6 +592,31 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'complete':
+            // Log what we've collected in currentEvent before finishing
+            // console.log('🔍 [Responses Provider] Final currentEvent structure:', {
+            //   id: currentEvent.id,
+            //   role: currentEvent.role,
+            //   segments_count: currentEvent.segments.length,
+            //   segments: currentEvent.segments.map((seg, idx) => ({
+            //     index: idx,
+            //     type: seg.type,
+            //     ...(seg.type === 'text' ? { 
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       id: (seg as any).id,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       text_length: (seg as any).text?.length,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       text_preview: (seg as any).text?.substring(0, 50) + '...'
+            //     } : {}),
+            //     ...(seg.type === 'reasoning' ? {
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       id: (seg as any).id,
+            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            //       parts_count: (seg as any).parts?.length
+            //     } : {})
+            //   }))
+            // });
+            
             yield { type: 'done' };
             return;
             
@@ -606,28 +657,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             }))
         });
       } else if (event.role === 'assistant') {
-        // Include assistant message with text content only
-        const textSegments = event.segments.filter(seg => seg.type === 'text');
-        if (textSegments.length > 0) {
-          items.push({
-            id: `msg_${messageIndex++}`,
-            type: 'message',
-            role: 'assistant',
-            content: textSegments.map(seg => ({ 
-              type: 'output_text',
-              text: (seg as { type: 'text'; text: string }).text 
-            }))
-          });
-        }
-        
-        // Process segments in their original order
-        // Build a list of items while tracking if reasoning should be kept
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const segmentItems: any[] = [];
-        
-        for (let i = 0; i < event.segments.length; i++) {
-          const segment = event.segments[i];
-          
+        // Simply flatten segments in their original order - this preserves the reasoning->output relationship
+        for (const segment of event.segments) {
           if (segment.type === 'reasoning') {
             // Convert reasoning parts to summary array
             const summary = segment.parts?.map(part => ({
@@ -635,34 +666,28 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               text: part.text
             })) || [];
             
-            const hasContent = summary.some(s => s.text && s.text.trim().length > 0);
+            // Include all reasoning segments, even with empty summaries
+            // They're required to maintain the reasoning->output relationship for tool calls
+            items.push({
+              id: segment.id,
+              type: 'reasoning',
+              summary: summary
+            });
+          } else if (segment.type === 'text') {
+            // Add text as a message with the segment's ID if available
+            const messageId = segment.id || `msg_${messageIndex++}`;
             
-            // Check if the next segment is a tool call
-            const nextSegment = event.segments[i + 1];
-            const isFollowedByToolCall = nextSegment && nextSegment.type === 'tool_call';
-            
-            // Include reasoning if it has content OR is followed by a tool call
-            if (hasContent || isFollowedByToolCall) {
-              segmentItems.push({
-                id: segment.id,
-                type: 'reasoning',
-                summary: summary
-              });
-              
-              if (!hasContent && isFollowedByToolCall) {
-                console.log('📌 [Responses API] Keeping empty reasoning summary before tool call:', {
-                  reasoningId: segment.id,
-                  nextToolId: nextSegment.id
-                });
-              }
-            } else {
-              console.log('🚫 [Responses API] Filtering out empty reasoning summary:', {
-                id: segment.id,
-                hasContent,
-                isFollowedByToolCall
-              });
-            }
+            items.push({
+              id: messageId,
+              type: 'message',
+              role: 'assistant',
+              content: [{ 
+                type: 'output_text',
+                text: segment.text
+              }]
+            });
           } else if (segment.type === 'tool_call') {
+            // Add the tool call
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const mcpCall: any = {
               id: segment.id,
@@ -682,12 +707,9 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               mcpCall.error = segment.error;
             }
             
-            segmentItems.push(mcpCall);
+            items.push(mcpCall);
           }
         }
-        
-        // Add all the items we collected
-        items.push(...segmentItems);
       } else if (event.role === 'tool') {
         // Convert tool results to mcp_call items with output
         const toolResult = event.segments[0];

@@ -6,7 +6,7 @@ import { EventId, ToolCallId, ConversationId, generateEventId, generateToolCallI
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; id?: string; sequence_number?: number; output_index?: number }
   | { 
       type: 'tool_call'; 
       id: ToolCallId; 
