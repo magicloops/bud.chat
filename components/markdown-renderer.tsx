@@ -17,7 +17,7 @@ interface MarkdownRendererProps {
 
 const MarkdownRenderer = memo(function MarkdownRenderer({ 
   content, 
-  className = 'prose dark:prose-invert max-w-none sm:pr-[20px]' 
+  className = 'prose dark:prose-invert max-w-none text-sm sm:pr-[20px]' 
 }: MarkdownRendererProps) {
   // Pre-process content to handle special formatting patterns
   const processedContent = React.useMemo(() => {
