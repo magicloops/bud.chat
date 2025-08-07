@@ -34,6 +34,7 @@ interface ChatRequestBase {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  reasoningEffort?: 'low' | 'medium' | 'high';
 }
 
 interface NewChatRequest extends ChatRequestBase {
@@ -49,14 +50,7 @@ interface ContinueChatRequest extends ChatRequestBase {
   message: string;
 }
 
-interface ResponsesChatRequest extends ChatRequestBase {
-  mode: 'responses';
-  conversationId: string;
-  message: string;
-  reasoningEffort?: 'low' | 'medium' | 'high';
-}
-
-type ChatRequest = NewChatRequest | ContinueChatRequest | ResponsesChatRequest;
+type ChatRequest = NewChatRequest | ContinueChatRequest;
 
 // Helper to validate workspace access
 async function validateWorkspaceAccess(
@@ -434,7 +428,7 @@ export async function POST(request: NextRequest) {
       }
       
       
-    } else if (mode === 'continue' || mode === 'responses') {
+    } else if (mode === 'continue') {
       // Validate continue request
       const continueBody = body as ContinueChatRequest;
       if (!continueBody.conversationId) {
@@ -638,7 +632,7 @@ export async function POST(request: NextRequest) {
               conversationId,
               workspaceId,
               budId,
-              reasoningEffort: (body as ResponsesChatRequest).reasoningEffort
+              reasoningEffort: body.reasoningEffort
             };
             
             // Stream the response
@@ -856,6 +850,22 @@ export async function POST(request: NextRequest) {
                 case 'mcp_tool_complete':
                   // Handle MCP tool complete events
                   if (extendedEvent.data) {
+                    // First emit as tool_result for consistent frontend handling
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_result',
+                      tool_id: extendedEvent.data.tool_id,
+                      output: extendedEvent.data.output,
+                      error: extendedEvent.data.error
+                    })}\n\n`));
+                    
+                    // Emit tool_complete to match the pattern used elsewhere
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_complete',
+                      tool_id: extendedEvent.data.tool_id,
+                      content: extendedEvent.data.error ? '❌ Tool failed' : '✅ Tool completed'
+                    })}\n\n`));
+                    
+                    // Then emit the mcp_tool_complete event for any specific handling
                     controller.enqueue(encoder.encode(`data: ${JSON.stringify({
                       type: 'mcp_tool_complete',
                       tool_id: extendedEvent.data.tool_id,
