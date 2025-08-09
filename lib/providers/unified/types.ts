@@ -1,6 +1,6 @@
 // Unified types for provider abstraction layer
 import { Event, Segment } from '@/lib/types/events';
-import { MCPBudConfig, BuiltInToolsConfig } from '@/lib/types';
+import { MCPBudConfig, BuiltInToolsConfig, ReasoningConfig, TextGenerationConfig } from '@/lib/types';
 
 export interface UnifiedChatRequest {
   events: Event[];
@@ -15,8 +15,11 @@ export interface UnifiedChatRequest {
   // Tool definitions for the request
   tools?: UnifiedTool[];
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
-  // Reasoning-specific options
-  reasoningEffort?: 'low' | 'medium' | 'high';
+  // Reasoning and verbosity configuration
+  reasoningConfig?: ReasoningConfig;
+  textGenerationConfig?: TextGenerationConfig;
+  // Legacy support - deprecated but still used by existing code
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high';
 }
 
 export interface UnifiedChatResponse {

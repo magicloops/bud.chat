@@ -24,12 +24,25 @@ export interface BudConfig {
     cssVariables: Record<string, string>
   }
   mcpConfig?: MCPBudConfig
+  reasoningConfig?: ReasoningConfig
+  textGenerationConfig?: TextGenerationConfig
 }
 
 // Built-in Tools Configuration (for OpenAI's built-in tools)
 export interface BuiltInToolsConfig {
   enabled_tools: string[] // Array of tool types: "web_search_preview", "code_interpreter"
   tool_settings: Record<string, Record<string, any>> // Tool-specific settings
+}
+
+// Reasoning Configuration (for OpenAI Responses API)
+export interface ReasoningConfig {
+  effort?: 'minimal' | 'low' | 'medium' | 'high'
+  summary?: 'auto' | 'concise' | 'detailed'
+}
+
+// Text Generation Configuration (for GPT-5 series)
+export interface TextGenerationConfig {
+  verbosity?: 'low' | 'medium' | 'high'
 }
 
 // Remote MCP Configuration (for OpenAI-hosted MCP servers)
@@ -57,6 +70,20 @@ export interface MCPConversationOverrides {
   additional_servers?: string[] // Additional server IDs to include
   disabled_tools?: string[] // Additional tools to disable
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
+}
+
+export interface ReasoningConversationOverrides {
+  effort?: 'minimal' | 'low' | 'medium' | 'high'
+  summary?: 'auto' | 'concise' | 'detailed'
+}
+
+export interface TextGenerationConversationOverrides {
+  verbosity?: 'low' | 'medium' | 'high'
+}
+
+export interface BuiltInToolsConversationOverrides {
+  enabled_tools?: string[] // Override enabled tools for this conversation
+  tool_settings?: Record<string, Record<string, any>> // Tool-specific settings overrides
 }
 
 // Database types (actively used)

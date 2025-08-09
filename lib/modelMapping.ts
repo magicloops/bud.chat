@@ -13,10 +13,25 @@ export interface BuiltInTool {
   };
 }
 
+export interface ReasoningCapabilities {
+  supports_reasoning: boolean;
+  supports_reasoning_effort: boolean;
+  available_reasoning_efforts: ('minimal' | 'low' | 'medium' | 'high')[];
+  supports_reasoning_summary: boolean;
+  available_summary_types: ('auto' | 'concise' | 'detailed')[];
+}
+
+export interface VerbosityCapabilities {
+  supports_verbosity: boolean;
+  available_verbosity_levels: ('low' | 'medium' | 'high')[];
+}
+
 export interface ModelCapabilities {
   supports_builtin_tools: boolean;
   available_builtin_tools: BuiltInTool[];
   uses_responses_api: boolean;
+  reasoning_capabilities?: ReasoningCapabilities;
+  verbosity_capabilities?: VerbosityCapabilities;
 }
 
 export interface ModelInfo {
@@ -147,7 +162,18 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'], // 'minimal' not compatible with built-in tools
+      supports_reasoning_summary: true,
+      available_summary_types: ['detailed'] // GPT-5 only supports 'detailed' summary
+    },
+    verbosity_capabilities: {
+      supports_verbosity: true,
+      available_verbosity_levels: ['low', 'medium', 'high']
+    }
   },
   'gpt-5-mini': {
     supports_builtin_tools: true,
@@ -158,7 +184,18 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'], // 'minimal' not compatible with built-in tools
+      supports_reasoning_summary: true,
+      available_summary_types: ['detailed'] // GPT-5 only supports 'detailed' summary
+    },
+    verbosity_capabilities: {
+      supports_verbosity: true,
+      available_verbosity_levels: ['low', 'medium', 'high']
+    }
   },
   'gpt-5-nano': {
     supports_builtin_tools: true,
@@ -169,7 +206,18 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'], // 'minimal' not compatible with built-in tools
+      supports_reasoning_summary: true,
+      available_summary_types: ['detailed'] // GPT-5 only supports 'detailed' summary
+    },
+    verbosity_capabilities: {
+      supports_verbosity: true,
+      available_verbosity_levels: ['low', 'medium', 'high']
+    }
   },
 
   // O-series reasoning models with built-in tools
@@ -182,7 +230,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'],
+      supports_reasoning_summary: true,
+      available_summary_types: ['auto', 'concise', 'detailed']
+    }
   },
   'o3-mini': {
     supports_builtin_tools: true,
@@ -193,7 +248,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'],
+      supports_reasoning_summary: true,
+      available_summary_types: ['auto', 'concise', 'detailed']
+    }
   },
   'o4-mini': {
     supports_builtin_tools: true,
@@ -204,7 +266,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'],
+      supports_reasoning_summary: true,
+      available_summary_types: ['auto', 'concise', 'detailed']
+    }
   },
   'o1': {
     supports_builtin_tools: true,
@@ -215,7 +284,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'],
+      supports_reasoning_summary: true,
+      available_summary_types: ['auto', 'concise', 'detailed']
+    }
   },
   'o1-mini': {
     supports_builtin_tools: true,
@@ -226,7 +302,14 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
         description: 'Search the web for current information and recent developments'
       }
     ],
-    uses_responses_api: true
+    uses_responses_api: true,
+    reasoning_capabilities: {
+      supports_reasoning: true,
+      supports_reasoning_effort: true,
+      available_reasoning_efforts: ['low', 'medium', 'high'],
+      supports_reasoning_summary: true,
+      available_summary_types: ['auto', 'concise', 'detailed']
+    }
   },
 
   // GPT-4 series - No built-in tools, uses ChatCompletion API
@@ -404,15 +487,6 @@ export function isReasoningModel(friendlyName: string): boolean {
   return reasoningModels.includes(friendlyName);
 }
 
-/**
- * Check if a model supports reasoning effort parameter
- * @param friendlyName - The friendly model name
- * @returns true if the model supports reasoning effort levels
- */
-export function supportsReasoningEffort(friendlyName: string): boolean {
-  // Currently only o1 supports reasoning effort parameter
-  return friendlyName === 'o1';
-}
 
 /**
  * Check if a model supports temperature parameter
@@ -492,4 +566,82 @@ export function getBuiltInTool(
 ): BuiltInTool | null {
   const availableTools = getAvailableBuiltInTools(friendlyName);
   return availableTools.find(tool => tool.type === toolType) || null;
+}
+
+/**
+ * Check if a model supports reasoning capabilities
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports reasoning
+ */
+export function supportsReasoning(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.reasoning_capabilities?.supports_reasoning || false;
+}
+
+/**
+ * Check if a model supports reasoning effort configuration
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports reasoning effort levels
+ */
+export function supportsReasoningEffort(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.reasoning_capabilities?.supports_reasoning_effort || false;
+}
+
+/**
+ * Check if a model supports reasoning summary configuration
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports reasoning summary
+ */
+export function supportsReasoningSummary(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.reasoning_capabilities?.supports_reasoning_summary || false;
+}
+
+/**
+ * Check if a model supports verbosity configuration
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports verbosity levels
+ */
+export function supportsVerbosity(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.verbosity_capabilities?.supports_verbosity || false;
+}
+
+/**
+ * Get available reasoning effort levels for a model
+ * @param friendlyName - The friendly model name
+ * @param hasBuiltInTools - Whether built-in tools are enabled (affects minimal reasoning compatibility)
+ * @returns Array of available reasoning effort levels
+ */
+export function getAvailableReasoningEfforts(friendlyName: string, hasBuiltInTools?: boolean): ('minimal' | 'low' | 'medium' | 'high')[] {
+  const capabilities = getModelCapabilities(friendlyName);
+  const baseEfforts = capabilities.reasoning_capabilities?.available_reasoning_efforts || [];
+  
+  // GPT-5 models can use 'minimal' only when no built-in tools are enabled
+  if (friendlyName.startsWith('gpt-5') && !hasBuiltInTools) {
+    return ['minimal', ...baseEfforts];
+  }
+  
+  return baseEfforts;
+}
+
+/**
+ * Get available reasoning summary types for a model
+ * @param friendlyName - The friendly model name
+ * @returns Array of available summary types
+ */
+export function getAvailableReasoningSummaryTypes(friendlyName: string): ('auto' | 'concise' | 'detailed')[] {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.reasoning_capabilities?.available_summary_types || [];
+}
+
+/**
+ * Get available verbosity levels for a model
+ * @param friendlyName - The friendly model name
+ * @returns Array of available verbosity levels
+ */
+export function getAvailableVerbosityLevels(friendlyName: string): ('low' | 'medium' | 'high')[] {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.verbosity_capabilities?.available_verbosity_levels || [];
 }

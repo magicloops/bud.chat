@@ -276,14 +276,15 @@ export default function ChatPage({ params }: ChatPageProps) {
   
   // Clear streaming events when store conversation is ready (for seamless transitions)
   useEffect(() => {
-    if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents) {
+    if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents && !isLocalStreaming) {
+      // Only clear if we're not actively streaming to avoid interfering with ongoing streams
       setStreamingEvents(null);
       setIsLocalStreaming(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNewConversation, existingConversation]); // Intentionally omit streamingEvents to prevent infinite loops
+  }, [isNewConversation, existingConversation?.events?.length]); // Only depend on events length, not the entire conversation object
 
-  // Message handler for new conversations
+  // Message handler for new conversations  
   const handleSendMessage = useCallback(async (content: string) => {
     if (!selectedWorkspace || !isNewConversation) return;
 
@@ -333,20 +334,21 @@ export default function ChatPage({ params }: ChatPageProps) {
         { debug: true }
       );
       
-      // Set up local state updater for streaming and track final events
-      let finalStreamingEvents: Event[] = newEvents; // Track events outside React state
+      // Use ref to track final events outside React state to prevent infinite updates
+      const finalStreamingEventsRef = { current: newEvents };
       
-      // Create a stable updater that doesn't cause re-renders
-      const stableUpdater = (updater: (events: Event[]) => Event[]) => {
+      // Create a stable updater that avoids infinite loops without dropping updates
+      const stableUpdater = useCallback((updater: (events: Event[]) => Event[]) => {
         setStreamingEvents(prevEvents => {
           if (!prevEvents) return prevEvents;
           const updated = updater(prevEvents);
-          // Only update if the events actually changed
+          // Only update if the events reference actually changed
           if (updated === prevEvents) return prevEvents;
-          finalStreamingEvents = updated; // Keep sync'd copy for transition
+          
+          finalStreamingEventsRef.current = updated; // Keep sync'd copy for transition
           return updated;
         });
-      };
+      }, []);
       
       eventHandler.setLocalStateUpdater(stableUpdater, assistantPlaceholder);
       
@@ -377,14 +379,14 @@ export default function ChatPage({ params }: ChatPageProps) {
                 setIsLocalStreaming(false);
                 
                 
-                if (realConversationId && finalStreamingEvents) {
+                if (realConversationId && finalStreamingEventsRef.current) {
                   // Create final conversation with completed streaming events
                   const tempConv = store.conversations[tempConversationId];
                   if (tempConv) {
                     const realConv = {
                       ...tempConv,
                       id: realConversationId,
-                      events: finalStreamingEvents, // Use final streaming events
+                      events: finalStreamingEventsRef.current, // Use final streaming events from ref
                       isStreaming: false,
                       streamingEventId: undefined,
                       meta: { 
@@ -412,8 +414,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                 } else {
                   console.error('🚨 ERROR CONDITION:', {
                     realConversationId: realConversationId,
-                    finalStreamingEvents: finalStreamingEvents,
-                    finalStreamingEventsCount: finalStreamingEvents?.length,
+                    finalStreamingEvents: finalStreamingEventsRef.current,
+                    finalStreamingEventsCount: finalStreamingEventsRef.current?.length,
                     dataType: data.type,
                     dataKeys: Object.keys(data)
                   });

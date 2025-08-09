@@ -12,9 +12,21 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Sparkles } from 'lucide-react';
 import { EmojiPicker } from '@/components/EmojiPicker';
 import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP';
-import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig, ReasoningConfig, TextGenerationConfig } from '@/lib/types';
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers';
-import { getModelsForUI, supportsTemperature, getAvailableBuiltInTools, supportsBuiltInTools } from '@/lib/modelMapping';
+import { 
+  getModelsForUI, 
+  supportsTemperature, 
+  getAvailableBuiltInTools, 
+  supportsBuiltInTools,
+  supportsReasoning,
+  supportsReasoningEffort,
+  supportsReasoningSummary,
+  supportsVerbosity,
+  getAvailableReasoningEfforts,
+  getAvailableReasoningSummaryTypes,
+  getAvailableVerbosityLevels
+} from '@/lib/modelMapping';
 import { Checkbox } from '@/components/ui/checkbox';
 
 interface BudFormProps {
@@ -361,6 +373,156 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
                     No built-in tools are available for this model.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Reasoning Configuration */}
+          {supportsReasoning(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Reasoning Configuration
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Configure how {config.model} approaches reasoning for better performance and control.
+                </p>
+                
+                {supportsReasoningEffort(config.model) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Reasoning Effort</label>
+                    <Select
+                      value={config.reasoningConfig?.effort || 'medium'}
+                      onValueChange={(value) => {
+                        setConfig({
+                          ...config,
+                          reasoningConfig: {
+                            ...config.reasoningConfig,
+                            effort: value as 'minimal' | 'low' | 'medium' | 'high'
+                          }
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableReasoningEfforts(config.model, builtInToolsConfig.enabled_tools.length > 0).map(effort => (
+                          <SelectItem key={effort} value={effort}>
+                            <div className="flex flex-col">
+                              <span className="capitalize">{effort}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {effort === 'minimal' && 'Fastest response, minimal reasoning'}
+                                {effort === 'low' && 'Fast response, basic reasoning'}
+                                {effort === 'medium' && 'Balanced speed and reasoning quality'}
+                                {effort === 'high' && 'Thorough reasoning, slower response'}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Controls how much computational effort the model puts into reasoning before responding.
+                    </p>
+                  </div>
+                )}
+                
+                {supportsReasoningSummary(config.model) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Reasoning Summary</label>
+                    <Select
+                      value={config.reasoningConfig?.summary || (config.model.startsWith('gpt-5') ? 'detailed' : 'auto')}
+                      onValueChange={(value) => {
+                        setConfig({
+                          ...config,
+                          reasoningConfig: {
+                            ...config.reasoningConfig,
+                            summary: value as 'auto' | 'concise' | 'detailed'
+                          }
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableReasoningSummaryTypes(config.model).map(summaryType => (
+                          <SelectItem key={summaryType} value={summaryType}>
+                            <div className="flex flex-col">
+                              <span className="capitalize">{summaryType}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {summaryType === 'auto' && 'Automatic summary generation'}
+                                {summaryType === 'concise' && 'Brief reasoning summary'}
+                                {summaryType === 'detailed' && 'Comprehensive reasoning explanation'}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Choose how detailed the reasoning explanation should be in the response.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Verbosity Configuration */}
+          {supportsVerbosity(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Response Verbosity
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Control how verbose and detailed the model&apos;s responses are.
+                </p>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Verbosity Level</label>
+                  <Select
+                    value={config.textGenerationConfig?.verbosity || 'medium'}
+                    onValueChange={(value) => {
+                      setConfig({
+                        ...config,
+                        textGenerationConfig: {
+                          ...config.textGenerationConfig,
+                          verbosity: value as 'low' | 'medium' | 'high'
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getAvailableVerbosityLevels(config.model).map(verbosity => (
+                        <SelectItem key={verbosity} value={verbosity}>
+                          <div className="flex flex-col">
+                            <span className="capitalize">{verbosity}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {verbosity === 'low' && 'Concise, minimal commentary'}
+                              {verbosity === 'medium' && 'Balanced detail and brevity'}
+                              {verbosity === 'high' && 'Detailed explanations and examples'}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Affects response length and detail level. High verbosity provides more thorough explanations.
+                  </p>
+                </div>
               </CardContent>
             </Card>
           )}

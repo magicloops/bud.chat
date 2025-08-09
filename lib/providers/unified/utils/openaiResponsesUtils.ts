@@ -100,15 +100,15 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     // Lifecycle events for progress indication
     case 'response.created':
       return {
-        type: 'progress_update',
-        activity: 'response_starting',
+        type: 'response.created',
+        response: event.response as any,
         sequence_number: event.sequence_number as number
       };
 
     case 'response.in_progress':
       return {
-        type: 'progress_update',
-        activity: 'thinking',
+        type: 'response.in_progress',
+        response: event.response as any,
         sequence_number: event.sequence_number as number
       };
 
@@ -219,51 +219,10 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
 
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
-      // console.log('🎯 OpenAI Responses API: response.completed - finalizing event now');
-      
-      // Log the complete response structure for debugging
-      // const response = event.response as Record<string, unknown>;
-      // if (response) {
-      //   console.log('📦 [COMPLETE RESPONSE] Full structure from OpenAI:', {
-      //     id: response.id,
-      //     object: response.object,
-      //     model: response.model,
-      //     created: response.created,
-      //     input: JSON.stringify(response.input, null, 2),
-      //     output: JSON.stringify(response.output, null, 2),
-      //     usage: response.usage,
-      //     all_keys: Object.keys(response)
-      //   });
-      //   
-      //   // Log detailed output structure
-      //   if (Array.isArray(response.output)) {
-      //     console.log('📋 [RESPONSE OUTPUT] Detailed output items:');
-      //     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      //     response.output.forEach((item: any, index: number) => {
-      //       console.log(`  Item ${index}:`, {
-      //         type: item.type,
-      //         id: item.id,
-      //         ...(item.type === 'text' ? { content: item.content?.substring(0, 100) + '...' } : {}),
-      //         ...(item.type === 'reasoning' ? { summary_count: item.summary?.length } : {}),
-      //         all_keys: Object.keys(item)
-      //       });
-      //     });
-      //   }
-      // }
-      
-      // TODO: Extract usage data from event.response when StreamEvent interface is extended
-      // const response = event.response as {
-      //   usage?: {
-      //     input_tokens: number;
-      //     output_tokens: number;
-      //     total_tokens: number;
-      //   };
-      // };
-      
-      // For now, just return the complete event. 
-      // Usage data will need to be handled differently since StreamEvent doesn't support a data field
       return {
-        type: 'complete'
+        type: 'response.completed',
+        response: event.response as any,
+        sequence_number: event.sequence_number as number
       };
 
     // Note: response.created and response.in_progress are handled earlier in the switch
@@ -521,10 +480,8 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           combined_text: reasoningParts.map(p => p.text).join('\n')
         };
       } else if (doneItem?.type === 'message') {
-        // Handle message completion - this should trigger completion
-        return {
-          type: 'complete'
-        };
+        // Handle message completion - but don't trigger completion here since response.completed will handle it
+        return null;
       }
       return null;
 
@@ -633,9 +590,15 @@ export async function* processResponsesAPIStream(
   try {
     for await (const event of stream) {
       try {
+        // Add debug logging to see raw OpenAI events
+        console.log('🔍 [DEBUG] Raw OpenAI Event:', JSON.stringify(event, null, 2));
+        
         const transformedEvent = transformOpenAIReasoningEvent(event);
         if (transformedEvent) {
-          // Handle both single events and arrays of events
+          // Add debug logging for transformed events
+          console.log('🔄 [DEBUG] Transformed Event:', JSON.stringify(transformedEvent, null, 2));
+          
+          // Handle both single events and arrays of events - no buffering, just pass through
           if (Array.isArray(transformedEvent)) {
             for (const singleEvent of transformedEvent) {
               yield singleEvent;

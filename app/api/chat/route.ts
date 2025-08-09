@@ -577,10 +577,12 @@ export async function POST(request: NextRequest) {
             // Get MCP config and built-in tools config if bud is configured
             let mcpConfig = undefined;
             let builtInToolsConfig = undefined;
+            let reasoningConfig = undefined;
+            let textGenerationConfig = undefined;
             if (budId) {
               const { data: bud } = await supabase
                 .from('buds')
-                .select('mcp_config, builtin_tools_config')
+                .select('mcp_config, builtin_tools_config, default_json')
                 .eq('id', budId)
                 .single();
                 
@@ -625,29 +627,56 @@ export async function POST(request: NextRequest) {
               if (bud?.builtin_tools_config) {
                 builtInToolsConfig = bud.builtin_tools_config;
               }
+              
+              // Handle reasoning and text generation config from default_json
+              if (bud?.default_json) {
+                const budConfig = bud.default_json as any;
+                if (budConfig.reasoningConfig) {
+                  reasoningConfig = budConfig.reasoningConfig;
+                }
+                if (budConfig.textGenerationConfig) {
+                  textGenerationConfig = budConfig.textGenerationConfig;
+                }
+              }
             }
             
-            // Apply conversation overrides for built-in tools (for continue mode)
+            // Apply conversation overrides (for continue mode)
             if (!isNewConversation && conversationId) {
               console.log('📋 [Chat API] Checking for conversation overrides:', { conversationId });
               // Load conversation overrides
               const { data: conversationData, error: convError } = await supabase
                 .from('conversations')
-                .select('builtin_tools_config_overrides')
+                .select('builtin_tools_config_overrides, model_config_overrides')
                 .eq('id', conversationId)
                 .single();
               
-              if (!convError && conversationData?.builtin_tools_config_overrides) {
-                const originalConfig = builtInToolsConfig;
-                builtInToolsConfig = conversationData.builtin_tools_config_overrides as any; // Cast since it's JSONB
-                console.log('📋 [Chat API] Applied conversation overrides:', {
-                  original: originalConfig,
-                  override: builtInToolsConfig
-                });
+              if (!convError && conversationData) {
+                // Apply built-in tools config overrides
+                if (conversationData.builtin_tools_config_overrides) {
+                  const originalConfig = builtInToolsConfig;
+                  builtInToolsConfig = conversationData.builtin_tools_config_overrides as any; // Cast since it's JSONB
+                  console.log('📋 [Chat API] Applied built-in tools conversation overrides:', {
+                    original: originalConfig,
+                    override: builtInToolsConfig
+                  });
+                }
+                
+                // Apply reasoning and text generation config overrides
+                if (conversationData.model_config_overrides) {
+                  const modelOverrides = conversationData.model_config_overrides as any;
+                  if (modelOverrides.reasoningConfig) {
+                    reasoningConfig = modelOverrides.reasoningConfig;
+                    console.log('📋 [Chat API] Applied reasoning config override:', reasoningConfig);
+                  }
+                  if (modelOverrides.textGenerationConfig) {
+                    textGenerationConfig = modelOverrides.textGenerationConfig;
+                    console.log('📋 [Chat API] Applied text generation config override:', textGenerationConfig);
+                  }
+                }
               } else {
                 console.log('📋 [Chat API] No conversation overrides found:', {
                   convError,
-                  hasOverrides: !!conversationData?.builtin_tools_config_overrides
+                  hasOverrides: !!(conversationData?.builtin_tools_config_overrides || conversationData?.model_config_overrides)
                 });
               }
             }
@@ -664,7 +693,9 @@ export async function POST(request: NextRequest) {
               conversationId,
               workspaceId,
               budId,
-              reasoningEffort: body.reasoningEffort
+              reasoningConfig,
+              textGenerationConfig,
+              reasoningEffort: body.reasoningEffort // Legacy support
             };
             
             
@@ -938,7 +969,7 @@ export async function POST(request: NextRequest) {
                     sequence_number: extendedEvent.data?.sequence_number,
                     delta: extendedEvent.data?.delta,
                     code: extendedEvent.data?.code
-                  })}\\n\\n`));
+                  })}\n\n`));
                   break;
                   
                 case 'progress_hide':
@@ -955,31 +986,56 @@ export async function POST(request: NextRequest) {
                   throw new Error(extendedEvent.data?.error || 'Stream error');
                   
                 case 'done':
-                  if (currentEvent && !isNewConversation) {
-                    // Save the assistant response
-                    currentOrderKey = await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
+                  console.log('🔚 [Chat API] Processing done event from provider');
+                  
+                  // Send immediate done event to frontend to unblock UI
+                  controller.enqueue(encoder.encode(
+                    streamingFormat.formatSSE(streamingFormat.done())
+                  ));
+                  console.log('🔚 [Chat API] Sent immediate done event to frontend');
+                  
+                  // Handle database saves immediately for both new and existing conversations
+                  if (isNewConversation) {
+                    console.log('🔚 [Chat API] Saving events for new conversation...');
+                    const saveStartTime = Date.now();
+                    try {
+                      currentOrderKey = await saveEvents(supabase, eventLog.getEvents(), conversationId);
+                      console.log('🔚 [Chat API] New conversation events saved in', Date.now() - saveStartTime, 'ms');
+                      
+                      // Generate title in background
+                      generateConversationTitleInBackground(
+                        conversationId,
+                        eventLog.getEvents(),
+                        supabase
+                      ).catch(console.error);
+                    } catch (error) {
+                      console.error('🔴 [Chat API] Error saving new conversation events:', error);
+                    }
+                  } else if (currentEvent) {
+                    console.log('🔚 [Chat API] Saving events for existing conversation...');
+                    const saveStartTime = Date.now();
+                    try {
+                      await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
+                      console.log('🔚 [Chat API] Existing conversation events saved in', Date.now() - saveStartTime, 'ms');
+                    } catch (error) {
+                      console.error('🔴 [Chat API] Error saving existing conversation events:', error);
+                    }
                   }
+                  
+                  // Close connection after saving
+                  controller.close();
+                  console.log('🔚 [Chat API] Closed connection, frontend should be unblocked');
                   
                   // For Responses API, tool calls are handled internally by OpenAI
                   // so we should exit the loop after the stream completes
                   if (provider.name === 'openai-responses' || !hasToolCalls) {
                     iteration = maxIterations;
                   }
+                  console.log('🔚 [Chat API] Done event processed, exiting stream processing');
+                  return; // Exit the stream processing entirely
                   break;
               }
             }
-          }
-          
-          // Save all events if new conversation
-          if (isNewConversation) {
-            currentOrderKey = await saveEvents(supabase, eventLog.getEvents(), conversationId);
-            
-            // Generate title in background
-            generateConversationTitleInBackground(
-              conversationId,
-              eventLog.getEvents(),
-              supabase
-            ).catch(console.error);
           }
           
           // Send completion
@@ -995,16 +1051,8 @@ export async function POST(request: NextRequest) {
             .map(s => s.type === 'text' ? s.text : '')
             .join('');
           
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'complete',
-            content: finalContent
-          })}\n\n`));
-          
-          controller.enqueue(encoder.encode(
-            streamingFormat.formatSSE(streamingFormat.done())
-          ));
-          
-          controller.close();
+          // Note: Final completion and done events are now handled immediately in the 'done' case above
+          // This ensures the frontend gets unblocked as soon as the provider signals completion
           
         } catch (error) {
           console.error('Stream processing error:', error);

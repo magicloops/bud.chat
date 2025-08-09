@@ -3,7 +3,7 @@ import { Event, Segment } from '@/lib/types/events';
 import { AppError } from '@/lib/errors';
 
 export interface StreamingEvent {
-  type: 'event_start' | 'segment' | 'event_complete' | 'error' | 'done';
+  type: 'event_start' | 'segment' | 'event_complete' | 'error' | 'complete';
   data?: {
     event?: Event;
     segment?: Segment;
@@ -117,11 +117,11 @@ export class StreamingFormat {
   }
   
   /**
-   * Create done message
+   * Create completion message
    */
   done(metadata?: StreamingEvent['metadata']): StreamingEvent {
     return {
-      type: 'done',
+      type: 'complete',
       metadata: {
         timestamp: Date.now(),
         ...metadata
