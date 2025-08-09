@@ -17,6 +17,10 @@ export interface StreamEvent {
     | 'reasoning_summary_delta' | 'reasoning_summary_done'
     // Unified segments reasoning events
     | 'reasoning_start' | 'reasoning_complete'
+    // Built-in tool events
+    | 'web_search_call_in_progress' | 'web_search_call_searching' | 'web_search_call_completed'
+    | 'code_interpreter_call_in_progress' | 'code_interpreter_call_interpreting' | 'code_interpreter_call_completed'
+    | 'code_interpreter_call_code_delta' | 'code_interpreter_call_code_done'
     // Progress events
     | 'progress_update' | 'progress_hide'
     // Internal-only event types
@@ -64,6 +68,10 @@ export interface StreamEvent {
   // Progress fields
   activity?: ActivityType;
   hideProgress?: boolean;
+  
+  // Built-in tool fields
+  status?: 'in_progress' | 'searching' | 'completed' | 'failed' | 'interpreting';
+  code?: string; // For code interpreter streaming code
 }
 
 export interface LocalStateUpdater {
@@ -227,6 +235,31 @@ export class FrontendEventHandler {
         break;
       case 'progress_hide':
         await this.handleProgressHide(data);
+        break;
+      // Built-in tool event handlers
+      case 'web_search_call_in_progress':
+        await this.handleWebSearchInProgress(data);
+        break;
+      case 'web_search_call_searching':
+        await this.handleWebSearchSearching(data);
+        break;
+      case 'web_search_call_completed':
+        await this.handleWebSearchCompleted(data);
+        break;
+      case 'code_interpreter_call_in_progress':
+        await this.handleCodeInterpreterInProgress(data);
+        break;
+      case 'code_interpreter_call_interpreting':
+        await this.handleCodeInterpreterInterpreting(data);
+        break;
+      case 'code_interpreter_call_completed':
+        await this.handleCodeInterpreterCompleted(data);
+        break;
+      case 'code_interpreter_call_code_delta':
+        await this.handleCodeInterpreterCodeDelta(data);
+        break;
+      case 'code_interpreter_call_code_done':
+        await this.handleCodeInterpreterCodeDone(data);
         break;
     }
   }
@@ -1057,6 +1090,142 @@ export class FrontendEventHandler {
   }
 
   /**
+   * BUILT-IN TOOL EVENT HANDLERS
+   */
+
+  /**
+   * Handle web search in progress events
+   */
+  private async handleWebSearchInProgress(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
+    } else {
+      this.updateStoreStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
+    }
+  }
+
+  /**
+   * Handle web search searching events
+   */
+  private async handleWebSearchSearching(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Update progress state to show searching activity
+    this.updateProgressState('web_search', true);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStatus(data, 'searching');
+    } else {
+      this.updateStoreStateBuiltInToolStatus(data, 'searching');
+    }
+  }
+
+  /**
+   * Handle web search completed events
+   */
+  private async handleWebSearchCompleted(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Hide progress when search completes
+    this.updateProgressState(null, false);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolComplete(data, 'web_search_call');
+    } else {
+      this.updateStoreStateBuiltInToolComplete(data, 'web_search_call');
+    }
+  }
+
+  /**
+   * Handle code interpreter in progress events
+   */
+  private async handleCodeInterpreterInProgress(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
+    } else {
+      this.updateStoreStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
+    }
+  }
+
+  /**
+   * Handle code interpreter interpreting events
+   */
+  private async handleCodeInterpreterInterpreting(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Update progress state to show interpreting activity
+    this.updateProgressState('code_interpreter', true);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStatus(data, 'interpreting');
+    } else {
+      this.updateStoreStateBuiltInToolStatus(data, 'interpreting');
+    }
+  }
+
+  /**
+   * Handle code interpreter completed events
+   */
+  private async handleCodeInterpreterCompleted(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Hide progress when interpretation completes
+    this.updateProgressState(null, false);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolComplete(data, 'code_interpreter_call');
+    } else {
+      this.updateStoreStateBuiltInToolComplete(data, 'code_interpreter_call');
+    }
+  }
+
+  /**
+   * Handle code interpreter code delta events (streaming code)
+   */
+  private async handleCodeInterpreterCodeDelta(data: StreamEvent): Promise<void> {
+    const { item_id, delta } = data;
+    
+    if (!item_id || !delta) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateCodeDelta(data);
+    } else {
+      this.updateStoreStateCodeDelta(data);
+    }
+  }
+
+  /**
+   * Handle code interpreter code done events
+   */
+  private async handleCodeInterpreterCodeDone(data: StreamEvent): Promise<void> {
+    const { item_id, code } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateCodeDone(data);
+    } else {
+      this.updateStoreStateCodeDone(data);
+    }
+  }
+
+  /**
    * PROGRESS STATE MANAGEMENT
    */
   
@@ -1131,6 +1300,226 @@ export class FrontendEventHandler {
    */
   getProgressState(): ProgressState {
     return { ...this.progressState };
+  }
+
+  /**
+   * BUILT-IN TOOL STATE UPDATES
+   */
+
+  /**
+   * Handle built-in tool start for local state
+   */
+  private updateLocalStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.item_id) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => {
+        if (event.id === this.assistantPlaceholder!.id) {
+          // Check if built-in tool segment already exists
+          const toolExists = event.segments.some(
+            s => (s.type === 'web_search_call' || s.type === 'code_interpreter_call') && s.id === data.item_id
+          );
+          
+          if (!toolExists) {
+            // Add new built-in tool segment
+            const newSegment = toolType === 'web_search_call' 
+              ? {
+                  type: 'web_search_call' as const,
+                  id: data.item_id!,
+                  output_index: data.output_index || 0,
+                  sequence_number: data.sequence_number || 0,
+                  status: 'in_progress' as const
+                }
+              : {
+                  type: 'code_interpreter_call' as const,
+                  id: data.item_id!,
+                  output_index: data.output_index || 0,
+                  sequence_number: data.sequence_number || 0,
+                  status: 'in_progress' as const
+                };
+            
+            return {
+              ...event,
+              segments: [
+                ...event.segments,
+                newSegment
+              ],
+              ts: Date.now()
+            };
+          }
+        }
+        return event;
+      });
+    });
+  }
+
+  /**
+   * Handle built-in tool status update for local state
+   */
+  private updateLocalStateBuiltInToolStatus(data: StreamEvent, status: string): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.item_id) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => {
+                if (segment.type === 'web_search_call' && segment.id === data.item_id) {
+                  return { 
+                    ...segment, 
+                    status: status as 'in_progress' | 'searching' | 'completed' | 'failed'
+                  };
+                } else if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                  return { 
+                    ...segment, 
+                    status: status as 'in_progress' | 'interpreting' | 'completed' | 'failed'
+                  };
+                }
+                return segment;
+              }),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  /**
+   * Handle built-in tool complete for local state
+   */
+  private updateLocalStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.item_id) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => {
+                if (segment.type === 'web_search_call' && segment.id === data.item_id) {
+                  return { 
+                    ...segment, 
+                    status: 'completed' as const
+                  };
+                } else if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                  return { 
+                    ...segment, 
+                    status: 'completed' as const
+                  };
+                }
+                return segment;
+              }),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  /**
+   * Handle code delta streaming for local state
+   */
+  private updateLocalStateCodeDelta(data: StreamEvent): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.item_id || !data.delta) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => {
+                if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                  const currentCode = segment.code || '';
+                  return { 
+                    ...segment, 
+                    code: currentCode + data.delta
+                  };
+                }
+                return segment;
+              }),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  /**
+   * Handle code done for local state
+   */
+  private updateLocalStateCodeDone(data: StreamEvent): void {
+    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.item_id) return;
+
+    this.localStateUpdater(events => {
+      return events.map(event => 
+        event.id === this.assistantPlaceholder!.id
+          ? {
+              ...event,
+              segments: event.segments.map(segment => {
+                if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                  return { 
+                    ...segment, 
+                    code: data.code || segment.code || ''
+                  };
+                }
+                return segment;
+              }),
+              ts: Date.now()
+            }
+          : event
+      );
+    });
+  }
+
+  /**
+   * Handle built-in tool start for store state
+   */
+  private updateStoreStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateBuiltInToolStart(data, toolType, toolDisplayName);
+    }
+  }
+
+  /**
+   * Handle built-in tool status update for store state
+   */
+  private updateStoreStateBuiltInToolStatus(data: StreamEvent, status: string): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateBuiltInToolStatus(data, status);
+    }
+  }
+
+  /**
+   * Handle built-in tool complete for store state
+   */
+  private updateStoreStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateBuiltInToolComplete(data, toolType);
+    }
+  }
+
+  /**
+   * Handle code delta streaming for store state
+   */
+  private updateStoreStateCodeDelta(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateCodeDelta(data);
+    }
+  }
+
+  /**
+   * Handle code done for store state
+   */
+  private updateStoreStateCodeDone(data: StreamEvent): void {
+    // Delegate to local state updater which will update the store optimistically
+    if (this.localStateUpdater && this.assistantPlaceholder) {
+      this.updateLocalStateCodeDone(data);
+    }
   }
 
   /**

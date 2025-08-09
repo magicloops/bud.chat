@@ -63,14 +63,10 @@ export default function ChatLayout({
       return;
     }
 
-    console.log('📡 Subscribing to workspace:', selectedWorkspace);
     subscribeToWorkspace(selectedWorkspace);
-    
-    console.log('🔄 Loading workspace buds for chat layout:', selectedWorkspace);
     loadWorkspaceBuds(selectedWorkspace);
 
     return () => {
-      console.log('📡 Unsubscribing from workspace:', selectedWorkspace);
       unsubscribeFromWorkspace(selectedWorkspace);
     };
   }, [user, selectedWorkspace, subscribeToWorkspace, unsubscribeFromWorkspace, loadWorkspaceBuds]);

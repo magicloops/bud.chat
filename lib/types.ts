@@ -26,6 +26,12 @@ export interface BudConfig {
   mcpConfig?: MCPBudConfig
 }
 
+// Built-in Tools Configuration (for OpenAI's built-in tools)
+export interface BuiltInToolsConfig {
+  enabled_tools: string[] // Array of tool types: "web_search_preview", "code_interpreter"
+  tool_settings: Record<string, Record<string, any>> // Tool-specific settings
+}
+
 // Remote MCP Configuration (for OpenAI-hosted MCP servers)
 export interface RemoteMCPConfig {
   server_label: string;
@@ -58,10 +64,15 @@ export type Conversation = Database['public']['Tables']['conversations']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceMember = Database['public']['Tables']['workspace_members']['Row']
 
-// Properly typed Bud with BudConfig for default_json and MCPBudConfig for mcp_config
-export type Bud = Omit<Database['public']['Tables']['buds']['Row'], 'default_json' | 'mcp_config'> & {
+// Properly typed Bud with BudConfig for default_json, MCPBudConfig for mcp_config, 
+// and BuiltInToolsConfig for builtin_tools_config
+export type Bud = Omit<
+  Database['public']['Tables']['buds']['Row'], 
+  'default_json' | 'mcp_config' | 'builtin_tools_config'
+> & {
   default_json: BudConfig
   mcp_config: MCPBudConfig | null
+  builtin_tools_config: BuiltInToolsConfig
 }
 
 // Message Role (still used in MCP)

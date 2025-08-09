@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 import { Event } from '@/state/eventChatStore';
 import { createTextEvent } from '@/lib/types/events';
@@ -11,11 +11,13 @@ export interface CreateBudArgs {
   config: BudConfig
   workspaceId: string
   isPublic?: boolean
+  builtInToolsConfig?: BuiltInToolsConfig
 }
 
 export interface UpdateBudArgs {
   name?: string
   config?: Partial<BudConfig>
+  builtInToolsConfig?: BuiltInToolsConfig
 }
 
 // Client-side Bud operations

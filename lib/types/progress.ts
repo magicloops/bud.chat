@@ -8,7 +8,9 @@ export type ActivityType =
   | 'reasoning'
   | 'function_prep'
   | 'thinking'
-  | 'response_starting';
+  | 'response_starting'
+  | 'web_search'
+  | 'code_interpreter';
 
 export interface ProgressState {
   /** Current activity being performed */

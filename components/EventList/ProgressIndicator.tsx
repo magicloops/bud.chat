@@ -28,6 +28,10 @@ const getActivityMessage = (activity: ActivityType, serverLabel?: string): strin
       return 'Preparing function call...';
     case 'response_starting':
       return 'Starting response...';
+    case 'web_search':
+      return 'Searching the web...';
+    case 'code_interpreter':
+      return 'Interpreting code...';
     case 'thinking':
     default:
       return 'Thinking...';
@@ -45,6 +49,10 @@ const getActivityIcon = (activity: ActivityType) => {
       return '⚙️';
     case 'response_starting':
       return '✨';
+    case 'web_search':
+      return '🔍';
+    case 'code_interpreter':
+      return '💻';
     case 'thinking':
     default:
       return '💭';

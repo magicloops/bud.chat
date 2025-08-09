@@ -2,6 +2,23 @@
 // This allows us to use simple model names in the UI while maintaining
 // flexibility to update to newer model versions without changing user configs
 
+export interface BuiltInTool {
+  type: 'web_search_preview' | 'code_interpreter';
+  name: string;
+  description: string;
+  settings?: {
+    // Tool-specific configuration options
+    search_context_size?: 'low' | 'medium' | 'high';
+    container?: string; // For code interpreter
+  };
+}
+
+export interface ModelCapabilities {
+  supports_builtin_tools: boolean;
+  available_builtin_tools: BuiltInTool[];
+  uses_responses_api: boolean;
+}
+
 export interface ModelInfo {
   apiName: string;      // The actual API model identifier
   provider: 'openai' | 'anthropic';
@@ -115,6 +132,155 @@ export const MODEL_MAPPING: Record<string, ModelInfo> = {
     apiName: 'claude-3-haiku-20240307',
     provider: 'anthropic',
     displayName: 'Claude 3 Haiku'
+  }
+};
+
+// Model capabilities mapping - defines which built-in tools are available per model
+export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
+  // GPT-5 Series - Hybrid reasoning models with built-in tools
+  'gpt-5': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'gpt-5-mini': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'gpt-5-nano': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+
+  // O-series reasoning models with built-in tools
+  'o3': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'o3-mini': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'o4-mini': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'o1': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+  'o1-mini': {
+    supports_builtin_tools: true,
+    available_builtin_tools: [
+      {
+        type: 'web_search_preview',
+        name: 'Web Search',
+        description: 'Search the web for current information and recent developments'
+      }
+    ],
+    uses_responses_api: true
+  },
+
+  // GPT-4 series - No built-in tools, uses ChatCompletion API
+  'gpt-4o': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'gpt-4o-mini': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'gpt-4-turbo': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'gpt-4': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'gpt-3.5-turbo': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+
+  // Anthropic Claude models - No built-in tools (uses their own API)
+  'claude-3-5-sonnet': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'claude-3-5-haiku': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'claude-3-opus': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'claude-3-sonnet': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
+  },
+  'claude-3-haiku': {
+    supports_builtin_tools: false,
+    available_builtin_tools: [],
+    uses_responses_api: false
   }
 };
 
@@ -264,4 +430,66 @@ export function supportsTemperature(friendlyName: string): boolean {
  */
 export function getDefaultModel(): string {
   return 'gpt-4o'; // Can be changed here to update system-wide default
+}
+
+/**
+ * Get model capabilities for a friendly model name
+ * @param friendlyName - The friendly model name
+ * @returns ModelCapabilities object with built-in tool support info
+ */
+export function getModelCapabilities(friendlyName: string): ModelCapabilities {
+  const capabilities = MODEL_CAPABILITIES[friendlyName];
+  if (!capabilities) {
+    // Default to no built-in tools for unknown models
+    return {
+      supports_builtin_tools: false,
+      available_builtin_tools: [],
+      uses_responses_api: false
+    };
+  }
+  return capabilities;
+}
+
+/**
+ * Get available built-in tools for a model
+ * @param friendlyName - The friendly model name
+ * @returns Array of BuiltInTool objects
+ */
+export function getAvailableBuiltInTools(friendlyName: string): BuiltInTool[] {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.available_builtin_tools;
+}
+
+/**
+ * Check if a model supports built-in tools
+ * @param friendlyName - The friendly model name
+ * @returns true if the model supports built-in tools
+ */
+export function supportsBuiltInTools(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.supports_builtin_tools;
+}
+
+/**
+ * Check if a model should use the Responses API (includes built-in tool support)
+ * @param friendlyName - The friendly model name
+ * @returns true if the model uses Responses API
+ */
+export function usesResponsesAPI(friendlyName: string): boolean {
+  const capabilities = getModelCapabilities(friendlyName);
+  return capabilities.uses_responses_api;
+}
+
+/**
+ * Get built-in tool by type for a specific model
+ * @param friendlyName - The friendly model name
+ * @param toolType - The tool type to find
+ * @returns BuiltInTool object or null if not found
+ */
+export function getBuiltInTool(
+  friendlyName: string, 
+  toolType: 'web_search_preview' | 'code_interpreter'
+): BuiltInTool | null {
+  const availableTools = getAvailableBuiltInTools(friendlyName);
+  return availableTools.find(tool => tool.type === toolType) || null;
 }

@@ -24,6 +24,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     // Text output events
     'response.output_text.delta',
     'response.output_text.done',
+    'response.output_text.annotation.added',
     
     // Output item events
     'response.output_item.added',
@@ -54,7 +55,19 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     'response.reasoning_summary_text.delta',
     'response.reasoning_summary_text.done',
     'response.reasoning_summary.delta',
-    'response.reasoning_summary.done'
+    'response.reasoning_summary.done',
+    
+    // Built-in tool events - Web Search
+    'response.web_search_call.in_progress',
+    'response.web_search_call.searching',  
+    'response.web_search_call.completed',
+    
+    // Built-in tool events - Code Interpreter
+    'response.code_interpreter_call.in_progress',
+    'response.code_interpreter_call.interpreting',
+    'response.code_interpreter_call.completed',
+    'response.code_interpreter_call_code.delta',
+    'response.code_interpreter_call_code.done'
   ]);
   
   // Only log events we're not already handling
@@ -185,6 +198,24 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.output_text.done':
       // This indicates a text output is complete, but we continue processing
       return null; // Don't emit anything special, just continue
+      
+    case 'response.output_text.annotation.added':
+      // Handle URL citations
+      return {
+        type: 'response.output_text.annotation.added',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        content_index: event.content_index as number,
+        annotation_index: event.annotation_index as number,
+        annotation: event.annotation as {
+          type: string;
+          url: string;
+          title: string;
+          start_index: number;
+          end_index: number;
+        },
+        sequence_number: event.sequence_number as number
+      };
 
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
@@ -496,6 +527,74 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
         };
       }
       return null;
+
+    // Handle built-in tool events - Web Search
+    case 'response.web_search_call.in_progress':
+      return {
+        type: 'web_search_call_in_progress',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.web_search_call.searching':
+      return {
+        type: 'web_search_call_searching',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.web_search_call.completed':
+      return {
+        type: 'web_search_call_completed',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    // Handle built-in tool events - Code Interpreter
+    case 'response.code_interpreter_call.in_progress':
+      return {
+        type: 'code_interpreter_call_in_progress',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.code_interpreter_call.interpreting':
+      return {
+        type: 'code_interpreter_call_interpreting',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.code_interpreter_call.completed':
+      return {
+        type: 'code_interpreter_call_completed',
+        item_id: event.item_id as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.code_interpreter_call_code.delta':
+      return {
+        type: 'code_interpreter_call_code_delta',
+        item_id: event.item_id as string,
+        delta: event.delta as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
+
+    case 'response.code_interpreter_call_code.done':
+      return {
+        type: 'code_interpreter_call_code_done',
+        item_id: event.item_id as string,
+        code: event.code as string,
+        output_index: event.output_index as number,
+        sequence_number: event.sequence_number as number
+      };
 
     default:
       // Log unknown events for debugging with full details

@@ -3,12 +3,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
 import { BudId, toBudId } from '@/lib/types/branded';
-import { BudConfig, Bud } from '@/lib/types';
+import { BudConfig, Bud, BuiltInToolsConfig } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 
 export interface UpdateBudRequest {
   name?: string
   config?: Partial<BudConfig>
+  builtInToolsConfig?: BuiltInToolsConfig
 }
 
 // Helper to get bud with access check
@@ -133,6 +134,11 @@ export async function PUT(
       if (mcpConfig !== undefined) {
         updateData.mcp_config = mcpConfig as unknown as Database['public']['Tables']['buds']['Update']['mcp_config'];
       }
+    }
+    
+    // Update built-in tools config if provided
+    if (body.builtInToolsConfig !== undefined) {
+      updateData.builtin_tools_config = body.builtInToolsConfig as unknown as Database['public']['Tables']['buds']['Update']['builtin_tools_config'];
     }
 
     // Update the bud

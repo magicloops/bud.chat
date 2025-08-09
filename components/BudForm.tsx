@@ -12,16 +12,17 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Sparkles } from 'lucide-react';
 import { EmojiPicker } from '@/components/EmojiPicker';
 import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers';
-import { getModelsForUI, supportsTemperature } from '@/lib/modelMapping';
+import { getModelsForUI, supportsTemperature, getAvailableBuiltInTools, supportsBuiltInTools } from '@/lib/modelMapping';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface BudFormProps {
   bud?: Bud
   workspaceId: string
   open: boolean
   onClose: () => void
-  onSave: (config: BudConfig, name: string) => Promise<void>
+  onSave: (config: BudConfig, name: string, builtInToolsConfig?: BuiltInToolsConfig) => Promise<void>
   loading?: boolean
 }
 
@@ -32,6 +33,16 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(
     config.mcpConfig || {}
   );
+  const [builtInToolsConfig, setBuiltInToolsConfig] = useState<BuiltInToolsConfig>(() => {
+    // Initialize built-in tools config from bud or default
+    if (bud?.builtin_tools_config) {
+      return bud.builtin_tools_config;
+    }
+    return {
+      enabled_tools: [],
+      tool_settings: {}
+    };
+  });
   const [errors, setErrors] = useState<string[]>([]);
 
   // Reset form when bud changes
@@ -40,10 +51,18 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
       const budConfig = getBudConfig(bud);
       setConfig(budConfig);
       setMcpConfig(budConfig.mcpConfig || {});
+      setBuiltInToolsConfig(bud.builtin_tools_config || {
+        enabled_tools: [],
+        tool_settings: {}
+      });
     } else {
       const defaultConfig = getDefaultBudConfig();
       setConfig(defaultConfig);
       setMcpConfig({});
+      setBuiltInToolsConfig({
+        enabled_tools: [],
+        tool_settings: {}
+      });
     }
     setErrors([]);
   }, [bud]);
@@ -66,7 +85,13 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
         ...config,
         mcpConfig: Object.keys(mcpConfig).length > 0 ? mcpConfig : undefined
       };
-      await onSave(finalConfig, config.name);
+      
+      // Pass built-in tools config separately since it's stored in a separate DB column
+      const finalBuiltInToolsConfig = builtInToolsConfig.enabled_tools.length > 0 
+        ? builtInToolsConfig 
+        : { enabled_tools: [], tool_settings: {} };
+        
+      await onSave(finalConfig, config.name, finalBuiltInToolsConfig);
       onClose();
     } catch (error) {
       console.error('Failed to save bud:', error);
@@ -247,6 +272,98 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               )}
             </CardContent>
           </Card>
+          
+          {/* Built-in Tools Configuration */}
+          {supportsBuiltInTools(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Built-in Tools
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Enable OpenAI's built-in tools for enhanced capabilities. These tools are only available for {config.model}.
+                </p>
+                
+                {getAvailableBuiltInTools(config.model).map(tool => (
+                  <div key={tool.type} className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id={tool.type}
+                        checked={builtInToolsConfig.enabled_tools.includes(tool.type)}
+                        onCheckedChange={(checked) => {
+                          const updatedTools = checked
+                            ? [...builtInToolsConfig.enabled_tools, tool.type]
+                            : builtInToolsConfig.enabled_tools.filter(t => t !== tool.type);
+                          
+                          const updatedConfig = {
+                            ...builtInToolsConfig,
+                            enabled_tools: updatedTools
+                          };
+                          
+                          setBuiltInToolsConfig(updatedConfig);
+                        }}
+                      />
+                      <div className="grid gap-1.5 leading-none">
+                        <label 
+                          htmlFor={tool.type}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                        >
+                          {tool.name}
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {tool.description}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Tool-specific settings */}
+                    {builtInToolsConfig.enabled_tools.includes(tool.type) && (
+                      <div className="ml-6 space-y-2">
+                        {tool.type === 'web_search_preview' && (
+                          <div>
+                            <label className="text-xs font-medium">Search Context Size</label>
+                            <Select
+                              value={builtInToolsConfig.tool_settings[tool.type]?.search_context_size || 'medium'}
+                              onValueChange={(value) => {
+                                setBuiltInToolsConfig({
+                                  ...builtInToolsConfig,
+                                  tool_settings: {
+                                    ...builtInToolsConfig.tool_settings,
+                                    [tool.type]: {
+                                      ...builtInToolsConfig.tool_settings[tool.type],
+                                      search_context_size: value
+                                    }
+                                  }
+                                });
+                              }}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="low">Low - Minimal context</SelectItem>
+                                <SelectItem value="medium">Medium - Balanced context</SelectItem>
+                                <SelectItem value="high">High - Maximum context</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {getAvailableBuiltInTools(config.model).length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No built-in tools are available for this model.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
           
           {/* MCP Configuration */}
           <MCPConfigurationPanel

@@ -5,6 +5,7 @@ import { ReasoningSegment } from './ReasoningSegment';
 import { ToolCallSegment } from './ToolCallSegment';
 import { TextSegment } from './TextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
+import { BuiltInToolSegment } from './BuiltInToolSegment';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
@@ -43,7 +44,8 @@ export function SequentialSegmentRenderer({
   });
 
   const renderSegment = (segment: Segment, index: number) => {
-    const key = segment.type === 'reasoning' || segment.type === 'tool_call' 
+    const key = segment.type === 'reasoning' || segment.type === 'tool_call' || 
+                segment.type === 'web_search_call' || segment.type === 'code_interpreter_call'
       ? segment.id || `${segment.type}-${index}`
       : `${segment.type}-${index}`;
 
@@ -82,6 +84,16 @@ export function SequentialSegmentRenderer({
         // Tool results are rendered inline with their corresponding tool calls
         // So we don't render them separately here
         return null;
+        
+      case 'web_search_call':
+      case 'code_interpreter_call':
+        return (
+          <BuiltInToolSegment
+            key={key}
+            segment={segment as any} // Type assertion needed due to union complexity
+            isStreaming={isStreaming}
+          />
+        );
         
       default:
         // Handle any unknown segment types gracefully

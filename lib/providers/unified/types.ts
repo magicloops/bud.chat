@@ -1,6 +1,6 @@
 // Unified types for provider abstraction layer
 import { Event, Segment } from '@/lib/types/events';
-import { MCPBudConfig } from '@/lib/types';
+import { MCPBudConfig, BuiltInToolsConfig } from '@/lib/types';
 
 export interface UnifiedChatRequest {
   events: Event[];
@@ -8,6 +8,7 @@ export interface UnifiedChatRequest {
   temperature?: number;
   maxTokens?: number;
   mcpConfig?: MCPBudConfig;
+  builtInToolsConfig?: BuiltInToolsConfig;
   conversationId?: string;
   workspaceId?: string;
   budId?: string;

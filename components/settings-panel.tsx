@@ -9,14 +9,15 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench, Sparkles } from 'lucide-react';
 import { useModel } from '@/contexts/model-context';
 import { useToast } from '@/hooks/use-toast';
-import { BudConfig } from '@/lib/types';
+import { BudConfig, BuiltInToolsConfig } from '@/lib/types';
 import { useConversation, useSetConversation } from '@/state/eventChatStore';
 import { useBud, useUpdateBud } from '@/state/budStore';
 import { EmojiPicker } from '@/components/EmojiPicker';
-import { getModelsForUI, getDefaultModel, supportsTemperature } from '@/lib/modelMapping';
+import { getModelsForUI, getDefaultModel, supportsTemperature, supportsBuiltInTools, getAvailableBuiltInTools } from '@/lib/modelMapping';
 import { MCPConfigurationPanel } from '@/components/MCP/MCPConfigurationPanel';
 import type { MCPConfiguration } from '@/components/MCP/MCPConfigurationPanel';
 
@@ -29,6 +30,7 @@ interface ConversationOverrides {
   maxTokens?: number
   avatar?: string
   mcpConfig?: MCPConfiguration
+  builtInToolsConfig?: BuiltInToolsConfig
 }
 
 interface SettingsPanelProps {
@@ -71,9 +73,13 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const budConfig = bud?.default_json as unknown as BudConfig | undefined;
   const conversationOverrides = conversation?.meta.model_config_overrides as ConversationOverrides | undefined;
   const mcpOverrides = conversation?.meta.mcp_config_overrides as MCPConfiguration | undefined;
+  const builtInToolsOverrides = conversation?.meta.builtin_tools_config_overrides as BuiltInToolsConfig | undefined;
   
   // MCP config comes from top-level mcp_config field, not nested in default_json
   const budMcpConfig = bud?.mcp_config as MCPConfiguration | undefined;
+  
+  // Built-in tools config comes from top-level builtin_tools_config field
+  const budBuiltInToolsConfig = bud?.builtin_tools_config as BuiltInToolsConfig | undefined;
 
   // Form state with default values from bud config and overrides from conversation
   const [chatName, setChatName] = useState('');
@@ -85,6 +91,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [avatar, setAvatar] = useState('');
   const [currentTheme, setCurrentTheme] = useState<{name: string, cssVariables: Record<string, string>} | undefined>(undefined);
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>({});
+  const [builtInToolsConfig, setBuiltInToolsConfig] = useState<BuiltInToolsConfig>({ enabled_tools: [], tool_settings: {} });
 
   // Track original values for change detection
   const [originalValues, setOriginalValues] = useState({
@@ -96,7 +103,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     maxTokens: undefined as number | undefined,
     avatar: '',
     mcpConfig: {} as MCPConfiguration,
-    customTheme: undefined as {name: string, cssVariables: Record<string, string>} | undefined
+    customTheme: undefined as {name: string, cssVariables: Record<string, string>} | undefined,
+    builtInToolsConfig: { enabled_tools: [], tool_settings: {} } as BuiltInToolsConfig
   });
 
   // Update form values when props change
@@ -109,15 +117,6 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       return; // Don't update until bud is loaded
     }
 
-    // Debug logging
-    console.log('🔧 Settings Panel - Data loaded:', {
-      panelMode,
-      conversation: conversation?.meta,
-      bud: bud?.default_json,
-      conversationOverrides,
-      mcpOverrides,
-      budConfig: budConfig ? { name: budConfig.name, avatar: budConfig.avatar, model: budConfig.model, mcpConfig: budConfig.mcpConfig } : null
-    });
     
     // Get available models to validate
     const availableModels = getModelsForUI().map(m => m.value);
@@ -139,6 +138,12 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = budConfig?.maxTokens || undefined;
       const finalAvatar = budConfig?.avatar || '';
       const finalMcpConfig = budMcpConfig || {};
+      const finalBuiltInToolsConfig = budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} };
+      
+      console.log('🔧 [Settings Panel] Bud mode final config:', {
+        budBuiltInToolsConfig,
+        finalBuiltInToolsConfig
+      });
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -148,6 +153,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       setMaxTokens(finalMaxTokens);
       setAvatar(finalAvatar);
       setMcpConfig(finalMcpConfig);
+      setBuiltInToolsConfig(finalBuiltInToolsConfig);
       
       // Set original values for bud mode
       setOriginalValues({
@@ -159,7 +165,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         maxTokens: finalMaxTokens,
         avatar: finalAvatar,
         mcpConfig: finalMcpConfig,
-        customTheme: budConfig?.customTheme
+        customTheme: budConfig?.customTheme,
+        builtInToolsConfig: finalBuiltInToolsConfig
       });
     } else {
       // Chat mode: Use conversation overrides with bud fallbacks
@@ -169,7 +176,6 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       
       // Validate model exists in available options
       const validModel = availableModels.includes(chatModel) ? chatModel : getDefaultModel();
-      console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) });
       
       const finalChatName = newChatName;
       const finalAssistantName = newAssistantName;
@@ -178,6 +184,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined;
       const finalAvatar = conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '';
       const finalMcpConfig = mcpOverrides || budMcpConfig || {};
+      const finalBuiltInToolsConfig = builtInToolsOverrides || budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} };
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -187,6 +194,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       setMaxTokens(finalMaxTokens);
       setAvatar(finalAvatar);
       setMcpConfig(finalMcpConfig);
+      setBuiltInToolsConfig(finalBuiltInToolsConfig);
       
       // Set original values for chat mode
       setOriginalValues({
@@ -198,7 +206,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         maxTokens: finalMaxTokens,
         avatar: finalAvatar,
         mcpConfig: finalMcpConfig,
-        customTheme: budConfig?.customTheme
+        customTheme: budConfig?.customTheme,
+        builtInToolsConfig: finalBuiltInToolsConfig
       });
     }
     
@@ -405,7 +414,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           mcpConfig: mcpConfig
         };
         
-        await updateBud(bud.id, { config: updatedConfig });
+        await updateBud(bud.id, { 
+          config: updatedConfig, 
+          builtInToolsConfig: builtInToolsConfig 
+        });
         
         toast({
           title: 'Saved!',
@@ -438,7 +450,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         temperature: temperature !== (budConfig?.temperature || 1) ? temperature : undefined,
         maxTokens: maxTokens !== (budConfig?.maxTokens || undefined) ? maxTokens : undefined,
         avatar: avatar !== (budConfig?.avatar || '') ? avatar : undefined,
-        mcpConfig: JSON.stringify(mcpConfig) !== JSON.stringify(budConfig?.mcpConfig || {}) ? mcpConfig : undefined
+        mcpConfig: JSON.stringify(mcpConfig) !== JSON.stringify(budConfig?.mcpConfig || {}) ? mcpConfig : undefined,
+        builtInToolsConfig: JSON.stringify(builtInToolsConfig) !== JSON.stringify(budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} }) ? builtInToolsConfig : undefined
       };
       
       // Remove undefined values
@@ -472,7 +485,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             assistant_name: assistantName, // Use exact form value
             assistant_avatar: avatar, // Use exact form value
             model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides : null,
-            mcp_config_overrides: Object.keys(mcpConfig).length > 0 ? mcpConfig : null 
+            mcp_config_overrides: Object.keys(mcpConfig).length > 0 ? mcpConfig : null,
+            builtin_tools_config_overrides: currentOverrides.builtInToolsConfig ? builtInToolsConfig : null 
           })
         });
       } catch (error) {
@@ -493,7 +507,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           mcpConfig: mcpConfig
         };
         
-        await updateBud(bud.id, { config: updatedBudConfig });
+        await updateBud(bud.id, { 
+          config: updatedBudConfig, 
+          builtInToolsConfig: builtInToolsConfig 
+        });
         
         // Set conversation fields to match the updated bud values
         const updatedConversation = {
@@ -516,7 +533,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               assistant_name: assistantName, // Set to bud name
               assistant_avatar: avatar, // Set to bud avatar
               model_config_overrides: null, // Clear model overrides
-              mcp_config_overrides: null // Clear MCP overrides since they're now in the bud
+              mcp_config_overrides: null, // Clear MCP overrides since they're now in the bud
+              builtin_tools_config_overrides: null // Clear built-in tools overrides since they're now in the bud
             })
           });
         } catch (error) {
@@ -705,6 +723,120 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Built-in Tools - only show for supported models */}
+                {supportsBuiltInTools(aiModel) && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <label className="text-sm font-medium">Built-in Tools</label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Enable OpenAI's built-in tools for enhanced capabilities with {aiModel}.
+                    </p>
+                    
+                    {getAvailableBuiltInTools(aiModel).map(tool => (
+                      <div key={tool.type} className="space-y-3">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id={tool.type}
+                            checked={builtInToolsConfig.enabled_tools.includes(tool.type)}
+                            onCheckedChange={(checked) => {
+                              const updatedTools = checked
+                                ? [...builtInToolsConfig.enabled_tools, tool.type]
+                                : builtInToolsConfig.enabled_tools.filter(t => t !== tool.type);
+                              
+                              const updatedConfig = {
+                                ...builtInToolsConfig,
+                                enabled_tools: updatedTools
+                              };
+                              setBuiltInToolsConfig(updatedConfig);
+                              handleFieldChange('builtInToolsConfig', updatedConfig);
+                            }}
+                          />
+                          <div className="grid gap-1.5 leading-none">
+                            <label 
+                              htmlFor={tool.type}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                              {tool.name}
+                            </label>
+                            <p className="text-xs text-muted-foreground">
+                              {tool.description}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Tool-specific settings */}
+                        {builtInToolsConfig.enabled_tools.includes(tool.type) && (
+                          <div className="ml-6 space-y-2">
+                            {tool.type === 'web_search_preview' && (
+                              <div>
+                                <label className="text-xs font-medium">Search Context Size</label>
+                                <Select
+                                  value={builtInToolsConfig.tool_settings[tool.type]?.search_context_size || 'medium'}
+                                  onValueChange={(value) => {
+                                    const updatedConfig = {
+                                      ...builtInToolsConfig,
+                                      tool_settings: {
+                                        ...builtInToolsConfig.tool_settings,
+                                        [tool.type]: {
+                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          search_context_size: value
+                                        }
+                                      }
+                                    };
+                                    setBuiltInToolsConfig(updatedConfig);
+                                    handleFieldChange('builtInToolsConfig', updatedConfig);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="low">Low - Minimal context</SelectItem>
+                                    <SelectItem value="medium">Medium - Balanced context</SelectItem>
+                                    <SelectItem value="high">High - Maximum context</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            
+                            {tool.type === 'code_interpreter' && (
+                              <div>
+                                <label className="text-xs font-medium">Container</label>
+                                <Select
+                                  value={builtInToolsConfig.tool_settings[tool.type]?.container || 'default'}
+                                  onValueChange={(value) => {
+                                    const updatedConfig = {
+                                      ...builtInToolsConfig,
+                                      tool_settings: {
+                                        ...builtInToolsConfig.tool_settings,
+                                        [tool.type]: {
+                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          container: value
+                                        }
+                                      }
+                                    };
+                                    setBuiltInToolsConfig(updatedConfig);
+                                    handleFieldChange('builtInToolsConfig', updatedConfig);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="default">Default Python Environment</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* AI Goals / Instructions - only show in bud mode */}
                 {panelMode === 'bud' && (

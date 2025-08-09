@@ -32,7 +32,7 @@ interface ResponsesCreateParams {
     effort: 'low' | 'medium' | 'high';
     summary: 'auto' | 'none';
   };
-  tools?: ResponsesMCPTool[];
+  tools?: (ResponsesMCPTool | ResponsesBuiltInTool)[];
 }
 
 interface ResponsesInputItem {
@@ -54,6 +54,12 @@ interface ResponsesMCPTool {
   require_approval: 'never' | 'always' | { never?: { tool_names: string[] }; always?: { tool_names: string[] } };
   allowed_tools?: string[];
   headers?: Record<string, string>;
+}
+
+interface ResponsesBuiltInTool {
+  type: 'web_search_preview' | 'code_interpreter';
+  search_context_size?: 'low' | 'medium' | 'high';
+  container?: string;
 }
 
 export class OpenAIResponsesProvider extends OpenAIBaseProvider {
@@ -87,6 +93,44 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       [ProviderFeature.STREAMING]: true,
     };
   }
+
+  private buildToolsArray(request: UnifiedChatRequest): (ResponsesMCPTool | ResponsesBuiltInTool)[] {
+    const tools: (ResponsesMCPTool | ResponsesBuiltInTool)[] = [];
+    
+    // Add remote MCP tools if configured
+    if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
+      const mcpTools = request.mcpConfig.remote_servers.map(server => ({
+        type: 'mcp' as const,
+        server_label: server.server_label,
+        server_url: server.server_url,
+        require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
+        allowed_tools: server.allowed_tools,
+        headers: server.headers
+      }));
+      tools.push(...mcpTools);
+    }
+    
+    // Add built-in tools if configured
+    if (request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0) {
+      for (const toolType of request.builtInToolsConfig.enabled_tools) {
+        const toolSettings = request.builtInToolsConfig.tool_settings[toolType] || {};
+        
+        if (toolType === 'web_search_preview') {
+          tools.push({
+            type: 'web_search_preview',
+            search_context_size: toolSettings.search_context_size || 'medium'
+          });
+        } else if (toolType === 'code_interpreter') {
+          tools.push({
+            type: 'code_interpreter',
+            container: toolSettings.container || 'default'
+          });
+        }
+      }
+    }
+    
+    return tools;
+  }
   
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
@@ -98,16 +142,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         max_output_tokens: request.maxTokens || 8000,
       };
       
-      // Add remote MCP tools if configured
-      if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        params.tools = request.mcpConfig.remote_servers.map(server => ({
-          type: 'mcp' as const,
-          server_label: server.server_label,
-          server_url: server.server_url,
-          require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
-          allowed_tools: server.allowed_tools,
-          headers: server.headers
-        }));
+      // Add tools (MCP and built-in)
+      const tools = this.buildToolsArray(request);
+      if (tools.length > 0) {
+        params.tools = tools;
       }
       
       // Add reasoning configuration
@@ -150,16 +188,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         stream: true,
       };
       
-      // Add remote MCP tools if configured
-      if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        params.tools = request.mcpConfig.remote_servers.map(server => ({
-          type: 'mcp' as const,
-          server_label: server.server_label,
-          server_url: server.server_url,
-          require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
-          allowed_tools: server.allowed_tools,
-          headers: server.headers
-        }));
+      // Add tools (MCP and built-in)
+      const tools = this.buildToolsArray(request);
+      if (tools.length > 0) {
+        params.tools = tools;
       }
       
       // Add reasoning configuration
@@ -201,6 +233,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           'mcp_tool_complete', 'mcp_tool_arguments_delta', 'mcp_list_tools',
           'mcp_call_in_progress', 'mcp_call_completed', 'mcp_call_failed',
           'mcp_list_tools_in_progress', 'mcp_list_tools_completed', 'mcp_list_tools_failed',
+          'web_search_call_in_progress', 'web_search_call_searching', 'web_search_call_completed',
+          'response.output_text.annotation.added',
           'error', 'complete', 'finalize_only', 'progress_update', 'progress_hide'
         ];
         
@@ -565,6 +599,64 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'mcp_call_completed':
           case 'mcp_call_failed':
             // MCP call lifecycle events
+            break;
+            
+          case 'web_search_call_in_progress':
+          case 'web_search_call_searching':
+          case 'web_search_call_completed':
+            // Web search lifecycle events - pass through as progress updates
+            yield {
+              type: 'progress_update',
+              data: {
+                message: streamEvent.type === 'web_search_call_in_progress' ? 'Starting web search...' :
+                        streamEvent.type === 'web_search_call_searching' ? 'Searching the web...' :
+                        'Web search completed',
+                progress: streamEvent.type === 'web_search_call_completed' ? 100 : undefined,
+                item_id: streamEvent.item_id,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+            
+          case 'response.output_text.annotation.added':
+            // Handle URL citations - add to the current text segment
+            if (streamEvent.annotation?.type === 'url_citation') {
+              // Find the text segment that contains this citation
+              const textSegmentIndex = currentEvent.segments.findIndex(s => s.type === 'text');
+              if (textSegmentIndex >= 0) {
+                const textSegment = currentEvent.segments[textSegmentIndex] as { type: 'text'; text: string; citations?: Array<{url: string; title: string; start_index: number; end_index: number}> };
+                
+                // Add citations array if it doesn't exist
+                if (!textSegment.citations) {
+                  textSegment.citations = [];
+                }
+                
+                // Add the citation
+                textSegment.citations.push({
+                  url: streamEvent.annotation.url,
+                  title: streamEvent.annotation.title,
+                  start_index: streamEvent.annotation.start_index,
+                  end_index: streamEvent.annotation.end_index
+                });
+                
+                // Yield citation event for immediate processing
+                yield {
+                  type: 'citation_added',
+                  data: {
+                    citation: {
+                      url: streamEvent.annotation.url,
+                      title: streamEvent.annotation.title,
+                      start_index: streamEvent.annotation.start_index,
+                      end_index: streamEvent.annotation.end_index
+                    },
+                    segmentIndex: textSegmentIndex
+                  }
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any;
+              }
+            }
             break;
             
           case 'progress_update':

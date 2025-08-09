@@ -38,6 +38,7 @@ export interface EventConversationMeta {
   assistant_avatar?: string
   model_config_overrides?: Record<string, unknown>
   mcp_config_overrides?: Record<string, unknown>
+  builtin_tools_config_overrides?: Record<string, unknown>
   created_at: string
 }
 

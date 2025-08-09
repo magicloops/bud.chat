@@ -574,12 +574,13 @@ export async function POST(request: NextRequest) {
               continue;
             }
             
-            // Get MCP config if bud is configured
+            // Get MCP config and built-in tools config if bud is configured
             let mcpConfig = undefined;
+            let builtInToolsConfig = undefined;
             if (budId) {
               const { data: bud } = await supabase
                 .from('buds')
-                .select('mcp_config')
+                .select('mcp_config, builtin_tools_config')
                 .eq('id', budId)
                 .single();
                 
@@ -619,6 +620,36 @@ export async function POST(request: NextRequest) {
                   mcpConfig = bud.mcp_config;
                 }
               }
+              
+              // Handle built-in tools config
+              if (bud?.builtin_tools_config) {
+                builtInToolsConfig = bud.builtin_tools_config;
+              }
+            }
+            
+            // Apply conversation overrides for built-in tools (for continue mode)
+            if (!isNewConversation && conversationId) {
+              console.log('📋 [Chat API] Checking for conversation overrides:', { conversationId });
+              // Load conversation overrides
+              const { data: conversationData, error: convError } = await supabase
+                .from('conversations')
+                .select('builtin_tools_config_overrides')
+                .eq('id', conversationId)
+                .single();
+              
+              if (!convError && conversationData?.builtin_tools_config_overrides) {
+                const originalConfig = builtInToolsConfig;
+                builtInToolsConfig = conversationData.builtin_tools_config_overrides as any; // Cast since it's JSONB
+                console.log('📋 [Chat API] Applied conversation overrides:', {
+                  original: originalConfig,
+                  override: builtInToolsConfig
+                });
+              } else {
+                console.log('📋 [Chat API] No conversation overrides found:', {
+                  convError,
+                  hasOverrides: !!conversationData?.builtin_tools_config_overrides
+                });
+              }
             }
             
             // Prepare chat request
@@ -629,11 +660,13 @@ export async function POST(request: NextRequest) {
               maxTokens: body.maxTokens,
               tools: tools.length > 0 ? tools : undefined,
               mcpConfig,
+              builtInToolsConfig,
               conversationId,
               workspaceId,
               budId,
               reasoningEffort: body.reasoningEffort
             };
+            
             
             // Stream the response
             let currentEvent: Event | null = null;
@@ -887,6 +920,25 @@ export async function POST(request: NextRequest) {
                       sequence_number: extendedEvent.data.sequence_number
                     })}\n\n`));
                   }
+                  break;
+                  
+                case 'web_search_call_in_progress':
+                case 'web_search_call_searching':
+                case 'web_search_call_completed':
+                case 'code_interpreter_call_in_progress':
+                case 'code_interpreter_call_interpreting':
+                case 'code_interpreter_call_completed':
+                case 'code_interpreter_call_code_delta':
+                case 'code_interpreter_call_code_done':
+                  // Handle built-in tool events
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    type: extendedEvent.type,
+                    item_id: extendedEvent.data?.item_id,
+                    output_index: extendedEvent.data?.output_index,
+                    sequence_number: extendedEvent.data?.sequence_number,
+                    delta: extendedEvent.data?.delta,
+                    code: extendedEvent.data?.code
+                  })}\\n\\n`));
                   break;
                   
                 case 'progress_hide':
