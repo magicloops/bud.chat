@@ -274,6 +274,20 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [streamingEvents, setStreamingEvents] = useState<Event[] | null>(null);
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
   
+  // Stable updater function for streaming events to prevent infinite loops
+  const createStableUpdater = useCallback(() => {
+    return (updater: (events: Event[]) => Event[]) => {
+      setStreamingEvents(prevEvents => {
+        if (!prevEvents) return prevEvents;
+        const updated = updater(prevEvents);
+        // Only update if the events reference actually changed
+        if (updated === prevEvents) return prevEvents;
+        
+        return updated;
+      });
+    };
+  }, []);
+  
   // Clear streaming events when store conversation is ready (for seamless transitions)
   useEffect(() => {
     if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents && !isLocalStreaming) {
@@ -337,20 +351,17 @@ export default function ChatPage({ params }: ChatPageProps) {
       // Use ref to track final events outside React state to prevent infinite updates
       const finalStreamingEventsRef = { current: newEvents };
       
-      // Create a stable updater that avoids infinite loops without dropping updates
-      const stableUpdater = useCallback((updater: (events: Event[]) => Event[]) => {
-        setStreamingEvents(prevEvents => {
-          if (!prevEvents) return prevEvents;
+      // Create a stable updater that tracks final events
+      const stableUpdater = createStableUpdater();
+      const wrappedUpdater = (updater: (events: Event[]) => Event[]) => {
+        stableUpdater(prevEvents => {
           const updated = updater(prevEvents);
-          // Only update if the events reference actually changed
-          if (updated === prevEvents) return prevEvents;
-          
           finalStreamingEventsRef.current = updated; // Keep sync'd copy for transition
           return updated;
         });
-      }, []);
+      };
       
-      eventHandler.setLocalStateUpdater(stableUpdater, assistantPlaceholder);
+      eventHandler.setLocalStateUpdater(wrappedUpdater, assistantPlaceholder);
       
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
