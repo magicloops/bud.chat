@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState, useCallback, useMemo } from 'react';
+import { use, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { EventStream } from '@/components/EventStream';
@@ -273,18 +273,19 @@ export default function ChatPage({ params }: ChatPageProps) {
   // Local streaming state for new conversations
   const [streamingEvents, setStreamingEvents] = useState<Event[] | null>(null);
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
+  // Refs to buffer streaming updates and flush at ~30fps to avoid nested updates
+  const latestStreamingEventsRef = useRef<Event[]>([]);
+  const updateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
-  // Stable updater function for streaming events to prevent infinite loops
+  // Stable updater creator (kept for compatibility, but we buffer updates in refs now)
   const createStableUpdater = useCallback(() => {
     return (updater: (events: Event[]) => Event[]) => {
-      setStreamingEvents(prevEvents => {
-        if (!prevEvents) return prevEvents;
-        const updated = updater(prevEvents);
-        // Only update if the events reference actually changed
-        if (updated === prevEvents) return prevEvents;
-        
-        return updated;
-      });
+      // Update the ref only; UI is flushed on an interval
+      const current = latestStreamingEventsRef.current;
+      const updated = updater(current);
+      if (updated !== current) {
+        latestStreamingEventsRef.current = updated;
+      }
     };
   }, []);
   
@@ -312,6 +313,8 @@ export default function ChatPage({ params }: ChatPageProps) {
     // Set local streaming state instead of updating store immediately
     setStreamingEvents(newEvents);
     setIsLocalStreaming(true);
+    // Initialize the buffered ref; a useEffect manages the periodic flush
+    latestStreamingEventsRef.current = newEvents;
     
     // Only update store with user event + placeholder (no streaming updates)
     const updatedConversation = {
@@ -354,11 +357,10 @@ export default function ChatPage({ params }: ChatPageProps) {
       // Create a stable updater that tracks final events
       const stableUpdater = createStableUpdater();
       const wrappedUpdater = (updater: (events: Event[]) => Event[]) => {
-        stableUpdater(prevEvents => {
-          const updated = updater(prevEvents);
-          finalStreamingEventsRef.current = updated; // Keep sync'd copy for transition
-          return updated;
-        });
+        // Update buffered refs only; UI is flushed by interval
+        const updated = updater(latestStreamingEventsRef.current);
+        latestStreamingEventsRef.current = updated;
+        finalStreamingEventsRef.current = updated; // Keep sync'd copy for transition
       };
       
       eventHandler.setLocalStateUpdater(wrappedUpdater, assistantPlaceholder);
@@ -394,6 +396,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                   // Create final conversation with completed streaming events
                   const tempConv = store.conversations[tempConversationId];
                   if (tempConv) {
+                    // Final flush before transitioning
+                    setStreamingEvents([...latestStreamingEventsRef.current]);
                     const realConv = {
                       ...tempConv,
                       id: realConversationId,
@@ -446,7 +450,35 @@ export default function ChatPage({ params }: ChatPageProps) {
       setIsLocalStreaming(false);
       setStreamingEvents(null);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud?.id, router]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud?.id, router, latestStreamingEventsRef, updateIntervalRef]);
+
+  // Manage the periodic UI flush while local streaming is active
+  useEffect(() => {
+    if (!isLocalStreaming) {
+      // Ensure any stale interval is cleared
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+      return;
+    }
+
+    // Start periodic flush (~30fps)
+    updateIntervalRef.current = setInterval(() => {
+      setStreamingEvents(prev => {
+        const latest = latestStreamingEventsRef.current;
+        // Only update when the reference actually changed
+        return prev === latest ? prev : latest;
+      });
+    }, 33);
+
+    return () => {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, [isLocalStreaming]);
 
   // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {

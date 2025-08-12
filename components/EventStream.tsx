@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo, useRef } from 'react';
+import { useState, memo, useRef, useEffect } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
@@ -46,6 +46,8 @@ const EventStreamComponent = function EventStream({
   
   // Ref to track latest events during streaming without causing re-renders
   const latestEventsRef = useRef<Event[]>([]);
+  // Ref to manage the periodic UI flush interval
+  const updateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Load current bud data if conversation has a source_bud_id
   const currentBudData = useBud(conversation?.meta?.source_bud_id || '');
@@ -91,7 +93,6 @@ const EventStreamComponent = function EventStream({
     store.setConversation(conversationId, updatedConversation);
     
     // Use unified frontend event handler for existing conversations
-    let updateInterval: NodeJS.Timeout | undefined;
     
     try {
       const response = await fetch('/api/chat', {
@@ -123,11 +124,6 @@ const EventStreamComponent = function EventStream({
       // Initialize the ref with the current events
       latestEventsRef.current = finalEvents;
       
-      // Set up periodic UI updates during streaming (30fps)
-      updateInterval = setInterval(() => {
-        setLocalStreamingEvents([...latestEventsRef.current]);
-      }, 33); // ~30fps
-      
       // Set up local state updater to track streaming events locally (NOT in store during streaming)
       eventHandler.setLocalStateUpdater(
         (updater) => {
@@ -140,9 +136,6 @@ const EventStreamComponent = function EventStream({
       
       // Process streaming response with unified handler
       await eventHandler.processStreamingResponse(response);
-      
-      // Clear the update interval
-      clearInterval(updateInterval);
       
       // Do one final update to ensure we have the latest state
       setLocalStreamingEvents([...latestEventsRef.current]);
@@ -160,11 +153,6 @@ const EventStreamComponent = function EventStream({
       setIsLocalStreaming(false);
     } catch (error) {
       console.error('Error sending message:', error);
-      
-      // Clear the update interval if it exists
-      if (updateInterval) {
-        clearInterval(updateInterval);
-      }
       
       // Clear local streaming state on error
       setLocalStreamingEvents(null);
@@ -184,6 +172,32 @@ const EventStreamComponent = function EventStream({
       throw error;
     }
   };
+
+  // Manage the periodic UI flush while local streaming is active
+  useEffect(() => {
+    if (!isLocalStreaming) {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+      return;
+    }
+
+    updateIntervalRef.current = setInterval(() => {
+      setLocalStreamingEvents(prev => {
+        const latest = latestEventsRef.current;
+        // Only update when the reference actually changed
+        return prev === latest ? prev : latest;
+      });
+    }, 33);
+
+    return () => {
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+        updateIntervalRef.current = null;
+      }
+    };
+  }, [isLocalStreaming]);
 
   const title = isNewConversation 
     ? 'New Conversation' 
