@@ -568,7 +568,7 @@ export default function WorkspaceSettingsPage() {
                       <div>
                         <CardTitle>{getBudDisplayName(bud)}</CardTitle>
                         <CardDescription>
-                          Model: {getBudModel(bud)} • Created: {new Date(bud.created_at).toLocaleDateString()}
+                          Model: {getBudModel(bud)} • Created: {new Date(bud.created_at ?? Date.now()).toLocaleDateString()}
                         </CardDescription>
                       </div>
                     </div>

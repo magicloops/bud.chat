@@ -36,12 +36,14 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
           const match = /language-(\w+)/.exec(className || '');
 
           return !inline && match ? (
-            <CodeBlock
-              key={Math.random()}
-              language={(match && match[1]) || ''}
-              value={String(children).replace(/\n$/, '')}
-              {...props}
-            />
+            <div className="mt-[1.25rem] mb-[1.25rem]">
+              <CodeBlock
+                key={Math.random()}
+                language={(match && match[1]) || ''}
+                value={String(children).replace(/\n$/, '')}
+                {...props}
+              />
+            </div>
           ) : (
             <code className={`${className || ''} before:content-[''] after:content-['']`} {...props}>
               {children}

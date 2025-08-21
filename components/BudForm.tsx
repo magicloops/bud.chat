@@ -296,7 +296,7 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Enable OpenAI's built-in tools for enhanced capabilities. These tools are only available for {config.model}.
+                  Enable OpenAI&apos;s built-in tools for enhanced capabilities. These tools are only available for {config.model}.
                 </p>
                 
                 {getAvailableBuiltInTools(config.model).map(tool => (
@@ -338,7 +338,9 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
                           <div>
                             <label className="text-xs font-medium">Search Context Size</label>
                             <Select
-                              value={builtInToolsConfig.tool_settings[tool.type]?.search_context_size || 'medium'}
+                              value={(
+                                builtInToolsConfig.tool_settings[tool.type] as { search_context_size?: string } | undefined
+                              )?.search_context_size ?? 'medium'}
                               onValueChange={(value) => {
                                 setBuiltInToolsConfig({
                                   ...builtInToolsConfig,
@@ -543,7 +545,7 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               value={config.greeting || ''}
               onChange={(e) => setConfig({...config, greeting: e.target.value})}
               rows={3}
-              placeholder="Hello! I'm here to help you with..."
+              placeholder="Hello! I&apos;m here to help you with..."
             />
             <p className="text-xs text-muted-foreground mt-1">
               This message will appear when starting a new conversation with this bud.

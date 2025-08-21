@@ -1,4 +1,5 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
+import { streamingBus } from '@/lib/streaming/streamingBus';
 import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
@@ -91,6 +92,7 @@ export class FrontendEventHandler {
   private localStateUpdater: LocalStateUpdater | null = null;
   private assistantPlaceholder: Event | null = null;
   private hasCreatedPostToolPlaceholder: boolean = false;
+  private useLocalStreaming: boolean = false;
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -104,10 +106,11 @@ export class FrontendEventHandler {
   /**
    * Set local state updater for optimistic flows
    */
-  setLocalStateUpdater(updater: LocalStateUpdater, placeholder: Event): void {
+  setLocalStateUpdater(updater: LocalStateUpdater, placeholder: Event, options?: { useLocalStreaming?: boolean }): void {
     this.localStateUpdater = updater;
     this.assistantPlaceholder = placeholder;
     this.hasCreatedPostToolPlaceholder = false; // Reset flag for new stream
+    this.useLocalStreaming = !!options?.useLocalStreaming;
   }
 
   /**
@@ -392,6 +395,7 @@ export class FrontendEventHandler {
     } else {
       this.updateStoreStateComplete(data);
     }
+    // Do not clear streaming overlays here; containers handle clearing
   }
 
   /**
@@ -459,23 +463,25 @@ export class FrontendEventHandler {
     if (!reasoningData) return;
     
     // Find the reasoning part to update by index
-    let reasoningPart = reasoningData.parts[summary_index];
-    if (!reasoningPart) {
-      // Create part if it doesn't exist (defensive programming)
-      reasoningPart = {
-        summary_index,
-        type: 'summary_text',
-        text: '',
-        sequence_number: sequence_number || 0,
-        is_complete: false,
-        created_at: Date.now()
-      };
-      reasoningData.parts[summary_index] = reasoningPart;
-    }
-    
-    // Append delta text
+    const existingPart = reasoningData.parts[summary_index];
+    const basePart = existingPart || {
+      summary_index,
+      type: 'summary_text' as const,
+      text: '',
+      sequence_number: sequence_number || 0,
+      is_complete: false,
+      created_at: Date.now()
+    };
+
+    // Append delta text immutably (avoid mutating possibly frozen objects)
     const deltaText = typeof delta === 'string' ? delta : delta.text || '';
-    reasoningPart.text += deltaText;
+    const updatedPart = {
+      ...basePart,
+      text: (basePart.text || '') + deltaText,
+      // keep latest sequence number if provided
+      sequence_number: sequence_number ?? basePart.sequence_number
+    };
+    reasoningData.parts[summary_index] = updatedPart;
     
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
@@ -483,6 +489,13 @@ export class FrontendEventHandler {
     
     // Update UI state
     this.updateReasoningInState(item_id, reasoningData);
+    // Also stream to overlay bus keyed by assistant placeholder event id
+    if (this.assistantPlaceholder) {
+      const overlayDelta = typeof delta === 'string' 
+        ? delta 
+        : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
+      if (overlayDelta) streamingBus.appendReasoning(this.assistantPlaceholder.id, overlayDelta);
+    }
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
@@ -496,8 +509,12 @@ export class FrontendEventHandler {
     const reasoningData = this.currentReasoningData.get(item_id);
     if (!reasoningData || !reasoningData.parts[summary_index]) return;
     
-    // Mark this specific part as complete
-    reasoningData.parts[summary_index].is_complete = true;
+    // Mark this specific part as complete (immutably)
+    const prevPart = reasoningData.parts[summary_index];
+    reasoningData.parts[summary_index] = {
+      ...prevPart,
+      is_complete: true
+    };
     
     
     // Update UI state
@@ -526,13 +543,21 @@ export class FrontendEventHandler {
     // Clear streaming part index
     reasoningData.streaming_part_index = undefined;
     
-    // Mark all parts as complete
-    Object.values(reasoningData.parts).forEach(part => {
-      part.is_complete = true;
-    });
+    // Mark all parts as complete (immutably)
+    for (const idx of Object.keys(reasoningData.parts)) {
+      const i = Number(idx);
+      const prev = reasoningData.parts[i];
+      if (prev) {
+        reasoningData.parts[i] = { ...prev, is_complete: true };
+      }
+    }
     
     // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
+    // Finalize overlay text for this event
+    if (this.assistantPlaceholder && reasoningData.combined_text) {
+      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+    }
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -587,13 +612,21 @@ export class FrontendEventHandler {
     // Clear streaming state
     reasoningData.streaming_part_index = undefined;
     
-    // Mark all parts as complete
-    Object.values(reasoningData.parts).forEach(part => {
-      part.is_complete = true;
-    });
+    // Mark all parts as complete (immutably)
+    for (const idx of Object.keys(reasoningData.parts)) {
+      const i = Number(idx);
+      const prev = reasoningData.parts[i];
+      if (prev) {
+        reasoningData.parts[i] = { ...prev, is_complete: true };
+      }
+    }
     
     // Update UI state - reasoning is now complete
     this.updateReasoningInState(item_id, reasoningData, true);
+    // Finalize overlay text for this event
+    if (this.assistantPlaceholder && reasoningData.combined_text) {
+      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+    }
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -701,11 +734,13 @@ export class FrontendEventHandler {
       id: item_id,
       output_index: reasoningData.output_index,
       sequence_number: reasoningData.sequence_number || 0,
-      parts: Object.values(reasoningData.parts),
+      // Deep-copy parts to avoid freezing internal mutable references
+      parts: Object.values(reasoningData.parts).map(p => ({ ...p })),
       combined_text: reasoningData.combined_text,
       effort_level: reasoningData.effort_level,
       reasoning_tokens: reasoningData.reasoning_tokens,
-      streaming: reasoningData.streaming_part_index !== undefined
+      streaming: reasoningData.streaming_part_index !== undefined,
+      streaming_part_index: reasoningData.streaming_part_index
     };
 
     // Find existing reasoning segment with the same ID and update it, or add new one
@@ -730,36 +765,9 @@ export class FrontendEventHandler {
    */
 
   private updateLocalStateToken(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.content) return;
-
-    this.localStateUpdater(events => {
-      // Find the event to update
-      const eventIndex = events.findIndex(e => e.id === this.assistantPlaceholder!.id);
-      if (eventIndex === -1) return events; // Return same reference if no changes
-      
-      const event = events[eventIndex];
-      // Find the text segment to update
-      const textSegmentIndex = event.segments.findIndex(s => s.type === 'text');
-      if (textSegmentIndex === -1) return events; // Return same reference if no text segment
-      
-      // Only create new objects for what actually changed
-      const newEvents = [...events];
-      const newEvent = { ...event };
-      const newSegments = [...event.segments];
-      const textSegment = newSegments[textSegmentIndex];
-      
-      // Update only the text segment
-      const typedTextSegment = textSegment as { type: 'text'; text: string; id?: string; sequence_number?: number; output_index?: number };
-      newSegments[textSegmentIndex] = {
-        ...typedTextSegment,
-        text: typedTextSegment.text + data.content
-      };
-      
-      newEvent.segments = newSegments;
-      newEvents[eventIndex] = newEvent;
-      
-      return newEvents;
-    });
+    if (!this.assistantPlaceholder || !data.content) return;
+    // Route tokens to external streaming bus to avoid parent re-renders
+    streamingBus.append(this.assistantPlaceholder.id, data.content);
   }
 
   private updateLocalStateToolStart(data: StreamEvent): void {
@@ -839,6 +847,12 @@ export class FrontendEventHandler {
     // Create a new assistant placeholder for the next streaming response
     // But only create it once, even if there are multiple tool calls
     if (!this.localStateUpdater || this.hasCreatedPostToolPlaceholder) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[STREAM][handler] Skipping local post-tool placeholder', {
+          hasUpdater: !!this.localStateUpdater,
+          hasCreatedPostToolPlaceholder: this.hasCreatedPostToolPlaceholder
+        });
+      }
       return;
     }
     
@@ -849,6 +863,9 @@ export class FrontendEventHandler {
       ts: Date.now()
     };
     
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[STREAM][handler] Adding local post-tool placeholder');
+    }
     this.localStateUpdater(events => {
       return [...events, newAssistantPlaceholder];
     });
@@ -973,38 +990,94 @@ export class FrontendEventHandler {
    */
 
   private updateStoreStateToken(data: StreamEvent): void {
-    // For store mode, only update when we have a local state updater (means we're tracking locally)
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToken(data);
+    // For store mode, push tokens to the streaming bus only
+    if (this.assistantPlaceholder && data.content) {
+      streamingBus.append(this.assistantPlaceholder.id, data.content);
     }
-    // If no local state updater, we don't update the store during streaming (prevents infinite loops)
   }
 
   private updateStoreStateToolStart(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToolStart(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.tool_name) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event => {
+      if (event.id !== conversation.streamingEventId) return event;
+      const exists = event.segments.some(s => s.type === 'tool_call' && s.id === data.tool_id);
+      if (exists) return event;
+      return {
+        ...event,
+        segments: [
+          ...event.segments,
+          {
+            type: 'tool_call' as const,
+            id: data.tool_id as ToolCallId,
+            name: data.tool_name!,
+            args: {},
+            sequence_number: data.sequence_number,
+            output_index: data.output_index,
+            server_label: data.server_label,
+            server_type: data.server_type,
+            display_name: data.display_name
+          }
+        ],
+        ts: Date.now()
+      };
+    });
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   private updateStoreStateToolFinalized(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToolFinalized(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.args) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: event.segments.map(segment => {
+              if (segment.type === 'tool_call' && segment.id === data.tool_id) {
+                return { ...segment, args: data.args! } as Extract<Segment, { type: 'tool_call' }>;
+              }
+              return segment;
+            }),
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   private updateStoreStateToolResult(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater) {
-      this.updateLocalStateToolResult(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.tool_id) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: [
+              ...event.segments,
+              {
+                type: 'tool_result' as const,
+                id: data.tool_id as ToolCallId,
+                output: typeof data.output === 'object' && data.output !== null ? data.output : {},
+                error: data.error
+              }
+            ],
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
-  private updateStoreStateToolComplete(data: StreamEvent): void {
-    // Delegate to local state updater which will create a new assistant placeholder
-    if (this.localStateUpdater) {
-      this.updateLocalStateToolComplete(data);
+  private updateStoreStateToolComplete(_data: StreamEvent): void {
+    // For Responses API, new assistant placeholders after tools are not needed here.
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[STREAM][handler] Store tool complete (no new assistant placeholder)');
     }
   }
 
@@ -1044,24 +1117,15 @@ export class FrontendEventHandler {
    */
 
   private updateStoreStateMCPToolStart(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateMCPToolStart(data);
-    }
+    this.updateStoreStateToolStart(data);
   }
 
   private updateStoreStateMCPToolFinalized(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateMCPToolFinalized(data);
-    }
+    this.updateStoreStateToolFinalized(data);
   }
 
   private updateStoreStateMCPToolComplete(data: StreamEvent): void {
-    // Delegate to local state updater for MCP tool completion
-    if (this.localStateUpdater) {
-      this.updateLocalStateMCPToolComplete(data);
-    }
+    this.updateStoreStateToolComplete(data);
   }
 
   /**
@@ -1193,6 +1257,8 @@ export class FrontendEventHandler {
     } else {
       this.updateStoreStateBuiltInToolComplete(data, 'code_interpreter_call');
     }
+    // Clear code overlay buffer
+    if (item_id) streamingBus.clearCode(item_id);
   }
 
   /**
@@ -1208,6 +1274,10 @@ export class FrontendEventHandler {
     } else {
       this.updateStoreStateCodeDelta(data);
     }
+    // Stream code overlay
+    if (data.item_id && data.delta && typeof data.delta === 'string') {
+      streamingBus.appendCode(data.item_id, data.delta);
+    }
   }
 
   /**
@@ -1222,6 +1292,10 @@ export class FrontendEventHandler {
       this.updateLocalStateCodeDone(data);
     } else {
       this.updateStoreStateCodeDone(data);
+    }
+    // Finalize code overlay
+    if (data.item_id && data.code) {
+      streamingBus.setCode(data.item_id, data.code);
     }
   }
 
@@ -1476,56 +1550,113 @@ export class FrontendEventHandler {
    * Handle built-in tool start for store state
    */
   private updateStoreStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateBuiltInToolStart(data, toolType, toolDisplayName);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.item_id) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event => {
+      if (event.id !== conversation.streamingEventId) return event;
+      const exists = event.segments.some(
+        s => (s.type === 'web_search_call' || s.type === 'code_interpreter_call') && s.id === data.item_id
+      );
+      if (exists) return event;
+      const newSegment = toolType === 'web_search_call'
+        ? { type: 'web_search_call' as const, id: data.item_id!, output_index: data.output_index || 0, sequence_number: data.sequence_number || 0, status: 'in_progress' as const }
+        : { type: 'code_interpreter_call' as const, id: data.item_id!, output_index: data.output_index || 0, sequence_number: data.sequence_number || 0, status: 'in_progress' as const };
+      return { ...event, segments: [...event.segments, newSegment], ts: Date.now() };
+    });
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   /**
    * Handle built-in tool status update for store state
    */
-  private updateStoreStateBuiltInToolStatus(data: StreamEvent, status: string): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateBuiltInToolStatus(data, status);
-    }
+  private updateStoreStateBuiltInToolStatus(data: StreamEvent, status: 'in_progress' | 'searching' | 'completed' | 'failed' | 'interpreting'): void {
+    if (!this.conversationId || !this.storeInstance || !data.item_id) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: event.segments.map(segment => {
+              if (segment.type === 'web_search_call' && segment.id === data.item_id) {
+                return { ...segment, status } as Extract<Segment, { type: 'web_search_call' }>;
+              } else if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                return { ...segment, status } as Extract<Segment, { type: 'code_interpreter_call' }>;
+              }
+              return segment;
+            }),
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   /**
    * Handle built-in tool complete for store state
    */
-  private updateStoreStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateBuiltInToolComplete(data, toolType);
-    }
+  private updateStoreStateBuiltInToolComplete(data: StreamEvent, _toolType: string): void {
+    this.updateStoreStateBuiltInToolStatus(data, 'completed');
   }
 
   /**
    * Handle code delta streaming for store state
    */
   private updateStoreStateCodeDelta(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateCodeDelta(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.item_id || !data.delta) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: event.segments.map(segment => {
+              if (segment.type === 'code_interpreter_call' && segment.id === data.item_id && typeof data.delta === 'string') {
+                const currentCode = segment.code || '';
+                return { ...segment, code: currentCode + data.delta } as Extract<Segment, { type: 'code_interpreter_call' }>;
+              }
+              return segment;
+            }),
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   /**
    * Handle code done for store state
    */
   private updateStoreStateCodeDone(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateCodeDone(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.item_id) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: event.segments.map(segment => {
+              if (segment.type === 'code_interpreter_call' && segment.id === data.item_id) {
+                return { ...segment, code: data.code || segment.code || '' } as Extract<Segment, { type: 'code_interpreter_call' }>;
+              }
+              return segment;
+            }),
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   /**
    * Check if we're using local state
    */
   private isLocalState(): boolean {
-    return !!this.localStateUpdater && !!this.assistantPlaceholder;
+    return !!this.localStateUpdater && !!this.assistantPlaceholder && this.useLocalStreaming;
   }
 }

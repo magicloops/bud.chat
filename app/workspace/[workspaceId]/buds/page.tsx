@@ -336,7 +336,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(bud.created_at).toLocaleDateString()}
+                        {new Date(bud.created_at ?? Date.now()).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

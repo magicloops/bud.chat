@@ -123,6 +123,18 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
+          const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
+          const existing = state.conversations[id];
+          if (DEBUG_STREAM && existing) {
+            const prevLen = existing.events?.length || 0;
+            const nextLen = conversation.events?.length || 0;
+            if (nextLen - prevLen >= 2) {
+              const lastTwo = conversation.events.slice(-2).map(e => e.role);
+              // Log if looks like a user+assistant pair landed
+              // eslint-disable-next-line no-console
+              console.log('[STREAM][store] setConversation large increase', { id, prevLen, nextLen, lastTwo });
+            }
+          }
           state.conversations[id] = conversation;
           
           // Auto-sync: when setting a full conversation, also create/update the summary
@@ -181,9 +193,14 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Event actions
         addEvent: (conversationId, event) => set((state) => {
+          const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
           const conversation = state.conversations[conversationId];
           if (conversation) {
             conversation.events.push(event);
+            if (DEBUG_STREAM) {
+              // eslint-disable-next-line no-console
+              console.log('[STREAM][store] addEvent', { conversationId, role: event.role, eventId: event.id, newLen: conversation.events.length });
+            }
           }
         }),
         

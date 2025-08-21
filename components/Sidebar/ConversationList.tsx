@@ -113,7 +113,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
               id: conv.id,
               title: conv.title || undefined, // Don't set default title
               workspace_id: conv.workspace_id,
-              created_at: conv.created_at
+              created_at: conv.created_at ?? new Date().toISOString()
             };
             
             summaries.push(summary);

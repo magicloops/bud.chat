@@ -41,11 +41,12 @@ export type Segment =
       output_index: number;
       sequence_number: number;
       parts: ReasoningPart[];
-      combined_text?: string;
+      combined_text?: string; // Deprecated in UI; prefer rendering parts
       effort_level?: 'low' | 'medium' | 'high';
       reasoning_tokens?: number;
       // Streaming state (client-side only, not persisted)
       streaming?: boolean;
+      streaming_part_index?: number; // Which part is currently streaming
     }
   | {
       type: 'web_search_call';

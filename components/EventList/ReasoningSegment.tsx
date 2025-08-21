@@ -72,25 +72,25 @@ export function ReasoningSegment({
     }
   }, [segment.streaming, isStreaming, isExpanded, wasStreaming, wasManuallyToggled]);
   
-  // Get reasoning content from segment
-  const reasoningContent = segment.combined_text || 
-    segment.parts.map(part => part.text).join('\n');
-  
-  // Check if we have any content (either combined_text or parts with text)
-  const hasAnyContent = !!segment.combined_text || 
-    segment.parts.some(part => part.text && part.text.trim());
+  // Determine if this reasoning segment is currently streaming
+  const isReasoningStreaming = segment.streaming || (isStreaming && isLastSegment);
+
+  // Compute which parts to render:
+  // - While streaming, show only the current streaming part to minimize UI churn
+  // - When not streaming, render all parts (sorted)
+  const streamingIndex = segment.streaming_part_index;
+  const partsToRender = isReasoningStreaming && streamingIndex !== undefined
+    ? segment.parts.filter(p => p.summary_index === streamingIndex)
+    : [...segment.parts].sort((a, b) => a.summary_index - b.summary_index);
+
+  // Check if we have any content in parts
+  const hasAnyContent = partsToRender.some(part => part.text && part.text.trim());
   
   // Check if reasoning is complete (currently unused but kept for potential future use)
   // const isReasoningComplete = !segment.streaming && (
   //   !!segment.combined_text ||
   //   segment.parts.every(part => part.is_complete)
   // );
-  
-  // Determine if this reasoning segment is currently streaming
-  // Consider it streaming if:
-  // 1. The segment has streaming flag set, OR
-  // 2. The parent event is streaming AND this is the last segment (no content after it)
-  const isReasoningStreaming = segment.streaming || (isStreaming && isLastSegment);
   
   // Auto-show reasoning while streaming, otherwise user controls visibility
   const shouldShowReasoning = isReasoningStreaming || isExpanded;
@@ -143,30 +143,20 @@ export function ReasoningSegment({
           </div>
           
           <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-            {reasoningContent && reasoningContent.trim() && (
-              <MarkdownRenderer content={reasoningContent} />
-            )}
-            
-            {/* Show individual parts during streaming if no combined content yet */}
-            {(!reasoningContent || !reasoningContent.trim()) && segment.parts.length > 0 && (
-              <div className="reasoning-parts space-y-2">
-                {segment.parts
-                  .sort((a, b) => a.summary_index - b.summary_index)
-                  .map((part, index) => (
-                    <div key={part.summary_index || index} className="reasoning-part">
-                      <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                        <span>Part {part.summary_index + 1}</span>
-                        {!part.is_complete && (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        )}
-                      </div>
-                      <div className="text-xs">
-                        <MarkdownRenderer content={part.text} />
-                      </div>
+            <div className="reasoning-parts space-y-2">
+              {partsToRender.map((part, index) => (
+                <div key={part.summary_index || index} className="reasoning-part">
+                  {isReasoningStreaming && !part.is_complete && (
+                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" />
                     </div>
-                  ))}
-              </div>
-            )}
+                  )}
+                  <div className="text-xs">
+                    <MarkdownRenderer content={part.text} />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

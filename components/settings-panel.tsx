@@ -776,7 +776,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                       <label className="text-sm font-medium">Built-in Tools</label>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Enable OpenAI's built-in tools for enhanced capabilities with {aiModel}.
+                      Enable OpenAI&apos;s built-in tools for enhanced capabilities with {aiModel}.
                     </p>
                     
                     {getAvailableBuiltInTools(aiModel).map(tool => (
@@ -818,7 +818,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                               <div>
                                 <label className="text-xs font-medium">Search Context Size</label>
                                 <Select
-                                  value={builtInToolsConfig.tool_settings[tool.type]?.search_context_size || 'medium'}
+                                  value={(
+                                    builtInToolsConfig.tool_settings[tool.type] as { search_context_size?: string } | undefined
+                                  )?.search_context_size ?? 'medium'}
                                   onValueChange={(value) => {
                                     const updatedConfig = {
                                       ...builtInToolsConfig,
@@ -850,7 +852,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                               <div>
                                 <label className="text-xs font-medium">Container</label>
                                 <Select
-                                  value={builtInToolsConfig.tool_settings[tool.type]?.container || 'default'}
+                                  value={(
+                                    builtInToolsConfig.tool_settings[tool.type] as { container?: string } | undefined
+                                  )?.container ?? 'default'}
                                   onValueChange={(value) => {
                                     const updatedConfig = {
                                       ...builtInToolsConfig,
@@ -1031,7 +1035,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </div>
                     <Textarea
                       id="ai-goals"
-                      placeholder="Your Bud's goal, personality, and info it needs. (Recommended)"
+                      placeholder="Your Bud&apos;s goal, personality, and info it needs. (Recommended)"
                       className="min-h-[100px]"
                       value={systemPrompt}
                       onChange={(e) => {

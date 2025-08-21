@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { use, useEffect, useState, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { EventStream } from '@/components/EventStream';
@@ -13,8 +13,7 @@ import {
   useAddConversationToWorkspace,
   useEventChatStore,
   Conversation,
-  ConversationMeta,
-  Event
+  ConversationMeta
 } from '@/state/eventChatStore';
 import { 
   createGreetingEvent, 
@@ -34,6 +33,7 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ params }: ChatPageProps) {
+  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
   const resolvedParams = use(params);
   const initialConversationId = resolvedParams.conversationId;
   const searchParams = useSearchParams();
@@ -270,34 +270,8 @@ export default function ChatPage({ params }: ChatPageProps) {
     loadBud();
   }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation]);
   
-  // Local streaming state for new conversations
-  const [streamingEvents, setStreamingEvents] = useState<Event[] | null>(null);
+  // Local streaming flag for new conversations (leaf components handle rendering)
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
-  // Refs to buffer streaming updates and flush at ~30fps to avoid nested updates
-  const latestStreamingEventsRef = useRef<Event[]>([]);
-  const updateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  
-  // Stable updater creator (kept for compatibility, but we buffer updates in refs now)
-  const createStableUpdater = useCallback(() => {
-    return (updater: (events: Event[]) => Event[]) => {
-      // Update the ref only; UI is flushed on an interval
-      const current = latestStreamingEventsRef.current;
-      const updated = updater(current);
-      if (updated !== current) {
-        latestStreamingEventsRef.current = updated;
-      }
-    };
-  }, []);
-  
-  // Clear streaming events when store conversation is ready (for seamless transitions)
-  useEffect(() => {
-    if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents && !isLocalStreaming) {
-      // Only clear if we're not actively streaming to avoid interfering with ongoing streams
-      setStreamingEvents(null);
-      setIsLocalStreaming(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNewConversation, existingConversation?.events?.length]); // Only depend on events length, not the entire conversation object
 
   // Message handler for new conversations  
   const handleSendMessage = useCallback(async (content: string) => {
@@ -308,13 +282,18 @@ export default function ChatPage({ params }: ChatPageProps) {
     
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
-    const newEvents = [...currentEvents, userEvent, assistantPlaceholder];
+    if (DEBUG_STREAM) {
+      console.log('[STREAM][new] Creating optimistic pair', {
+        tempConversationId,
+        userEventId: userEvent.id,
+        assistantId: assistantPlaceholder.id,
+        prevCount: currentEvents.length,
+        nextCount: currentEvents.length + 2,
+      });
+    }
     
-    // Set local streaming state instead of updating store immediately
-    setStreamingEvents(newEvents);
+    // Set local streaming flag; rendering uses leaf streaming component
     setIsLocalStreaming(true);
-    // Initialize the buffered ref; a useEffect manages the periodic flush
-    latestStreamingEventsRef.current = newEvents;
     
     // Only update store with user event + placeholder (no streaming updates)
     const updatedConversation = {
@@ -351,22 +330,15 @@ export default function ChatPage({ params }: ChatPageProps) {
         { debug: true }
       );
       
-      // Use ref to track final events outside React state to prevent infinite updates
-      const finalStreamingEventsRef = { current: newEvents };
-      
-      // Create a stable updater that tracks final events
-      const stableUpdater = createStableUpdater();
-      const wrappedUpdater = (updater: (events: Event[]) => Event[]) => {
-        // Update buffered refs only; UI is flushed by interval
-        const updated = updater(latestStreamingEventsRef.current);
-        latestStreamingEventsRef.current = updated;
-        finalStreamingEventsRef.current = updated; // Keep sync'd copy for transition
-      };
-      
-      eventHandler.setLocalStateUpdater(wrappedUpdater, assistantPlaceholder);
+      // No local state updater needed for tokens; FrontendEventHandler will write to streaming bus
+      // Use local streaming mode to avoid store writes during /chat/new
+      eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: true });
       
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
+      if (DEBUG_STREAM) {
+        console.log('[STREAM][new] Started reader for temp conversation', { tempConversationId });
+      }
 
       const decoder = new TextDecoder();
       let realConversationId: string | null = null;
@@ -388,20 +360,58 @@ export default function ChatPage({ params }: ChatPageProps) {
                 if (selectedWorkspace && realConversationId) {
                   addConversationToWorkspace(selectedWorkspace, realConversationId);
                 }
+                if (DEBUG_STREAM) {
+                  console.log('[STREAM][new] Conversation created', {
+                    tempConversationId,
+                    realConversationId,
+                  });
+                }
               } else if (data.type === 'complete') {
                 setIsLocalStreaming(false);
                 
                 
-                if (realConversationId && finalStreamingEventsRef.current) {
+                if (realConversationId) {
                   // Create final conversation with completed streaming events
-                  const tempConv = store.conversations[tempConversationId];
+                  const latestStore = useEventChatStore.getState();
+                  const tempConv = latestStore.conversations[tempConversationId];
                   if (tempConv) {
-                    // Final flush before transitioning
-                    setStreamingEvents([...latestStreamingEventsRef.current]);
+                    if (DEBUG_STREAM) {
+                      console.log('[STREAM][new] Completing stream', {
+                        tempConversationId,
+                        realConversationId,
+                        tempEventCount: tempConv.events.length,
+                        streamingEventId: tempConv.streamingEventId,
+                      });
+                    }
+                    // Merge buffered streaming text from bus into the streaming event
+                    const { streamingBus } = await import('@/lib/streaming/streamingBus');
+                    const appended = streamingBus.get(assistantPlaceholder.id);
+                    const mergedEvents = [...tempConv.events];
+                    const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
+                    if (idx >= 0) {
+                      const ev = mergedEvents[idx];
+                      const segIdx = ev.segments.findIndex(s => s.type === 'text');
+                      if (segIdx >= 0) {
+                      const seg = ev.segments[segIdx];
+                      if (seg.type === 'text') {
+                        const newSeg = { ...seg, text: (seg.text || '') + appended };
+                        const newSegments = [...ev.segments];
+                        newSegments[segIdx] = newSeg;
+                        mergedEvents[idx] = { ...ev, segments: newSegments };
+                        if (DEBUG_STREAM) {
+                          console.log('[STREAM][new] Merge applied', {
+                            appendedLength: appended?.length || 0,
+                            segIdx,
+                            newTextLen: (newSeg.text || '').length,
+                          });
+                        }
+                      }
+                      }
+                    }
                     const realConv = {
                       ...tempConv,
                       id: realConversationId,
-                      events: finalStreamingEventsRef.current, // Use final streaming events from ref
+                      events: mergedEvents,
                       isStreaming: false,
                       streamingEventId: undefined,
                       meta: { 
@@ -410,31 +420,45 @@ export default function ChatPage({ params }: ChatPageProps) {
                       }
                     };
                     
-                    store.setConversation(realConversationId, realConv);
-                    store.removeConversation(tempConversationId);
-                    store.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
+                    if (DEBUG_STREAM) {
+                      console.log('[STREAM][new] Setting real conversation', {
+                        realConversationId,
+                        mergedEventCount: mergedEvents.length,
+                        lastTwoRoles: mergedEvents.slice(-2).map(e => e.role),
+                      });
+                    }
+                    // Set real conversation first so EventStream can immediately render it
+                    latestStore.setConversation(realConversationId, realConv);
+                    // Clear buses for this event after final text is in store
+                    streamingBus.clear(assistantPlaceholder.id);
+                    streamingBus.clearReasoning(assistantPlaceholder.id);
                     
+                    // Defer removal of the temp conversation until after route swap
+                    // to avoid a brief empty render between temp -> real
+                    setTimeout(() => {
+                      const s = useEventChatStore.getState();
+                      s.removeConversation(tempConversationId);
+                      if (selectedWorkspace) {
+                        s.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
+                      }
+                    }, 0);
+
                     // Update URL using Next.js router - this will trigger pathname updates
+                    if (DEBUG_STREAM) {
+                      console.log('[STREAM][new] Replacing route to real conversation');
+                    }
                     router.replace(`/chat/${realConversationId}`);
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
                     
                     // Clear local streaming state since store now has the data
-                    setStreamingEvents(null);
                     setIsLocalStreaming(false);
                   } else {
                     console.error('No temp conversation found for transition');
                   }
                 } else {
-                  console.error('🚨 ERROR CONDITION:', {
-                    realConversationId: realConversationId,
-                    finalStreamingEvents: finalStreamingEventsRef.current,
-                    finalStreamingEventsCount: finalStreamingEventsRef.current?.length,
-                    dataType: data.type,
-                    dataKeys: Object.keys(data)
-                  });
-                  console.error('Missing realConversationId or finalStreamingEvents');
+                  console.error('Missing realConversationId when stream completed');
                 }
               } else {
                 await eventHandler.handleStreamEvent(data);
@@ -448,37 +472,10 @@ export default function ChatPage({ params }: ChatPageProps) {
     } catch (error) {
       console.error('Failed to start streaming:', error);
       setIsLocalStreaming(false);
-      setStreamingEvents(null);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud?.id, router, latestStreamingEventsRef, updateIntervalRef]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router, DEBUG_STREAM]);
 
-  // Manage the periodic UI flush while local streaming is active
-  useEffect(() => {
-    if (!isLocalStreaming) {
-      // Ensure any stale interval is cleared
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-        updateIntervalRef.current = null;
-      }
-      return;
-    }
-
-    // Start periodic flush (~30fps)
-    updateIntervalRef.current = setInterval(() => {
-      setStreamingEvents(prev => {
-        const latest = latestStreamingEventsRef.current;
-        // Only update when the reference actually changed
-        return prev === latest ? prev : latest;
-      });
-    }, 33);
-
-    return () => {
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-        updateIntervalRef.current = null;
-      }
-    };
-  }, [isLocalStreaming]);
+  // No periodic flush; leaf components subscribe to streaming bus
 
   // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {
@@ -514,7 +511,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   // Show loading state only if neither cached conversation nor fresh data is available
   // In cache-first approach, we always try to show something
-  if (!isNewConversation && !isTempConversation && !existingConversation && !conversationData && !streamingEvents && isLoading) {
+  if (!isNewConversation && !isTempConversation && !existingConversation && !conversationData && isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -530,16 +527,14 @@ export default function ChatPage({ params }: ChatPageProps) {
     : 'Type your message...';
 
   // Determine which data source to use
-  const shouldUseStreamingEvents = streamingEvents && streamingEvents.length > 0;
-  
   return (
     <EventStream
       conversationId={isNewConversation ? undefined : workingConversationId}
-      events={shouldUseStreamingEvents ? streamingEvents : isNewConversation && existingConversation?.events ? existingConversation.events : undefined}
+      events={isNewConversation && existingConversation?.events ? existingConversation.events : undefined}
       onSendMessage={isNewConversation ? handleSendMessage : undefined}
       placeholder={placeholder}
       budData={bud || undefined}
-      isStreaming={shouldUseStreamingEvents ? isLocalStreaming : undefined}
+      isStreaming={isNewConversation ? (isLocalStreaming || !!existingConversation?.isStreaming) : undefined}
     />
   );
 

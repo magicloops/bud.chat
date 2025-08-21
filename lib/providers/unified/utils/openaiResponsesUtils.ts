@@ -2,6 +2,7 @@
 // Handles the transformation of reasoning events from OpenAI's Responses API
 
 import { StreamEvent } from '@/lib/streaming/frontendEventHandler';
+const RESPONSES_DEBUG = process.env.RESPONSES_DEBUG === 'true';
 
 /**
  * Transform OpenAI Responses API reasoning events to our internal format
@@ -72,7 +73,8 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
   
   // Only log events we're not already handling
   const isHandled = handledEventTypes.has(event.type);
-  if (!isHandled && (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.'))) {
+  if (!isHandled && RESPONSES_DEBUG && (event.type.includes('mcp') || event.type.includes('output_item') || event.type.includes('response.'))) {
+    // eslint-disable-next-line no-console
     console.log('🚨 [UNHANDLED] OpenAI Responses API EVENT:', {
       type: event.type, 
       keys: Object.keys(event),
@@ -85,7 +87,8 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     // Only log reasoning items if they have unexpected structure (for debugging)
     const item = (event as {item?: unknown}).item as Record<string, unknown>;
     const hasUnexpectedStructure = !item.summary && !item.content;
-    if (hasUnexpectedStructure) {
+    if (hasUnexpectedStructure && RESPONSES_DEBUG) {
+      // eslint-disable-next-line no-console
       console.log('🧠 [REASONING] UNEXPECTED STRUCTURE:', {
         event_type: event.type,
         all_item_keys: Object.keys(item || {}),
@@ -101,16 +104,16 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
     case 'response.created':
       return {
         type: 'response.created',
-        response: event.response as any,
+        response: event.response as unknown,
         sequence_number: event.sequence_number as number
-      };
+      } as unknown as StreamEvent;
 
     case 'response.in_progress':
       return {
         type: 'response.in_progress',
-        response: event.response as any,
+        response: event.response as unknown,
         sequence_number: event.sequence_number as number
-      };
+      } as unknown as StreamEvent;
 
     // MCP progress events
     case 'response.mcp_list_tools.in_progress':
@@ -215,15 +218,15 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           end_index: number;
         },
         sequence_number: event.sequence_number as number
-      };
+      } as unknown as StreamEvent;
 
     case 'response.completed':
       // Response is fully complete - now we can finalize the event
       return {
         type: 'response.completed',
-        response: event.response as any,
+        response: event.response as unknown,
         sequence_number: event.sequence_number as number
-      };
+      } as unknown as StreamEvent;
 
     // Note: response.created and response.in_progress are handled earlier in the switch
 
@@ -263,7 +266,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           output_index: event.output_index as number,
           sequence_number: event.sequence_number as number
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any;
+        } as unknown as StreamEvent;
       } else if (item?.type === 'text') {
         // Handle text output items with ID preservation (legacy format)
         return {
@@ -273,7 +276,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           sequence_number: event.sequence_number as number,
           content: item.content || ''
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any;
+        } as unknown as StreamEvent;
       } else if (item?.type === 'function_call') {
         return {
           type: 'tool_start',
@@ -477,7 +480,7 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): StreamEvent
           output_index: event.output_index as number,
           sequence_number: event.sequence_number as number,
           parts: reasoningParts,
-          combined_text: reasoningParts.map(p => p.text).join('\n')
+          combined_text: reasoningParts.map(p => p.text).join('\\n')
         };
       } else if (doneItem?.type === 'message') {
         // Handle message completion - but don't trigger completion here since response.completed will handle it
@@ -590,13 +593,17 @@ export async function* processResponsesAPIStream(
   try {
     for await (const event of stream) {
       try {
-        // Add debug logging to see raw OpenAI events
-        console.log('🔍 [DEBUG] Raw OpenAI Event:', JSON.stringify(event, null, 2));
+        if (RESPONSES_DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log('🔍 [DEBUG] Raw OpenAI Event:', JSON.stringify(event, null, 2));
+        }
         
         const transformedEvent = transformOpenAIReasoningEvent(event);
         if (transformedEvent) {
-          // Add debug logging for transformed events
-          console.log('🔄 [DEBUG] Transformed Event:', JSON.stringify(transformedEvent, null, 2));
+          if (RESPONSES_DEBUG) {
+            // eslint-disable-next-line no-console
+            console.log('🔄 [DEBUG] Transformed Event:', JSON.stringify(transformedEvent, null, 2));
+          }
           
           // Handle both single events and arrays of events - no buffering, just pass through
           if (Array.isArray(transformedEvent)) {

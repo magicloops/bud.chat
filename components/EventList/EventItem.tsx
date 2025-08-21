@@ -2,12 +2,15 @@
 
 import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event, Conversation } from '@/state/eventChatStore';
 import { ToolCallId } from '@/lib/types/branded';
 import { cn } from '@/lib/utils';
+import StepsDropdown from '@/components/Steps/StepsDropdown';
+import StepsOverlay from '@/components/Steps/StepsOverlay';
+import StreamingTextSegment from '@/components/EventList/StreamingTextSegment';
 import {
   Copy,
   Edit,
@@ -338,13 +341,12 @@ export const EventItem = memo(function EventItem({
               </span>
             </div>
             <div className="relative">
-              {isStreaming && !textContent && (
-                <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
-              )}
+              {/* Streaming text handled by StreamingTextSegment; remove cursor */}
             
-              {/* Reasoning Section - Moved to top */}
-              {hasReasoning && (
-                <div className="reasoning-section mb-3">
+  
+              {/* legacy reasoning UI removed */}
+              {false && hasReasoning && (
+                <div className="hidden">
                   {/* Only show toggle button when not streaming */}
                   {!isReasoningStreaming && (
                     <Button
@@ -424,12 +426,11 @@ export const EventItem = memo(function EventItem({
                               .sort((a, b) => a.summary_index - b.summary_index)
                               .map((part) => (
                                 <div key={part.summary_index} className="reasoning-part">
-                                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                                    <span>Part {part.summary_index + 1}</span>
-                                    {!part.is_complete && (
+                                  {!part.is_complete && (
+                                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
                                       <Loader2 className="h-3 w-3 animate-spin" />
-                                    )}
-                                  </div>
+                                    </div>
+                                  )}
                                   <div className="text-xs">
                                     <MarkdownRenderer content={part.text} />
                                   </div>
@@ -443,9 +444,9 @@ export const EventItem = memo(function EventItem({
                 </div>
               )}
             
-              {/* Tool Call Display - should appear before text content */}
-              {isToolCall && toolCalls.length > 0 && (
-                <div className="mt-2 mb-2 space-y-2">
+              {/* legacy tool call UI removed */}
+              {false && isToolCall && toolCalls.length > 0 && (
+                <div className="hidden">
                   {toolCalls.map((toolCall, index) => {
                     const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
                     const toolResult = allEvents?.find(event => 
@@ -566,10 +567,18 @@ export const EventItem = memo(function EventItem({
                   })}
                 </div>
               )}
-              
-              {/* Regular Content - now comes after tool calls */}
-              {textContent && (
-                <MarkdownRenderer content={textContent} />
+              {/* Steps overlay during streaming; steps dropdown for finalized */}
+              {isStreaming ? (
+                <StepsOverlay eventId={event.id} segments={event.segments} isStreaming={true} />
+              ) : (
+                <StepsDropdown event={event} />
+              )}
+
+              {/* Message text */}
+              {isStreaming ? (
+                <StreamingTextSegment eventId={event.id} baseText={textContent || ''} isStreaming={true} />
+              ) : (
+                textContent && <MarkdownRenderer content={textContent} />
               )}
             
               {/* Error Display */}
@@ -658,235 +667,29 @@ export const EventItem = memo(function EventItem({
             </span>
           </div>
           <div className="relative">
-            {isStreaming && !textContent && (
-              <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
-            )}
+            {/* Streaming text handled by StreamingTextSegment; remove cursor */}
             
-            {/* Reasoning Section - Moved to top */}
-            {hasReasoning && (
-              <div className="reasoning-section mb-3">
-                {/* Only show toggle button when not streaming */}
-                {!isReasoningStreaming && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowReasoning(!showReasoning)}
-                    className="reasoning-toggle text-xs px-2 py-1 h-auto"
-                  >
-                    <Brain className="h-3 w-3 mr-1" />
-                    {showReasoning ? 'Hide' : 'Show'} Reasoning
-                    <ChevronDown className={cn(
-                      "h-3 w-3 ml-1 transition-transform",
-                      showReasoning && "rotate-180"
-                    )} />
-                  </Button>
-                )}
-                
-                {shouldShowReasoning && (
-                  <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
-                    <div className="reasoning-header mb-2 flex items-center gap-2">
-                      <span className="text-xs font-medium text-muted-foreground">
-                        Model Reasoning
-                        {isReasoningStreaming && (
-                          <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
-                        )}
-                      </span>
-                      {reasoningEffortLevel && (
-                        <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
-                          {reasoningEffortLevel} effort
-                        </Badge>
-                      )}
-                    </div>
-                    
-                    <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-                      {reasoningContent && (
-                        <MarkdownRenderer content={reasoningContent} />
-                      )}
-                      
-                      {/* Show individual parts during streaming if no combined content yet */}
-                      {!reasoningContent && hasReasoningSegments && reasoningSegments.some(segment => segment.type === 'reasoning') && (
-                        <div className="reasoning-parts space-y-2">
-                          {reasoningSegments
-                            .filter(segment => segment.type === 'reasoning')
-                            .sort((a, b) => {
-                              if (a.type === 'reasoning' && b.type === 'reasoning') {
-                                return (a.sequence_number || 0) - (b.sequence_number || 0);
-                              }
-                              return 0;
-                            })
-                            .map((segment, index) => {
-                              if (segment.type !== 'reasoning') return null;
-                              return (
-                                <div key={segment.id || index} className="reasoning-part">
-                                  <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                                    <span>Reasoning {index + 1}</span>
-                                    {segment.streaming && (
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                    )}
-                                  </div>
-                                  <div className="text-xs">
-                                    <MarkdownRenderer content={segment.combined_text || segment.parts.map(part => part.text).join('\n')} />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      )}
-                      
-                      {/* Fallback to legacy reasoning display for backward compatibility */}
-                      {!reasoningContent && !hasReasoningSegments && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
-                        <div className="reasoning-parts space-y-2">
-                          {Object.values(event.reasoning.parts)
-                            .sort((a, b) => a.summary_index - b.summary_index)
-                            .map((part) => (
-                              <div key={part.summary_index} className="reasoning-part">
-                                <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                                  <span>Part {part.summary_index + 1}</span>
-                                  {!part.is_complete && (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  )}
-                                </div>
-                                <div className="text-xs">
-                                  <MarkdownRenderer content={part.text} />
-                                </div>
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+  
+              {/* legacy reasoning UI removed */}
             
             {/* Tool Call Display - should appear before text content */}
-            {isToolCall && toolCalls.length > 0 && (
-              <div className="mt-2 mb-2 space-y-2">
-                {toolCalls.map((toolCall, index) => {
-                  const toolCallSegment = toolCall as { type: 'tool_call'; id: string; name: string; args: object };
-                  const toolResult = allEvents?.find(event => 
-                    event.segments.some(segment => 
-                      segment.type === 'tool_result' && segment.id === toolCallSegment.id
-                    )
-                  );
-                  const resultSegment = toolResult?.segments.find(s => s.type === 'tool_result' && s.id === toolCallSegment.id) as 
-                    { type: 'tool_result'; id: string; output: object } | undefined;
-                  
-                  const hasResult = resultSegment !== undefined;
-                  const hasError = resultSegment && resultSegment.output && typeof resultSegment.output === 'object' && 'error' in resultSegment.output;
-                  const resultContent = hasError 
-                    ? (resultSegment.output as { error?: string }).error 
-                    : resultSegment ? ((resultSegment.output as { content?: string }).content || JSON.stringify(resultSegment.output, null, 2)) : null;
-                  
-                  const isExpanded = expandedToolCalls.has(toolCallSegment.id);
-                  
-                  const toggleExpanded = () => {
-                    const newExpanded = new Set(expandedToolCalls);
-                    if (isExpanded) {
-                      newExpanded.delete(toolCallSegment.id);
-                    } else {
-                      newExpanded.add(toolCallSegment.id);
-                    }
-                    setExpandedToolCalls(newExpanded);
-                  };
-                  
-                  return (
-                    <div key={index} className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                        <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-                          Tool Call: {toolCall.name}
-                        </span>
-                        {!hasResult && (
-                          <div className="flex space-x-1 items-end">
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.3s]"></div>
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce [animation-delay:-0.15s]"></div>
-                            <div className="w-1 h-1 bg-blue-500 rounded-full animate-high-bounce"></div>
-                          </div>
-                        )}
-                        {hasResult && (
-                          <div className="flex items-center">
-                            {hasError ? (
-                              <XCircle className="h-3 w-3 text-red-600 dark:text-red-400" />
-                            ) : (
-                              <CheckCircle className="h-3 w-3 text-green-600 dark:text-green-400" />
-                            )}
-                          </div>
-                        )}
-                        <button
-                          onClick={toggleExpanded}
-                          className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="h-3 w-3" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3" />
-                          )}
-                          Details
-                        </button>
-                      </div>
-                      
-                      {/* Collapsible tool details */}
-                      {isExpanded && (
-                        <div className="mt-3 border-t pt-3 space-y-3">
-                          {/* Tool Input Section */}
-                          <div>
-                            <div className="text-sm">
-                              <div className="text-muted-foreground mb-1">Arguments:</div>
-                              <pre className="text-xs text-muted-foreground bg-background/50 p-2 rounded overflow-x-auto">
-                                {JSON.stringify(toolCall.args, null, 2)}
-                              </pre>
-                            </div>
-                          </div>
-                          
-                          {/* Tool Result Section */}
-                          {hasResult && (
-                            <div>
-                              <div className="flex items-center gap-2 mb-2">
-                                {hasError ? (
-                                  <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
-                                ) : (
-                                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                                )}
-                                <span className="text-sm font-medium">
-                                  {hasError ? 'Tool Error' : 'Tool Result'}
-                                </span>
-                              </div>
-                              <div className="text-sm">
-                                <div className="text-muted-foreground mb-1">
-                                  {hasError ? 'Error:' : 'Output:'}
-                                </div>
-                                <div className={cn(
-                                  'rounded p-2 text-xs overflow-x-auto max-h-[500px] overflow-y-auto',
-                                  hasError 
-                                    ? 'bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800'
-                                    : 'bg-background/50'
-                                )}>
-                                  {hasError ? (
-                                    <div className="text-red-600 dark:text-red-400">
-                                      {resultContent}
-                                    </div>
-                                  ) : (
-                                    <div className="prose prose-xs max-w-none dark:prose-invert">
-                                      <MarkdownRenderer content={resultContent || ''} />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* legacy tool call UI removed */}
             
-            {/* Regular Content - now comes after tool calls */}
-            {textContent && (
-              <MarkdownRenderer content={textContent} />
-            )}
+              {/* Steps: overlay during streaming, dropdown after finalized */}
+              {isStreaming ? (
+                <StepsOverlay eventId={event.id} segments={event.segments} isStreaming={true} />
+              ) : (
+                <StepsDropdown event={event} />
+              )}
+
+              {/* Message Content */}
+              {isStreaming ? (
+                <StreamingTextSegment eventId={event.id} baseText={textContent || ''} isStreaming={true} />
+              ) : (
+                textContent && <MarkdownRenderer content={textContent} />
+              )}
+
+              
             
             {/* Error Display */}
             {error && (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo, useRef, useEffect } from 'react';
+import { useState, memo } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
@@ -36,32 +36,37 @@ const EventStreamComponent = function EventStream({
   conversationId,
   className 
 }: EventStreamProps) {
+  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
   
   
-  // Local streaming state for existing conversations during streaming (similar to new conversations)
-  const [localStreamingEvents, setLocalStreamingEvents] = useState<Event[] | null>(null);
+  // Streaming flag for existing conversations (leaf components render tokens)
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
-  
-  // Ref to track latest events during streaming without causing re-renders
-  const latestEventsRef = useRef<Event[]>([]);
-  // Ref to manage the periodic UI flush interval
-  const updateIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Load current bud data if conversation has a source_bud_id
   const currentBudData = useBud(conversation?.meta?.source_bud_id || '');
   
   // Create optimistic conversation for bud identity in new conversations
-  const optimisticConversation = isNewConversation && budData ? {
+  const streamingEventId = isNewConversation && events && isStreaming
+    ? (() => {
+        for (let i = events.length - 1; i >= 0; i--) {
+          if (events[i].role === 'assistant') return events[i].id;
+        }
+        return undefined;
+      })()
+    : undefined;
+
+  const localConversation = isNewConversation && events ? {
     id: 'temp',
     events: events || [],
-    isStreaming: false,
+    isStreaming: !!isStreaming,
+    streamingEventId: streamingEventId,
     meta: {
       id: 'temp',
       title: 'New Chat',
       workspace_id: 'temp',
-      source_bud_id: budData.id,
+      source_bud_id: budData?.id,
       // Don't set assistant name/avatar - let the UI derive from bud config
       created_at: new Date().toISOString()
     }
@@ -78,6 +83,15 @@ const EventStreamComponent = function EventStream({
     // Add optimistic UI updates
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
+    if (DEBUG_STREAM) {
+      console.log('[STREAM][existing] Creating optimistic pair', {
+        conversationId,
+        userEventId: userEvent.id,
+        assistantId: assistantPlaceholder.id,
+        prevCount: conversation.events.length,
+        nextCount: conversation.events.length + 2,
+      });
+    }
     
     
     // Add events optimistically to store
@@ -113,49 +127,85 @@ const EventStreamComponent = function EventStream({
         null,
         { debug: true }
       );
+      // Provide placeholder so handler can route streaming overlays
+      eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: false });
       
-      // Track final events for store update on completion
-      let finalEvents = [...conversation.events, userEvent, assistantPlaceholder];
+      // Streaming flag only; leaf components handle token rendering
       
-      // Set local streaming state for real-time display
-      setLocalStreamingEvents(finalEvents);
+      // Set streaming flag only; rendering uses leaf streaming component
       setIsLocalStreaming(true);
       
-      // Initialize the ref with the current events
-      latestEventsRef.current = finalEvents;
-      
-      // Set up local state updater to track streaming events locally (NOT in store during streaming)
-      eventHandler.setLocalStateUpdater(
-        (updater) => {
-          // Only update the ref - don't trigger state updates here
-          latestEventsRef.current = updater(latestEventsRef.current);
-          finalEvents = latestEventsRef.current;
-        },
-        assistantPlaceholder
-      );
+      // No local state updater needed for tokens; FrontendEventHandler routes tokens to streaming bus
       
       // Process streaming response with unified handler
       await eventHandler.processStreamingResponse(response);
       
-      // Do one final update to ensure we have the latest state
-      setLocalStreamingEvents([...latestEventsRef.current]);
-      
+      // After streaming completes, update store with final events including buffered text
+      if (DEBUG_STREAM) {
+        console.log('[STREAM][existing] Completing stream', {
+          conversationId,
+          streamingEventId: assistantPlaceholder.id,
+          currentEventCount: conversation.events.length,
+        });
+      }
+      const bus = (await import('@/lib/streaming/streamingBus')).streamingBus;
+      const appended = bus.get(assistantPlaceholder.id);
+      // Important: read the latest conversation from the store (not the stale closure)
+      const latestStore = useEventChatStore.getState();
+      const latestConv = latestStore.conversations[conversationId];
+      const mergedEvents = latestConv ? [...latestConv.events] : [...conversation.events];
+      const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
+      if (DEBUG_STREAM) {
+        console.log('[STREAM][existing] Merge details', {
+          assistantId: assistantPlaceholder.id,
+          appendedLength: appended?.length || 0,
+          foundEventIndex: mergedEvents.findIndex(e => e.id === assistantPlaceholder.id),
+        });
+      }
+      if (idx >= 0) {
+        const ev = mergedEvents[idx];
+        const segIdx = ev.segments.findIndex(s => s.type === 'text');
+        if (DEBUG_STREAM) {
+          const prevTextLen = segIdx >= 0 && ev.segments[segIdx].type === 'text' ? (ev.segments[segIdx] as { type: 'text'; text: string }).text.length : -1;
+          console.log('[STREAM][existing] Merge indices', { segIdx, prevTextLen });
+        }
+        if (segIdx >= 0 && ev.segments[segIdx].type === 'text') {
+          const seg = ev.segments[segIdx];
+          const newSeg = { ...seg, text: (seg.text || '') + appended };
+          const newSegments = [...ev.segments];
+          newSegments[segIdx] = newSeg;
+          mergedEvents[idx] = { ...ev, segments: newSegments };
+          if (DEBUG_STREAM) {
+            console.log('[STREAM][existing] Merge applied', { newTextLen: (newSeg.text || '').length });
+          }
+        }
+      }
+
       // After streaming completes, update store with final events
-      store.setConversation(conversationId, {
-        ...conversation,
-        events: finalEvents,
+      const finalConv = {
+        ...(latestConv || conversation),
+        events: mergedEvents,
         isStreaming: false,
         streamingEventId: undefined
-      });
+      };
+      if (DEBUG_STREAM) {
+        console.log('[STREAM][existing] Setting conversation with merged events', {
+          eventCount: mergedEvents.length,
+          lastTwoRoles: mergedEvents.slice(-2).map(e => e.role),
+        });
+      }
+      store.setConversation(conversationId, finalConv);
+
+      // Now clear the buses for this event so overlays disappear after final text is present
+      bus.clear(assistantPlaceholder.id);
+      bus.clearReasoning(assistantPlaceholder.id);
       
       // Clear local streaming state
-      setLocalStreamingEvents(null);
       setIsLocalStreaming(false);
     } catch (error) {
       console.error('Error sending message:', error);
       
       // Clear local streaming state on error
-      setLocalStreamingEvents(null);
       setIsLocalStreaming(false);
       
       // Remove optimistic updates on error
@@ -173,31 +223,7 @@ const EventStreamComponent = function EventStream({
     }
   };
 
-  // Manage the periodic UI flush while local streaming is active
-  useEffect(() => {
-    if (!isLocalStreaming) {
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-        updateIntervalRef.current = null;
-      }
-      return;
-    }
-
-    updateIntervalRef.current = setInterval(() => {
-      setLocalStreamingEvents(prev => {
-        const latest = latestEventsRef.current;
-        // Only update when the reference actually changed
-        return prev === latest ? prev : latest;
-      });
-    }, 33);
-
-    return () => {
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-        updateIntervalRef.current = null;
-      }
-    };
-  }, [isLocalStreaming]);
+  // No periodic flush; leaf components subscribe to streaming bus
 
   const title = isNewConversation 
     ? 'New Conversation' 
@@ -242,19 +268,10 @@ const EventStreamComponent = function EventStream({
           // Local state - render events directly (new conversations)
           <EventList 
             events={events}
-            conversation={optimisticConversation}
+            conversation={localConversation}
             autoScroll={true}
             className="h-full"
             isStreaming={isStreaming}
-          />
-        ) : localStreamingEvents ? (
-          // Local streaming state - render streaming events directly (existing conversations during streaming)
-          <EventList 
-            events={localStreamingEvents}
-            conversation={conversation}
-            autoScroll={true}
-            className="h-full"
-            isStreaming={isLocalStreaming}
           />
         ) : conversationId ? (
           // Server state - fetch from store (existing conversations not streaming)
@@ -287,7 +304,7 @@ const EventStreamComponent = function EventStream({
         {onSendMessage ? (
           // Local state composer - use EventComposer for consistency
           <EventComposer
-            conversation={optimisticConversation || { 
+            conversation={localConversation || { 
               id: 'temp', 
               events: events || [], 
               isStreaming: false,

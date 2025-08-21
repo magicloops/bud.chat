@@ -31,7 +31,7 @@ export interface BudConfig {
 // Built-in Tools Configuration (for OpenAI's built-in tools)
 export interface BuiltInToolsConfig {
   enabled_tools: string[] // Array of tool types: "web_search_preview", "code_interpreter"
-  tool_settings: Record<string, Record<string, any>> // Tool-specific settings
+  tool_settings: Record<string, Record<string, unknown>> // Tool-specific settings
 }
 
 // Reasoning Configuration (for OpenAI Responses API)
@@ -83,7 +83,7 @@ export interface TextGenerationConversationOverrides {
 
 export interface BuiltInToolsConversationOverrides {
   enabled_tools?: string[] // Override enabled tools for this conversation
-  tool_settings?: Record<string, Record<string, any>> // Tool-specific settings overrides
+  tool_settings?: Record<string, Record<string, unknown>> // Tool-specific settings overrides
 }
 
 // Database types (actively used)

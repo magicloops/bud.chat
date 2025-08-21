@@ -62,6 +62,7 @@ export function EventList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
   const lastEventCountRef = useRef(0);
+  const lastScrollHeightRef = useRef(0);
 
   // Auto-scroll to bottom when new events arrive or content updates
   const scrollToBottom = useCallback((force = false) => {
@@ -104,6 +105,36 @@ export function EventList({
       scrollToBottom();
     }
   }, [displayEvents, actualIsStreaming, scrollToBottom]);
+
+  // Auto-scroll when container grows during streaming (tokens/code/reasoning overlays)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    lastScrollHeightRef.current = el.scrollHeight;
+
+    const ro = new ResizeObserver(() => {
+      if (!autoScroll || !actualIsStreaming) return;
+      if (isUserScrollingRef.current) return;
+      const sh = el.scrollHeight;
+      if (sh !== lastScrollHeightRef.current) {
+        lastScrollHeightRef.current = sh;
+        scrollToBottom();
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [autoScroll, actualIsStreaming, scrollToBottom]);
+
+  // Also listen for custom streaming content events dispatched by leaf components
+  useEffect(() => {
+    const onStreamUpdate = () => {
+      if (!autoScroll || !actualIsStreaming) return;
+      if (isUserScrollingRef.current) return;
+      scrollToBottom();
+    };
+    window.addEventListener('streaming-content-updated', onStreamUpdate);
+    return () => window.removeEventListener('streaming-content-updated', onStreamUpdate);
+  }, [autoScroll, actualIsStreaming, scrollToBottom]);
 
   // Force scroll to bottom on initial load
   useEffect(() => {

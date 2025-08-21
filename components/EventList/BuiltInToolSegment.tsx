@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Segment } from '@/lib/types/events';
 import MarkdownRenderer from '@/components/markdown-renderer';
+import StreamingCodeInterpreter from './StreamingCodeInterpreter';
 
 interface BuiltInToolSegmentProps {
   segment: (Segment & { type: 'web_search_call'; status: 'in_progress' | 'searching' | 'completed' | 'failed' }) |
@@ -154,7 +155,7 @@ export function BuiltInToolSegment({
           )}
         </div>
         
-        {/* Expandable Code Content */}
+        {/* Expandable Code Content (includes streaming overlay) */}
         {hasExpandableContent && isExpanded && (
           <div className="mt-3 pt-3 border-t border-border">
             {hasCode && (
@@ -169,18 +170,16 @@ export function BuiltInToolSegment({
                 </div>
               </div>
             )}
+            {isCodeInterpreter && isStreaming && (
+              <StreamingCodeInterpreter itemId={segment.id} />
+            )}
           </div>
         )}
         
         {/* Show code inline if streaming and not expanded */}
-        {hasCode && !isExpanded && isStreaming && status === 'interpreting' && 'code' in segment && segment.code && (
-          <div className="mt-2 text-xs text-muted-foreground">
-            <div className="bg-muted/30 rounded px-2 py-1 font-mono">
-              {segment.code.length > 100 
-                ? `${segment.code.substring(0, 100)}...` 
-                : segment.code
-              }
-            </div>
+        {isCodeInterpreter && isStreaming && !isExpanded && (
+          <div className="mt-2">
+            <StreamingCodeInterpreter itemId={segment.id} />
           </div>
         )}
       </div>

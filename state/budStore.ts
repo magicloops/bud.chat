@@ -15,7 +15,7 @@ interface BudForStore {
   default_json: Database['public']['Tables']['buds']['Row']['default_json'];
   mcp_config: Database['public']['Tables']['buds']['Row']['mcp_config'];
   builtin_tools_config: Database['public']['Tables']['buds']['Row']['builtin_tools_config'];
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface BudStore {

@@ -516,12 +516,27 @@ export async function POST(request: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Track closed state to avoid enqueueing after close
+          let isClosed = false;
+          const send = (obj: unknown) => {
+            if (isClosed) return;
+            try {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+            } catch {
+              isClosed = true;
+            }
+          };
+          const sendSSE = (s: string) => {
+            if (isClosed) return;
+            try {
+              controller.enqueue(encoder.encode(s));
+            } catch {
+              isClosed = true;
+            }
+          };
           // Send conversation created event for new conversations
           if (isNewConversation && conversationId) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-              type: 'conversationCreated',
-              conversationId: conversationId
-            })}\n\n`));
+            send({ type: 'conversationCreated', conversationId });
           }
           
           const maxIterations = 5;
@@ -551,19 +566,18 @@ export async function POST(request: NextRequest) {
                 allNewEvents.push(event);
                 
                 // Stream tool result
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                send({
                   type: 'tool_result',
                   tool_id: result.id,
                   output: result.output,
                   error: result.error || null
-                })}\n\n`));
-                
+                });
                 // Stream tool completion
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                send({
                   type: 'tool_complete',
                   tool_id: result.id,
                   content: result.error ? '❌ Tool failed' : '✅ Tool completed'
-                })}\n\n`));
+                });
               }
               
               // Save tool results if not a new conversation
@@ -630,7 +644,7 @@ export async function POST(request: NextRequest) {
               
               // Handle reasoning and text generation config from default_json
               if (bud?.default_json) {
-                const budConfig = bud.default_json as any;
+                const budConfig = bud.default_json as Partial<import('@/lib/types').BudConfig>;
                 if (budConfig.reasoningConfig) {
                   reasoningConfig = budConfig.reasoningConfig;
                 }
@@ -654,7 +668,7 @@ export async function POST(request: NextRequest) {
                 // Apply built-in tools config overrides
                 if (conversationData.builtin_tools_config_overrides) {
                   const originalConfig = builtInToolsConfig;
-                  builtInToolsConfig = conversationData.builtin_tools_config_overrides as any; // Cast since it's JSONB
+                  builtInToolsConfig = conversationData.builtin_tools_config_overrides as import('@/lib/types').BuiltInToolsConfig; // Cast since it's JSONB
                   console.log('📋 [Chat API] Applied built-in tools conversation overrides:', {
                     original: originalConfig,
                     override: builtInToolsConfig
@@ -663,7 +677,10 @@ export async function POST(request: NextRequest) {
                 
                 // Apply reasoning and text generation config overrides
                 if (conversationData.model_config_overrides) {
-                  const modelOverrides = conversationData.model_config_overrides as any;
+                  const modelOverrides = conversationData.model_config_overrides as {
+                    reasoningConfig?: import('@/lib/types').ReasoningConfig;
+                    textGenerationConfig?: import('@/lib/types').TextGenerationConfig;
+                  };
                   if (modelOverrides.reasoningConfig) {
                     reasoningConfig = modelOverrides.reasoningConfig;
                     console.log('📋 [Chat API] Applied reasoning config override:', reasoningConfig);
@@ -676,7 +693,7 @@ export async function POST(request: NextRequest) {
               } else {
                 console.log('📋 [Chat API] No conversation overrides found:', {
                   convError,
-                  hasOverrides: !!(conversationData?.builtin_tools_config_overrides || conversationData?.model_config_overrides)
+                  hasOverrides: false
                 });
               }
             }
@@ -720,11 +737,11 @@ export async function POST(request: NextRequest) {
                       
                       // Send event start
                       if (!eventStarted) {
-                        controller.enqueue(encoder.encode(
+                        sendSSE(
                           streamingFormat.formatSSE(
                             streamingFormat.eventStart(currentEvent)
                           )
-                        ));
+                        );
                         eventStarted = true;
                       }
                       
@@ -733,21 +750,21 @@ export async function POST(request: NextRequest) {
                         if (segment.type === 'tool_call') {
                           
                           // Emit tool_start
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          send({
                             type: 'tool_start',
                             tool_id: segment.id,
                             tool_name: segment.name,
                             content: `🔧 *Using tool: ${segment.name}*\n`,
                             hideProgress: true
-                          })}\n\n`));
+                          });
                           
                           // Emit tool_finalized with args
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          send({
                             type: 'tool_finalized',
                             tool_id: segment.id,
                             tool_name: segment.name,
                             args: segment.args
-                          })}\n\n`));
+                          });
                         }
                       }
                     }
@@ -759,11 +776,11 @@ export async function POST(request: NextRequest) {
                     const segment = extendedEvent.data.segment;
                     
                     if (segment.type === 'text' && segment.text) {
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      send({
                         type: 'token',
                         content: segment.text,
                         hideProgress: true
-                      })}\n\n`));
+                      });
                     } else if (segment.type === 'tool_call') {
                       hasToolCalls = true;
                       
@@ -773,48 +790,48 @@ export async function POST(request: NextRequest) {
                       
                       if (!hasCompleteArgs) {
                         // Tool just started - emit tool_start
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        send({
                           type: 'tool_start',
                           tool_id: segment.id,
                           tool_name: segment.name,
                           content: `🔧 *Using tool: ${segment.name}*\n`,
                           hideProgress: true
-                        })}\n\n`));
+                        });
                       } else {
                         // Tool is complete - emit both start and finalized
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        send({
                           type: 'tool_start',
                           tool_id: segment.id,
                           tool_name: segment.name,
                           content: `🔧 *Using tool: ${segment.name}*\n`,
                           hideProgress: true
-                        })}\n\n`));
+                        });
                         
-                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                        send({
                           type: 'tool_finalized',
                           tool_id: segment.id,
                           tool_name: segment.name,
                           args: segment.args
-                        })}\n\n`));
+                        });
                       }
                     } else if (segment.type === 'reasoning') {
                       // Send reasoning segment
-                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      send({
                         type: 'reasoning_start',
                         item_id: segment.id,
                         output_index: segment.output_index,
                         sequence_number: segment.sequence_number
-                      })}\n\n`));
+                      });
                       
                       // Send reasoning content if available
                       if (segment.parts && segment.parts.length > 0) {
                         for (const part of segment.parts) {
-                          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                          send({
                             type: 'reasoning_content',
                             item_id: segment.id,
                             content: part.text,
                             summary_index: part.summary_index
-                          })}\n\n`));
+                          });
                         }
                       }
                     }
@@ -824,59 +841,59 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_summary_part_added':
                   // Handle reasoning part added events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'reasoning_summary_part_added',
                       item_id: extendedEvent.data.item_id,
                       summary_index: extendedEvent.data.summary_index,
                       part: extendedEvent.data.part,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'reasoning_summary_text_delta':
                   // Handle reasoning text delta events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'reasoning_summary_text_delta',
                       item_id: extendedEvent.data.item_id,
                       summary_index: extendedEvent.data.summary_index,
                       delta: extendedEvent.data.delta,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'reasoning_summary_part_done':
                   // Handle reasoning part done events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'reasoning_summary_part_done',
                       item_id: extendedEvent.data.item_id,
                       summary_index: extendedEvent.data.summary_index,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'reasoning_complete':
                   // Handle reasoning complete events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'reasoning_complete',
                       item_id: extendedEvent.data.item_id,
                       parts: extendedEvent.data.parts,
                       combined_text: extendedEvent.data.combined_text,
                       output_index: extendedEvent.data.output_index,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'mcp_tool_start':
                   // Handle MCP tool start events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'mcp_tool_start',
                       tool_id: extendedEvent.data.tool_id,
                       tool_name: extendedEvent.data.tool_name,
@@ -885,29 +902,29 @@ export async function POST(request: NextRequest) {
                       server_type: extendedEvent.data.server_type,
                       output_index: extendedEvent.data.output_index,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'mcp_tool_arguments_delta':
                   // Handle MCP tool arguments delta events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'mcp_tool_arguments_delta',
                       tool_id: extendedEvent.data.tool_id,
                       delta: extendedEvent.data.delta
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'mcp_tool_finalized':
                   // Handle MCP tool finalized events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'mcp_tool_finalized',
                       tool_id: extendedEvent.data.tool_id,
                       args: extendedEvent.data.args
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
@@ -915,41 +932,41 @@ export async function POST(request: NextRequest) {
                   // Handle MCP tool complete events
                   if (extendedEvent.data) {
                     // First emit as tool_result for consistent frontend handling
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'tool_result',
                       tool_id: extendedEvent.data.tool_id,
                       output: extendedEvent.data.output,
                       error: extendedEvent.data.error
-                    })}\n\n`));
+                    });
                     
                     // Emit tool_complete to match the pattern used elsewhere
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'tool_complete',
                       tool_id: extendedEvent.data.tool_id,
                       content: extendedEvent.data.error ? '❌ Tool failed' : '✅ Tool completed'
-                    })}\n\n`));
+                    });
                     
                     // Then emit the mcp_tool_complete event for any specific handling
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'mcp_tool_complete',
                       tool_id: extendedEvent.data.tool_id,
                       output: extendedEvent.data.output,
                       error: extendedEvent.data.error,
                       sequence_number: extendedEvent.data.sequence_number,
                       output_index: extendedEvent.data.output_index
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
                 case 'progress_update':
                   // Handle progress update events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'progress_update',
                       activity: extendedEvent.data.activity,
                       server_label: extendedEvent.data.server_label,
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
@@ -962,23 +979,23 @@ export async function POST(request: NextRequest) {
                 case 'code_interpreter_call_code_delta':
                 case 'code_interpreter_call_code_done':
                   // Handle built-in tool events
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                  send({
                     type: extendedEvent.type,
                     item_id: extendedEvent.data?.item_id,
                     output_index: extendedEvent.data?.output_index,
                     sequence_number: extendedEvent.data?.sequence_number,
                     delta: extendedEvent.data?.delta,
                     code: extendedEvent.data?.code
-                  })}\n\n`));
+                  });
                   break;
                   
                 case 'progress_hide':
                   // Handle progress hide events
                   if (extendedEvent.data) {
-                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                    send({
                       type: 'progress_hide',
                       sequence_number: extendedEvent.data.sequence_number
-                    })}\n\n`));
+                    });
                   }
                   break;
                   
@@ -989,9 +1006,7 @@ export async function POST(request: NextRequest) {
                   console.log('🔚 [Chat API] Processing done event from provider');
                   
                   // Send immediate done event to frontend to unblock UI
-                  controller.enqueue(encoder.encode(
-                    streamingFormat.formatSSE(streamingFormat.done())
-                  ));
+                  sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
                   console.log('🔚 [Chat API] Sent immediate done event to frontend');
                   
                   // Handle database saves immediately for both new and existing conversations
@@ -1024,6 +1039,7 @@ export async function POST(request: NextRequest) {
                   
                   // Close connection after saving
                   controller.close();
+                  isClosed = true;
                   console.log('🔚 [Chat API] Closed connection, frontend should be unblocked');
                   
                   // For Responses API, tool calls are handled internally by OpenAI
@@ -1039,10 +1055,7 @@ export async function POST(request: NextRequest) {
           }
           
           // Send completion
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'conversationId',
-            conversationId
-          })}\n\n`));
+          send({ type: 'conversationId', conversationId });
           
           const finalContent = allNewEvents
             .filter(e => e.role === 'assistant')
@@ -1058,12 +1071,15 @@ export async function POST(request: NextRequest) {
           console.error('Stream processing error:', error);
           
           // Send error in the format the frontend expects
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          send({
             type: 'error',
             error: error instanceof Error ? error.message : String(error)
-          })}\n\n`));
-          
+          });
           controller.close();
+          // Mark closed so later accidental sends are ignored
+          // (provider streams may continue emitting briefly)
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const _ = (isClosed = true);
         }
       }
     });

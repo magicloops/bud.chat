@@ -117,7 +117,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     // Add built-in tools if configured
     if (request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0) {
       for (const toolType of request.builtInToolsConfig.enabled_tools) {
-        const toolSettings = request.builtInToolsConfig.tool_settings[toolType] || {};
+        const toolSettings = (request.builtInToolsConfig.tool_settings[toolType] as {
+          search_context_size?: 'low' | 'medium' | 'high'
+          container?: string
+        } | undefined) || {};
         
         if (toolType === 'web_search_preview') {
           tools.push({
@@ -157,7 +160,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       let reasoningEffort = request.reasoningConfig?.effort || request.reasoningEffort || 'low';
       
       // Validate reasoning effort compatibility with built-in tools
-      const hasBuiltInTools = request.builtInToolsConfig?.enabled_tools?.length > 0;
+      const hasBuiltInTools = !!(request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0);
       if (hasBuiltInTools && reasoningEffort === 'minimal') {
         console.warn('⚠️ [OpenAI Responses] Minimal reasoning effort not compatible with built-in tools, using "low" instead');
         reasoningEffort = 'low';
@@ -183,15 +186,18 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       const response = await this.client.responses.create(params as Parameters<typeof this.client.responses.create>[0]);
       
       // Log the response ID for debugging and potential manual verification
-      console.log('🔍 [OpenAI Responses] Response ID:', {
-        id: response.id,
-        status: response.status,
-        model: response.model,
-        created_at: response.created_at,
-        store: response.store,
-        reasoning_effort: response.reasoning?.effort,
-        output_count: response.output?.length || 0
-      });
+      try {
+        const r = response as unknown as Record<string, unknown>;
+        console.log('🔍 [OpenAI Responses] Response ID:', {
+          id: r && 'id' in r ? (r as { id?: string }).id : undefined,
+          status: r && 'status' in r ? (r as { status?: string }).status : undefined,
+          model: r && 'model' in r ? (r as { model?: string }).model : undefined,
+          created_at: r && 'created_at' in r ? (r as { created_at?: unknown }).created_at : undefined,
+          store: r && 'store' in r ? (r as { store?: unknown }).store : undefined,
+          reasoning_effort: (r as { reasoning?: { effort?: unknown } }).reasoning?.effort,
+          output_count: Array.isArray((r as { output?: unknown[] }).output) ? ((r as { output?: unknown[] }).output as unknown[])?.length : 0
+        });
+      } catch {}
       
       // Convert response output to Event
       const event = this.convertResponseToEvent(response);
@@ -234,7 +240,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       let reasoningEffort = request.reasoningConfig?.effort || request.reasoningEffort || 'low';
       
       // Validate reasoning effort compatibility with built-in tools
-      const hasBuiltInTools = request.builtInToolsConfig?.enabled_tools?.length > 0;
+      const hasBuiltInTools = !!(request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0);
       if (hasBuiltInTools && reasoningEffort === 'minimal') {
         console.warn('⚠️ [OpenAI Responses] Minimal reasoning effort not compatible with built-in tools, using "low" instead');
         reasoningEffort = 'low';
@@ -348,9 +354,9 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'response.created':
           case 'response.in_progress':
             // Handle response lifecycle events - just capture response ID for now
-            const response = streamEvent.response;
-            if (response?.id && !debugResponseData.response_id) {
-              debugResponseData.response_id = response.id;
+            const respObj = streamEvent.response as Record<string, unknown> | undefined;
+            if (respObj && 'id' in respObj && !debugResponseData.response_id) {
+              debugResponseData.response_id = (respObj as { id?: string }).id;
             }
             break;
             
@@ -363,24 +369,18 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               action: 'processing'
             });
             
-            const completedResponse = streamEvent.response;
-            if (completedResponse?.id && !debugResponseData.response_id) {
-              debugResponseData.response_id = completedResponse.id;
+            const completedResponse = streamEvent.response as Record<string, unknown> | undefined;
+            if (completedResponse && 'id' in completedResponse && !debugResponseData.response_id) {
+              debugResponseData.response_id = (completedResponse as { id?: string }).id;
             }
             
             // Set final response metadata from completed response
             if (completedResponse) {
+              const r = completedResponse as Record<string, unknown>;
               currentEvent.response_metadata = {
                 ...currentEvent.response_metadata,
-                openai_response_id: completedResponse.id,
-                model: completedResponse.model,
-                created_at: completedResponse.created_at,
-                status: completedResponse.status, // This will be "completed"
-                store: completedResponse.store,
-                reasoning_effort: completedResponse.reasoning?.effort,
-                temperature: completedResponse.temperature,
-                ...(completedResponse.usage && { usage: completedResponse.usage }),
-                ...(completedResponse.metadata && { openai_metadata: completedResponse.metadata })
+                openai_response_id: (r as { id?: string }).id,
+                model: (r as { model?: string }).model
               };
             }
             
@@ -760,15 +760,54 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'web_search_call_in_progress':
           case 'web_search_call_searching':
           case 'web_search_call_completed':
-            // Web search lifecycle events - pass through as progress updates
+            // Pass through built-in Web Search events so the frontend can render segments
             yield {
-              type: 'progress_update',
+              type: streamEvent.type,
               data: {
-                message: streamEvent.type === 'web_search_call_in_progress' ? 'Starting web search...' :
-                        streamEvent.type === 'web_search_call_searching' ? 'Searching the web...' :
-                        'Web search completed',
-                progress: streamEvent.type === 'web_search_call_completed' ? 100 : undefined,
                 item_id: streamEvent.item_id,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_in_progress':
+          case 'code_interpreter_call_interpreting':
+          case 'code_interpreter_call_completed':
+            // Pass through Code Interpreter lifecycle events
+            yield {
+              type: streamEvent.type,
+              data: {
+                item_id: streamEvent.item_id,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_code_delta':
+            // Pass through streaming code delta
+            yield {
+              type: 'code_interpreter_call_code_delta',
+              data: {
+                item_id: streamEvent.item_id,
+                delta: streamEvent.delta,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_code_done':
+            // Pass through final code content
+            yield {
+              type: 'code_interpreter_call_code_done',
+              data: {
+                item_id: streamEvent.item_id,
+                code: streamEvent.code,
                 output_index: streamEvent.output_index,
                 sequence_number: streamEvent.sequence_number
               }
@@ -778,7 +817,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             
           case 'response.output_text.annotation.added':
             // Handle URL citations - add to the current text segment (optimized)
-            if (streamEvent.annotation?.type === 'url_citation') {
+            const ann = (streamEvent as { annotation?: { type?: string; url: string; title?: string; start_index?: number; end_index?: number } }).annotation;
+            if (ann?.type === 'url_citation') {
               // Find the text segment that contains this citation
               const textSegmentIndex = currentEvent.segments.findIndex(s => s.type === 'text');
               if (textSegmentIndex >= 0) {
@@ -791,10 +831,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                 
                 // Add the citation
                 textSegment.citations.push({
-                  url: streamEvent.annotation.url,
-                  title: streamEvent.annotation.title,
-                  start_index: streamEvent.annotation.start_index,
-                  end_index: streamEvent.annotation.end_index
+                  url: ann.url,
+                  title: ann.title || 'Source',
+                  start_index: ann.start_index || 0,
+                  end_index: ann.end_index || 0
                 });
                 
                 // Don't yield individual citation events - just batch them with the final result
@@ -840,9 +880,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             if (!currentEvent.response_metadata?.openai_response_id && debugResponseData.response_id) {
               currentEvent.response_metadata = {
                 ...currentEvent.response_metadata,
-                openai_response_id: debugResponseData.response_id,
-                status: 'completed', // Assume completed since we got 'complete'
-                // Other fields will be missing since we don't have the full response object
+                openai_response_id: debugResponseData.response_id
               };
             }
             
@@ -901,14 +939,16 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     
     // Debug: Collect all reasoning segments from our stored events
     const storedReasoningSegments = events.flatMap(e => 
-      e.segments.filter(s => s.type === 'reasoning').map(s => ({
-        id: s.id,
-        partsCount: (s as any).parts?.length || 0,
-        combinedText: (s as any).combined_text || '',
-        outputIndex: (s as any).output_index,
-        sequenceNumber: (s as any).sequence_number,
-        isEmpty: !(s as any).parts?.length && !(s as any).combined_text?.trim()
-      }))
+      e.segments
+        .filter((s): s is Extract<typeof e.segments[number], { type: 'reasoning' }> => s.type === 'reasoning')
+        .map((s) => ({
+          id: s.id,
+          partsCount: s.parts.length || 0,
+          combinedText: s.combined_text || '',
+          outputIndex: s.output_index,
+          sequenceNumber: s.sequence_number,
+          isEmpty: s.parts.length === 0 && !(s.combined_text && s.combined_text.trim())
+        }))
     );
     
     
