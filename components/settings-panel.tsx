@@ -157,7 +157,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = budConfig?.maxTokens || undefined;
       const finalAvatar = budConfig?.avatar || '';
       const finalMcpConfig = budMcpConfig || {};
-      const finalBuiltInToolsConfig = budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} };
+      const finalBuiltInToolsConfig = normalizeBuiltInToolsConfig(budBuiltInToolsConfig);
       const finalReasoningConfig = budConfig?.reasoningConfig || {};
       const finalTextGenerationConfig = budConfig?.textGenerationConfig || {};
       
@@ -209,7 +209,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined;
       const finalAvatar = conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '';
       const finalMcpConfig = mcpOverrides || budMcpConfig || {};
-      const finalBuiltInToolsConfig = builtInToolsOverrides || budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} };
+      const finalBuiltInToolsConfig = normalizeBuiltInToolsConfig(builtInToolsOverrides || budBuiltInToolsConfig);
       const finalReasoningConfig = conversationOverrides?.reasoningConfig || budConfig?.reasoningConfig || {};
       const finalTextGenerationConfig = conversationOverrides?.textGenerationConfig || budConfig?.textGenerationConfig || {};
       
@@ -273,6 +273,20 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     }
     
     return normalized;
+  };
+
+  // Ensure built-in tools config always has required shape
+  const normalizeBuiltInToolsConfig = (
+    cfg?: Partial<BuiltInToolsConfig> | null
+  ): BuiltInToolsConfig => {
+    const enabled = Array.isArray((cfg as any)?.enabled_tools)
+      ? ((cfg as any).enabled_tools as string[])
+      : [];
+    const settings =
+      cfg && typeof (cfg as any).tool_settings === 'object' && (cfg as any).tool_settings !== null
+        ? ((cfg as any).tool_settings as Record<string, Record<string, unknown>>)
+        : {};
+    return { enabled_tools: enabled, tool_settings: settings };
   };
 
   // Effect to check for changes whenever form values change

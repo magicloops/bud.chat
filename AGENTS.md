@@ -4,6 +4,8 @@ Important: Think carefully and only action the specific task I have given you wi
 
 This file contains important patterns, gotchas, and conventions for working with this codebase.
 
+Always read the full files, don't read specific lines unless you know which lines to read ahead of time.
+
 ---
 
 ## ⚠️ Critical Development Guidelines
