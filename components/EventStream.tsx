@@ -36,7 +36,7 @@ const EventStreamComponent = function EventStream({
   conversationId,
   className 
 }: EventStreamProps) {
-  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
+  const DEBUG_STREAM = process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
   
@@ -71,6 +71,24 @@ const EventStreamComponent = function EventStream({
       created_at: new Date().toISOString()
     }
   } : null;
+
+  // Debug: register a long task PerformanceObserver once per page
+  if (typeof window !== 'undefined' && DEBUG_STREAM && !(window as any).__stream_longtask_observer) {
+    try {
+      (window as any).__stream_longtask_observer = true;
+      if ('PerformanceObserver' in window) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const obs = new (window as any).PerformanceObserver((list: PerformanceObserverEntryList) => {
+          for (const entry of list.getEntries()) {
+            // eslint-disable-next-line no-console
+            console.log('[STREAM][perf] longtask', { dur: Math.round(entry.duration), ts: Date.now() });
+          }
+        });
+        // @ts-ignore: longtask type
+        obs.observe({ type: 'longtask', buffered: true });
+      }
+    } catch {}
+  }
   
   const _handleEventSent = (_eventId: string) => {
     // For server-state conversations, the store handles updates
@@ -121,13 +139,14 @@ const EventStreamComponent = function EventStream({
         })
       });
       
-      // Create unified event handler for existing conversations - use SAME approach as new conversations
+      // Create unified event handler for existing conversations
+      // Provide conversationId + store so completed steps persist to the event
       const eventHandler = new FrontendEventHandler(
-        null, // No store updates during streaming - keep it local
-        null,
+        conversationId,
+        useEventChatStore,
         { debug: true }
       );
-      // Provide placeholder so handler can route streaming overlays
+      // Provide placeholder so handler can route streaming overlays (tokens still via bus)
       eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: false });
       
       // Streaming flag only; leaf components handle token rendering

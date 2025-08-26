@@ -9,7 +9,8 @@ import { Event, Conversation } from '@/state/eventChatStore';
 import { ToolCallId } from '@/lib/types/branded';
 import { cn } from '@/lib/utils';
 import StepsDropdown from '@/components/Steps/StepsDropdown';
-import StepsOverlay from '@/components/Steps/StepsOverlay';
+// StepsOverlay disabled for debugging streaming freeze
+// import StepsOverlay from '@/components/Steps/StepsOverlay';
 import StreamingTextSegment from '@/components/EventList/StreamingTextSegment';
 import {
   Copy,
@@ -567,10 +568,8 @@ export const EventItem = memo(function EventItem({
                   })}
                 </div>
               )}
-              {/* Steps overlay during streaming; steps dropdown for finalized */}
-              {isStreaming ? (
-                <StepsOverlay eventId={event.id} segments={event.segments} isStreaming={true} />
-              ) : (
+              {/* Steps overlay disabled during streaming for debugging; keep dropdown after finalized */}
+              {isStreaming ? null : (
                 <StepsDropdown event={event} />
               )}
 
@@ -675,10 +674,8 @@ export const EventItem = memo(function EventItem({
             {/* Tool Call Display - should appear before text content */}
             {/* legacy tool call UI removed */}
             
-              {/* Steps: overlay during streaming, dropdown after finalized */}
-              {isStreaming ? (
-                <StepsOverlay eventId={event.id} segments={event.segments} isStreaming={true} />
-              ) : (
+              {/* Steps overlay disabled during streaming for debugging; keep dropdown after finalized */}
+              {isStreaming ? null : (
                 <StepsDropdown event={event} />
               )}
 

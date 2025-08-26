@@ -8,6 +8,10 @@ import { ToolCallId } from '@/lib/types/branded';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
+// StepsOverlay disabled for debugging streaming freeze
+// import StepsOverlay from '@/components/Steps/StepsOverlay';
+import StepsDropdown from '@/components/Steps/StepsDropdown';
+import { streamingBus } from '@/lib/streaming/streamingBus';
 import {
   Copy,
   Edit,
@@ -74,6 +78,8 @@ export const EventItemSequential = memo(function EventItemSequential({
   }, [event.segments]);
   
   // Update local content when the event changes
+  const UI_DEBUG = process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
+
   useEffect(() => {
     setLocalTextContent(textContent);
   }, [textContent]);
@@ -143,6 +149,42 @@ export const EventItemSequential = memo(function EventItemSequential({
   const canEdit = isUser && !isPending;
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
+  
+  // Track if text tokens and reasoning have begun streaming (to decide overlay/dropdown)
+  const [hasTextTokens, setHasTextTokens] = useState(false);
+  const [sawReasoning, setSawReasoning] = useState(false);
+  useEffect(() => {
+    if (!isStreaming) {
+      // Keep sawReasoning sticky after streaming ends so the Steps CTA
+      // remains visible until persisted steps arrive.
+      setHasTextTokens(false);
+      return;
+    }
+    const update = () => {
+      const t = streamingBus.get(event.id);
+      setHasTextTokens(!!t && t.length > 0);
+      if (UI_DEBUG) {
+        if (!!t && t.length > 0) {
+          console.log('[STREAM][ui] first_text_tokens', { eventId: event.id, len: t.length, ts: Date.now() });
+        }
+      }
+    };
+    update();
+    const unsub = streamingBus.subscribe(event.id, update);
+    // Also watch reasoning overlay text for this event id
+    const updateReasoning = () => {
+      const r = streamingBus.getReasoning(event.id);
+      if (r && r.length > 0) setSawReasoning(true);
+      if (UI_DEBUG) {
+        if (r && r.length > 0) {
+          console.log('[STREAM][ui] saw_reasoning', { eventId: event.id, len: r.length, ts: Date.now() });
+        }
+      }
+    };
+    const unsubR = streamingBus.subscribeReasoning(event.id, updateReasoning);
+    updateReasoning();
+    return () => { unsub(); unsubR(); };
+  }, [event.id, isStreaming]);
   
   // Determine if this should be a continuation (compact view)
   const shouldShowAsContinuation = isAssistant && previousEvent && 
@@ -253,7 +295,16 @@ export const EventItemSequential = memo(function EventItemSequential({
             {isStreaming && !hasSegments && (
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
             )}
-            
+
+            {/* Unified Steps: overlay during streaming; dropdown after finalized */}
+            {hasSegments && (
+              isStreaming
+                ? (hasTextTokens
+                    ? <StepsDropdown event={event} forceVisible={sawReasoning} />
+                    : null)
+                : <StepsDropdown event={event} forceVisible={sawReasoning} />
+            )}
+
             {/* Sequential segment rendering */}
             {hasSegments && (
               <SequentialSegmentRenderer

@@ -854,6 +854,14 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_summary_text_delta':
                   // Handle reasoning text delta events
                   if (extendedEvent.data) {
+                    if (process.env.NODE_ENV !== 'production') {
+                      console.log('[STREAM][api] emit reasoning_delta', {
+                        item_id: extendedEvent.data.item_id,
+                        idx: extendedEvent.data.summary_index,
+                        len: typeof extendedEvent.data.delta === 'string' ? extendedEvent.data.delta.length : (extendedEvent.data.delta?.text?.length || 0),
+                        ts: Date.now()
+                      });
+                    }
                     send({
                       type: 'reasoning_summary_text_delta',
                       item_id: extendedEvent.data.item_id,

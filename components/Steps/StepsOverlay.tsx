@@ -10,9 +10,11 @@ interface StepsOverlayProps {
   eventId: string;
   segments: Segment[];
   isStreaming: boolean;
+  allEvents?: { segments: Segment[] }[]; // Optional, used to detect MCP tool completion
 }
 
-export default function StepsOverlay({ eventId, segments, isStreaming }: StepsOverlayProps) {
+export default function StepsOverlay({ eventId, segments, isStreaming, allEvents }: StepsOverlayProps) {
+  const UI_DEBUG = process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
   const [reasoningText, setReasoningText] = useState<string>(() => streamingBus.getReasoning(eventId));
   const [codeItemId, setCodeItemId] = useState<string | null>(null);
   const [codeText, setCodeText] = useState<string>('');
@@ -62,10 +64,44 @@ export default function StepsOverlay({ eventId, segments, isStreaming }: StepsOv
 
   // Determine which overlay to show: reasoning text takes priority, then code, else tool status
   const activeWebSearch = useMemo(() => segments.find(s => s.type === 'web_search_call' && s.status !== 'completed'), [segments]);
+  // Detect active MCP tool call (no corresponding tool_result yet)
+  const activeMcpCall = useMemo(() => {
+    const toolCall = segments.find(s => s.type === 'tool_call');
+    if (!toolCall || toolCall.type !== 'tool_call') return null;
+    // If we don't have allEvents, assume running while streaming
+    if (!allEvents || allEvents.length === 0) return toolCall;
+    const hasResult = allEvents.some(ev => ev.segments.some(seg => seg.type === 'tool_result' && seg.id === toolCall.id));
+    return hasResult ? null : toolCall;
+  }, [segments, allEvents]);
   const hasReasoning = reasoningText && reasoningText.trim().length > 0;
   const hasCode = codeText && codeText.trim().length > 0;
-  const showOverlay = isStreaming && (hasReasoning || hasCode || !!activeWebSearch);
+  const showOverlay = isStreaming && (hasReasoning || hasCode || !!activeWebSearch || !!activeMcpCall);
+  if (UI_DEBUG) {
+    if (showOverlay) {
+      console.log('[STREAM][ui] overlay_show', {
+        eventId,
+        hasReasoning,
+        hasCode,
+        hasWebSearch: !!activeWebSearch,
+        hasMcp: !!activeMcpCall,
+        ts: Date.now()
+      });
+    }
+  }
   if (!showOverlay) return null;
+
+  // Debug: measure time-to-paint after reasoning overlay updates
+  useEffect(() => {
+    if (process.env.NEXT_PUBLIC_STREAM_DEBUG !== 'true') return;
+    if (!hasReasoning) return;
+    const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const id = requestAnimationFrame(() => {
+      const end = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      // eslint-disable-next-line no-console
+      console.log('[STREAM][ui][render] reasoning_render', { eventId, len: reasoningText.length, ms: Math.round(end - start), ts: Date.now() });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [reasoningText, hasReasoning, eventId]);
 
   return (
     <div className="mt-2 p-3 bg-muted/30 rounded-lg border border-muted" data-testid={`steps-overlay-${eventId}`}>
@@ -92,6 +128,13 @@ export default function StepsOverlay({ eventId, segments, isStreaming }: StepsOv
           <Search className="h-3 w-3" />
           <span>Web search: {activeWebSearch.status}</span>
           {activeWebSearch.status !== 'completed' && <Loader2 className="h-3 w-3 animate-spin" />}
+        </div>
+      )}
+      {!hasReasoning && !hasCode && !activeWebSearch && activeMcpCall && (
+        <div className="text-xs text-muted-foreground inline-flex items-center gap-2">
+          <TerminalSquare className="h-3 w-3" />
+          <span>Using tool: {(activeMcpCall as any).display_name || activeMcpCall.name || 'tool'}</span>
+          <Loader2 className="h-3 w-3 animate-spin" />
         </div>
       )}
     </div>

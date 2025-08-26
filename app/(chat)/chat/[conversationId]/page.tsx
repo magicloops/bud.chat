@@ -33,7 +33,7 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ params }: ChatPageProps) {
-  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
+  const DEBUG_STREAM = process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
   const resolvedParams = use(params);
   const initialConversationId = resolvedParams.conversationId;
   const searchParams = useSearchParams();
@@ -330,8 +330,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         { debug: true }
       );
       
-      // No local state updater needed for tokens; FrontendEventHandler will write to streaming bus
-      // Use local streaming mode to avoid store writes during /chat/new
+      // Keep local streaming minimal: tokens/overlays via streamingBus; avoid frequent store writes
       eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: true });
       
       const reader = response.body?.getReader();
@@ -354,7 +353,13 @@ export default function ChatPage({ params }: ChatPageProps) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+              if (DEBUG_STREAM) {
+                // Lightweight client-side stream tracing for /chat/new
+                console.log('[STREAM][new][recv]', {
+                  type: data?.type,
+                  ts: Date.now(),
+                });
+              }
               if (data.type === 'conversationCreated') {
                 realConversationId = data.conversationId;
                 if (selectedWorkspace && realConversationId) {
@@ -386,6 +391,9 @@ export default function ChatPage({ params }: ChatPageProps) {
                     // Merge buffered streaming text from bus into the streaming event
                     const { streamingBus } = await import('@/lib/streaming/streamingBus');
                     const appended = streamingBus.get(assistantPlaceholder.id);
+                    if (DEBUG_STREAM) {
+                      console.log('[STREAM][new] Final merge token length', appended?.length || 0);
+                    }
                     const mergedEvents = [...tempConv.events];
                     const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
                     if (idx >= 0) {
@@ -454,6 +462,44 @@ export default function ChatPage({ params }: ChatPageProps) {
                     
                     // Clear local streaming state since store now has the data
                     setIsLocalStreaming(false);
+
+                    // Hydrate with persisted events (including steps) after save
+                    ;(async () => {
+                      try {
+                        if (DEBUG_STREAM) {
+                          console.log('[STREAM][new] Hydrating conversation from server for steps');
+                        }
+                        const res = await fetch(`/api/conversations/${realConversationId}?include_events=true`);
+                        if (res.ok) {
+                          const data = await res.json();
+                          const latestHydrate = useEventChatStore.getState();
+                          const hydrated: Conversation = {
+                            id: data.id,
+                            events: data.events || [],
+                            isStreaming: false,
+                            meta: {
+                              id: data.id,
+                              title: data.title || 'Chat',
+                              workspace_id: data.workspace_id,
+                              source_bud_id: data.source_bud_id,
+                              assistant_name: data.assistant_name || undefined,
+                              assistant_avatar: data.assistant_avatar || undefined,
+                              model_config_overrides: data.model_config_overrides,
+                              mcp_config_overrides: data.mcp_config_overrides,
+                              created_at: data.created_at
+                            }
+                          };
+                          latestHydrate.setConversation(realConversationId, hydrated);
+                          if (DEBUG_STREAM) {
+                            console.log('[STREAM][new] Hydration complete, events:', hydrated.events.length);
+                          }
+                        } else if (DEBUG_STREAM) {
+                          console.warn('[STREAM][new] Hydration fetch failed', res.status);
+                        }
+                      } catch (e) {
+                        console.error('[STREAM][new] Hydration error', e);
+                      }
+                    })();
                   } else {
                     console.error('No temp conversation found for transition');
                   }

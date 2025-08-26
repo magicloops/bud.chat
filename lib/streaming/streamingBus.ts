@@ -9,11 +9,38 @@ class StreamingBus {
   // Code buffers keyed by tool item_id
   private code = new Map<string, string>();
   private codeSubs = new Map<string, Set<Callback>>();
+  private DEBUG = typeof process !== 'undefined' && !!(process as any).env && (process as any).env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
+  // Coalesced emit scheduling for text tokens and reasoning overlays
+  private pending = new Set<string>();
+  private pendingReasoning = new Set<string>();
+  private rafId: number | null = null;
+  private scheduleEmit() {
+    if (this.rafId != null) return;
+    const raf = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame
+      // Fallback in environments without rAF (SSR/tests)
+      : ((cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16) as unknown as typeof requestAnimationFrame);
+    this.rafId = raf(() => {
+      // Flush text token subscribers
+      if (this.pending.size > 0) {
+        this.pending.forEach((id) => this.emit(id));
+        this.pending.clear();
+      }
+      // Flush reasoning subscribers
+      if (this.pendingReasoning.size > 0) {
+        this.pendingReasoning.forEach((id) => this.emitReasoning(id));
+        this.pendingReasoning.clear();
+      }
+      this.rafId = null;
+    });
+  }
 
   append(id: string, delta: string) {
     const prev = this.buffers.get(id) || '';
     this.buffers.set(id, prev + delta);
-    this.emit(id);
+    // Coalesce notifications to ≤ 1 per frame
+    this.pending.add(id);
+    this.scheduleEmit();
   }
 
   get(id: string): string {
@@ -32,10 +59,16 @@ class StreamingBus {
       this.subs.set(id, set);
     }
     set.add(cb);
+    if (this.DEBUG) {
+      console.log('[STREAM][bus] subscribe', { id, subs: set.size });
+    }
     return () => {
       const s = this.subs.get(id);
       if (!s) return;
       s.delete(cb);
+      if (this.DEBUG) {
+        console.log('[STREAM][bus] unsubscribe', { id, subs: s.size });
+      }
       if (s.size === 0) this.subs.delete(id);
     };
   }
@@ -50,7 +83,14 @@ class StreamingBus {
   appendReasoning(eventId: string, delta: string) {
     const prev = this.reasoning.get(eventId) || '';
     this.reasoning.set(eventId, prev + delta);
-    this.emitReasoning(eventId);
+    this.pendingReasoning.add(eventId);
+    this.scheduleEmit();
+  }
+
+  setReasoning(eventId: string, value: string) {
+    this.reasoning.set(eventId, value);
+    this.pendingReasoning.add(eventId);
+    this.scheduleEmit();
   }
 
   getReasoning(eventId: string): string {
@@ -59,7 +99,8 @@ class StreamingBus {
 
   clearReasoning(eventId: string) {
     this.reasoning.delete(eventId);
-    this.emitReasoning(eventId);
+    this.pendingReasoning.add(eventId);
+    this.scheduleEmit();
   }
 
   subscribeReasoning(eventId: string, cb: Callback): () => void {
@@ -69,10 +110,16 @@ class StreamingBus {
       this.reasoningSubs.set(eventId, set);
     }
     set.add(cb);
+    if (this.DEBUG) {
+      console.log('[STREAM][bus] subscribe_reasoning', { eventId, subs: set.size });
+    }
     return () => {
       const s = this.reasoningSubs.get(eventId);
       if (!s) return;
       s.delete(cb);
+      if (this.DEBUG) {
+        console.log('[STREAM][bus] unsubscribe_reasoning', { eventId, subs: s.size });
+      }
       if (s.size === 0) this.reasoningSubs.delete(eventId);
     };
   }
@@ -107,10 +154,16 @@ class StreamingBus {
       this.codeSubs.set(itemId, set);
     }
     set.add(cb);
+    if (this.DEBUG) {
+      console.log('[STREAM][bus] subscribe_code', { itemId, subs: set.size });
+    }
     return () => {
       const s = this.codeSubs.get(itemId);
       if (!s) return;
       s.delete(cb);
+      if (this.DEBUG) {
+        console.log('[STREAM][bus] unsubscribe_code', { itemId, subs: s.size });
+      }
       if (s.size === 0) this.codeSubs.delete(itemId);
     };
   }

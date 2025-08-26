@@ -443,7 +443,6 @@ export function EventList({
                 onEdit={handleEventEdit}
                 onDelete={handleEventDelete}
                 onBranch={handleEventBranch}
-                allEvents={displayEvents}
                 previousEvent={previousEvent}
               />
             </div>

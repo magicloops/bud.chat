@@ -784,14 +784,15 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                         <div className="flex items-center space-x-2">
                           <Checkbox
                             id={tool.type}
-                            checked={builtInToolsConfig.enabled_tools.includes(tool.type)}
+                            checked={!!builtInToolsConfig?.enabled_tools?.includes(tool.type)}
                             onCheckedChange={(checked) => {
+                              const prev = builtInToolsConfig ?? { enabled_tools: [], tool_settings: {} };
                               const updatedTools = checked
-                                ? [...builtInToolsConfig.enabled_tools, tool.type]
-                                : builtInToolsConfig.enabled_tools.filter(t => t !== tool.type);
+                                ? [...(prev.enabled_tools ?? []), tool.type]
+                                : (prev.enabled_tools ?? []).filter(t => t !== tool.type);
                               
-                              const updatedConfig = {
-                                ...builtInToolsConfig,
+                              const updatedConfig: typeof prev = {
+                                ...prev,
                                 enabled_tools: updatedTools
                               };
                               setBuiltInToolsConfig(updatedConfig);
@@ -812,22 +813,23 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                         </div>
                         
                         {/* Tool-specific settings */}
-                        {builtInToolsConfig.enabled_tools.includes(tool.type) && (
+                        {builtInToolsConfig?.enabled_tools?.includes(tool.type) && (
                           <div className="ml-6 space-y-2">
                             {tool.type === 'web_search_preview' && (
                               <div>
                                 <label className="text-xs font-medium">Search Context Size</label>
                                 <Select
                                   value={(
-                                    builtInToolsConfig.tool_settings[tool.type] as { search_context_size?: string } | undefined
+                                    builtInToolsConfig?.tool_settings?.[tool.type] as { search_context_size?: string } | undefined
                                   )?.search_context_size ?? 'medium'}
                                   onValueChange={(value) => {
+                                    const prev = builtInToolsConfig ?? { enabled_tools: [], tool_settings: {} };
                                     const updatedConfig = {
-                                      ...builtInToolsConfig,
+                                      ...prev,
                                       tool_settings: {
-                                        ...builtInToolsConfig.tool_settings,
+                                        ...(prev.tool_settings ?? {}),
                                         [tool.type]: {
-                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          ...(prev.tool_settings?.[tool.type] as object | undefined),
                                           search_context_size: value
                                         }
                                       }
@@ -853,15 +855,16 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                                 <label className="text-xs font-medium">Container</label>
                                 <Select
                                   value={(
-                                    builtInToolsConfig.tool_settings[tool.type] as { container?: string } | undefined
+                                    builtInToolsConfig?.tool_settings?.[tool.type] as { container?: string } | undefined
                                   )?.container ?? 'default'}
                                   onValueChange={(value) => {
+                                    const prev = builtInToolsConfig ?? { enabled_tools: [], tool_settings: {} };
                                     const updatedConfig = {
-                                      ...builtInToolsConfig,
+                                      ...prev,
                                       tool_settings: {
-                                        ...builtInToolsConfig.tool_settings,
+                                        ...(prev.tool_settings ?? {}),
                                         [tool.type]: {
-                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          ...(prev.tool_settings?.[tool.type] as object | undefined),
                                           container: value
                                         }
                                       }
@@ -915,7 +918,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {getAvailableReasoningEfforts(aiModel, builtInToolsConfig.enabled_tools.length > 0).map(effort => (
+                            {getAvailableReasoningEfforts(aiModel, (builtInToolsConfig?.enabled_tools?.length ?? 0) > 0).map(effort => (
                               <SelectItem key={effort} value={effort}>
                                 <div className="flex flex-col">
                                   <span className="capitalize">{effort}</span>

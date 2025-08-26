@@ -79,7 +79,14 @@ export interface LocalStateUpdater {
   (updater: (events: Event[]) => Event[]): void;
 }
 
+const STREAM_DEBUG = typeof process !== 'undefined' && !!(process as any).env && (process as any).env.NEXT_PUBLIC_STREAM_DEBUG === 'true';
+let __feh_counter = 0;
+
 export class FrontendEventHandler {
+  private instanceId = ++__feh_counter;
+  private active = false;
+  // Diagnostics-only: mark when a stream has completed; do not change behavior
+  private finished = false;
   constructor(
     private conversationId: string | null,
     private storeInstance: typeof useEventChatStore | null,
@@ -117,6 +124,10 @@ export class FrontendEventHandler {
    * Process streaming response with unified logic for both local and store state
    */
   async processStreamingResponse(response: Response): Promise<void> {
+    if (STREAM_DEBUG && this.options.debug) {
+      console.log('[STREAM][fe] handler_start', { id: this.instanceId, ts: Date.now() });
+    }
+    this.active = true;
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -130,27 +141,81 @@ export class FrontendEventHandler {
 
     try {
       while (true) {
+        const tReadStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         const { done, value } = await reader.read();
-        if (done) break;
+        const tReadResolved = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        if (done) {
+          if (STREAM_DEBUG && this.options.debug) {
+            console.log('[STREAM][fe] reader_done', { id: this.instanceId, ts: Date.now() });
+          }
+          break;
+        }
 
+        const tDecodeStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         const chunk = decoder.decode(value, { stream: true });
+        const tDecodeEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
         const lines = chunk.split('\n');
 
+        let parseMs = 0;
+        let dispatchMs = 0;
+        let tokenEvents = 0;
+        let tokenChars = 0;
+
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              await this.handleStreamEvent(data);
-            } catch (e) {
-              if (this.options.debug) {
-                console.error('Error parsing stream data:', e);
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const tParseStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            const data = JSON.parse(line.slice(6));
+            const tParseEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            parseMs += (tParseEnd - tParseStart);
+
+            if (STREAM_DEBUG && this.options.debug) {
+              // Trace non-token events lightly
+              if (data?.type === 'complete') {
+                console.log('[STREAM][fe] recv_complete', { id: this.instanceId, ts: Date.now() });
+              } else if (data?.type && data.type !== 'token') {
+                console.log('[STREAM][fe] recv_event', { id: this.instanceId, type: data.type, ts: Date.now() });
               }
+            }
+
+            if (data && data.type === 'token' && typeof data.content === 'string') {
+              tokenEvents += 1;
+              tokenChars += data.content.length;
+            }
+
+            const tDispatchStart = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            await this.handleStreamEvent(data);
+            const tDispatchEnd = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+            dispatchMs += (tDispatchEnd - tDispatchStart);
+          } catch (e) {
+            if (this.options.debug) {
+              console.error('Error parsing stream data:', e);
             }
           }
         }
+
+        if (STREAM_DEBUG && this.options.debug) {
+          const chunkBytes = value?.byteLength || 0;
+          console.log('[STREAM][fe][chunk]', {
+            id: this.instanceId,
+            chunk_bytes: chunkBytes,
+            read_wait_ms: Math.round(tReadResolved - tReadStart),
+            decode_ms: Math.round(tDecodeEnd - tDecodeStart),
+            lines: lines.length,
+            parse_ms: Math.round(parseMs),
+            dispatch_ms: Math.round(dispatchMs),
+            token_events: tokenEvents,
+            token_chars: tokenChars,
+            ts: Date.now()
+          });
+        }
       }
     } finally {
-      reader.releaseLock();
+      try { reader.releaseLock(); } catch {}
+      this.active = false;
+      if (STREAM_DEBUG && this.options.debug) {
+        console.log('[STREAM][fe] handler_finally', { id: this.instanceId, ts: Date.now() });
+      }
     }
   }
 
@@ -271,6 +336,14 @@ export class FrontendEventHandler {
    * Handle token events (text streaming)
    */
   private async handleTokenEvent(data: StreamEvent): Promise<void> {
+    // Intentionally omit per-token logging to reduce overhead
+    if (STREAM_DEBUG && this.options.debug) {
+      // Log only when suspicious state is detected (late tokens or inactive handler)
+      if (this.finished || !this.active) {
+        const ctx = this.getDebugContext();
+        console.warn('[STREAM][fe] token_after_finish_or_inactive', { ...ctx, len: data.content?.length || 0, ts: Date.now() });
+      }
+    }
     if (this.isLocalState()) {
       // Local state update for optimistic flow
       this.updateLocalStateToken(data);
@@ -390,6 +463,11 @@ export class FrontendEventHandler {
    * Handle complete events
    */
   private async handleCompleteEvent(data: StreamEvent): Promise<void> {
+    // Diagnostics: mark as finished; behavior unchanged otherwise
+    this.finished = true;
+    if (STREAM_DEBUG && this.options.debug) {
+      console.log('[STREAM][fe] handle_complete', this.getDebugContext());
+    }
     if (this.isLocalState()) {
       this.updateLocalStateComplete(data);
     } else {
@@ -449,6 +527,12 @@ export class FrontendEventHandler {
     
     // Update UI state
     this.updateReasoningInState(item_id, reasoningData);
+
+    // Reset overlay to this part's current text only (single active step)
+    if (this.assistantPlaceholder) {
+      const initialText = part?.text || '';
+      streamingBus.setReasoning(this.assistantPlaceholder.id, initialText);
+    }
   }
 
   private async handleReasoningSummaryTextDelta(data: StreamEvent): Promise<void> {
@@ -474,6 +558,9 @@ export class FrontendEventHandler {
     };
 
     // Append delta text immutably (avoid mutating possibly frozen objects)
+    if (this.options.debug && STREAM_DEBUG) {
+      console.log('[STREAM][fe] reasoning_delta', { idx: summary_index, seq: sequence_number, len: typeof delta === 'string' ? delta.length : (delta as any)?.text?.length || 0, ts: Date.now(), local: this.isLocalState() });
+    }
     const deltaText = typeof delta === 'string' ? delta : delta.text || '';
     const updatedPart = {
       ...basePart,
@@ -489,12 +576,14 @@ export class FrontendEventHandler {
     
     // Update UI state
     this.updateReasoningInState(item_id, reasoningData);
-    // Also stream to overlay bus keyed by assistant placeholder event id
+    // Stream only the delta to prevent O(n^2) re-parsing in Markdown overlays
     if (this.assistantPlaceholder) {
-      const overlayDelta = typeof delta === 'string' 
-        ? delta 
-        : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
-      if (overlayDelta) streamingBus.appendReasoning(this.assistantPlaceholder.id, overlayDelta);
+      const overlayDelta = typeof delta === 'string'
+        ? delta
+        : (delta && typeof (delta as any).text === 'string' ? (delta as { text: string }).text : '');
+      if (overlayDelta) {
+        streamingBus.appendReasoning(this.assistantPlaceholder.id, overlayDelta);
+      }
     }
   }
 
@@ -554,9 +643,9 @@ export class FrontendEventHandler {
     
     // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
-    // Finalize overlay text for this event
+    // Optionally update overlay with final text of this step
     if (this.assistantPlaceholder && reasoningData.combined_text) {
-      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+      streamingBus.setReasoning(this.assistantPlaceholder.id, reasoningData.combined_text);
     }
     
     // Clean up after completion
@@ -623,9 +712,9 @@ export class FrontendEventHandler {
     
     // Update UI state - reasoning is now complete
     this.updateReasoningInState(item_id, reasoningData, true);
-    // Finalize overlay text for this event
+    // Optionally update overlay with final text of this step
     if (this.assistantPlaceholder && reasoningData.combined_text) {
-      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+      streamingBus.setReasoning(this.assistantPlaceholder.id, reasoningData.combined_text);
     }
     
     // Clean up after completion
@@ -675,8 +764,13 @@ export class FrontendEventHandler {
 
   private updateReasoningInState(item_id: string, reasoningData: ReasoningData, isComplete = false): void {
     if (this.isLocalState()) {
+      // For /chat/new, update local state so overlays/renderers can react if needed
       this.updateLocalStateReasoning(item_id, reasoningData, isComplete);
-    } else {
+      return;
+    }
+    // For store mode (/chat/[id]): avoid per-delta writes during streaming to prevent UI churn.
+    // Only persist reasoning segments when the step is complete.
+    if (isComplete) {
       this.updateStoreStateReasoning(item_id, reasoningData, isComplete);
     }
   }
@@ -703,9 +797,9 @@ export class FrontendEventHandler {
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
     if (!conversation) return;
-
-    // Find the assistant event being streamed
-    const streamingEventId = conversation.streamingEventId;
+    // Find the assistant event to update; if streamingEventId is missing (e.g., 'complete' arrived first),
+    // fall back to the most recent assistant event.
+    const streamingEventId = conversation.streamingEventId || this.getLastAssistantEventId(conversation);
     if (!streamingEventId) return;
 
     const updatedEvents = conversation.events.map(event =>
@@ -722,6 +816,13 @@ export class FrontendEventHandler {
       ...conversation,
       events: updatedEvents
     });
+  }
+
+  private getLastAssistantEventId(conversation: { events: Event[] }): string | undefined {
+    for (let i = conversation.events.length - 1; i >= 0; i--) {
+      if (conversation.events[i].role === 'assistant') return conversation.events[i].id;
+    }
+    return undefined;
   }
 
   /**
@@ -766,6 +867,9 @@ export class FrontendEventHandler {
 
   private updateLocalStateToken(data: StreamEvent): void {
     if (!this.assistantPlaceholder || !data.content) return;
+    if (STREAM_DEBUG && this.options.debug && (this.finished || !this.active)) {
+      console.warn('[STREAM][fe] append_local_after_finish_or_inactive', this.getDebugContext());
+    }
     // Route tokens to external streaming bus to avoid parent re-renders
     streamingBus.append(this.assistantPlaceholder.id, data.content);
   }
@@ -992,60 +1096,59 @@ export class FrontendEventHandler {
   private updateStoreStateToken(data: StreamEvent): void {
     // For store mode, push tokens to the streaming bus only
     if (this.assistantPlaceholder && data.content) {
+      if (STREAM_DEBUG && this.options.debug) {
+        const storeCtx = this.getDebugContext();
+        // Warn if store indicates streaming ended but we're still appending
+        if (storeCtx.storeIsStreaming === false || storeCtx.storeStreamingEventId && storeCtx.storeStreamingEventId !== storeCtx.assistantPlaceholderId) {
+          console.warn('[STREAM][fe] append_store_when_not_streaming', storeCtx);
+        }
+        if (this.finished || !this.active) {
+          console.warn('[STREAM][fe] append_store_after_finish_or_inactive', storeCtx);
+        }
+      }
       streamingBus.append(this.assistantPlaceholder.id, data.content);
     }
   }
 
   private updateStoreStateToolStart(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.tool_name) return;
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
-    const updatedEvents = conversation.events.map(event => {
-      if (event.id !== conversation.streamingEventId) return event;
-      const exists = event.segments.some(s => s.type === 'tool_call' && s.id === data.tool_id);
-      if (exists) return event;
-      return {
-        ...event,
-        segments: [
-          ...event.segments,
-          {
-            type: 'tool_call' as const,
-            id: data.tool_id as ToolCallId,
-            name: data.tool_name!,
-            args: {},
-            sequence_number: data.sequence_number,
-            output_index: data.output_index,
-            server_label: data.server_label,
-            server_type: data.server_type,
-            display_name: data.display_name
-          }
-        ],
-        ts: Date.now()
-      };
-    });
-    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
+    // Avoid persisting tool_call on start during streaming in store mode; overlay covers progress.
+    // We'll persist tool_call when finalized/complete arrives.
+    return;
   }
 
   private updateStoreStateToolFinalized(data: StreamEvent): void {
     if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.args) return;
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
-    const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
-        ? {
-            ...event,
-            segments: event.segments.map(segment => {
-              if (segment.type === 'tool_call' && segment.id === data.tool_id) {
-                return { ...segment, args: data.args! } as Extract<Segment, { type: 'tool_call' }>;
-              }
-              return segment;
-            }),
-            ts: Date.now()
-          }
-        : event
-    );
+    if (!conversation) return;
+    const targetEventId = conversation.streamingEventId || this.getLastAssistantEventId(conversation);
+    if (!targetEventId) return;
+    const updatedEvents = conversation.events.map(event => {
+      if (event.id !== targetEventId) return event;
+      const hasTool = event.segments.some(s => s.type === 'tool_call' && s.id === data.tool_id);
+      const newSegments = hasTool
+        ? event.segments.map(segment => {
+            if (segment.type === 'tool_call' && segment.id === data.tool_id) {
+              return { ...segment, args: data.args! } as Extract<Segment, { type: 'tool_call' }>;
+            }
+            return segment;
+          })
+        : [
+            ...event.segments,
+            {
+              type: 'tool_call' as const,
+              id: data.tool_id as ToolCallId,
+              name: data.tool_name!,
+              args: data.args!,
+              sequence_number: data.sequence_number,
+              output_index: data.output_index,
+              server_label: data.server_label,
+              server_type: data.server_type,
+              display_name: data.display_name
+            }
+          ];
+      return { ...event, segments: newSegments, ts: Date.now() };
+    });
     store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
@@ -1053,9 +1156,11 @@ export class FrontendEventHandler {
     if (!this.conversationId || !this.storeInstance || !data.tool_id) return;
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
+    if (!conversation) return;
+    const targetEventId = conversation.streamingEventId || this.getLastAssistantEventId(conversation);
+    if (!targetEventId) return;
     const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
+      event.id === targetEventId
         ? {
             ...event,
             segments: [
@@ -1151,6 +1256,41 @@ export class FrontendEventHandler {
       streamingEventId: undefined,
       shouldCreateNewEvent: false
     });
+  }
+
+  /**
+   * Diagnostics helper: capture current handler/store context for logs
+   */
+  private getDebugContext(): {
+    instanceId: number;
+    active: boolean;
+    finished: boolean;
+    useLocalStreaming: boolean;
+    conversationId: string | null;
+    assistantPlaceholderId: string | null;
+    storeIsStreaming?: boolean;
+    storeStreamingEventId?: string;
+  } {
+    let storeIsStreaming: boolean | undefined = undefined;
+    let storeStreamingEventId: string | undefined = undefined;
+    if (this.conversationId && this.storeInstance) {
+      const s = this.storeInstance.getState();
+      const conv = s.conversations[this.conversationId];
+      if (conv) {
+        storeIsStreaming = !!conv.isStreaming;
+        storeStreamingEventId = conv.streamingEventId;
+      }
+    }
+    return {
+      instanceId: this.instanceId,
+      active: this.active,
+      finished: this.finished,
+      useLocalStreaming: this.useLocalStreaming,
+      conversationId: this.conversationId,
+      assistantPlaceholderId: this.assistantPlaceholder ? this.assistantPlaceholder.id : null,
+      storeIsStreaming,
+      storeStreamingEventId,
+    };
   }
 
   /**
@@ -1609,9 +1749,11 @@ export class FrontendEventHandler {
     if (!this.conversationId || !this.storeInstance || !data.item_id || !data.delta) return;
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
+    if (!conversation) return;
+    const targetEventId = conversation.streamingEventId || this.getLastAssistantEventId(conversation);
+    if (!targetEventId) return;
     const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
+      event.id === targetEventId
         ? {
             ...event,
             segments: event.segments.map(segment => {
@@ -1635,9 +1777,11 @@ export class FrontendEventHandler {
     if (!this.conversationId || !this.storeInstance || !data.item_id) return;
     const store = this.storeInstance.getState();
     const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
+    if (!conversation) return;
+    const targetEventId = conversation.streamingEventId || this.getLastAssistantEventId(conversation);
+    if (!targetEventId) return;
     const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
+      event.id === targetEventId
         ? {
             ...event,
             segments: event.segments.map(segment => {
