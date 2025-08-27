@@ -324,10 +324,46 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
+      // Track the final event emitted by the server so we can commit
+      // canonical segments to the real conversation even if 'complete'
+      // arrives before 'message_final'. We also gate the route swap on
+      // receiving message_final (with a timeout fallback) to avoid the
+      // missing "Show Reasoning" button after swap.
+      let lastFinalEvent: import('@/state/eventChatStore').Event | null = null;
+      let finalReceived = false;
+      let resolveFinal: (() => void) | null = null;
+      const waitForFinal = new Promise<void>((resolve) => { resolveFinal = resolve; });
+
       const eventHandler = new FrontendEventHandler(
         tempConversationId,
         useEventChatStore,
-        { debug: true }
+        { 
+          debug: true,
+          onMessageFinal: (finalEvent) => {
+            // Replace the assistant placeholder in the temp conversation with the canonical final event
+            const store = useEventChatStore.getState();
+            const tempConv = store.conversations[tempConversationId];
+            if (!tempConv) return;
+            const events = [...tempConv.events];
+            // Match the client-side assistant placeholder id
+            const idx = events.findIndex(e => e.id === assistantPlaceholder.id);
+            if (idx >= 0) {
+              events[idx] = finalEvent;
+            } else {
+              events.push(finalEvent);
+            }
+            store.setConversation(tempConversationId, {
+              ...tempConv,
+              events,
+              // keep streaming true until 'complete', but event content is now canonical
+            });
+
+            // Cache for real conversation assembly after 'complete'
+            lastFinalEvent = finalEvent;
+            finalReceived = true;
+            if (resolveFinal) resolveFinal();
+          }
+        }
       );
       
       // No local state updater needed for tokens; FrontendEventHandler will write to streaming bus
@@ -366,8 +402,14 @@ export default function ChatPage({ params }: ChatPageProps) {
                     realConversationId,
                   });
                 }
+              } else if (data.type === 'message_final') {
+                if (DEBUG_STREAM) {
+                  console.log('[STREAM][new] message_final (page loop)', { eventId: data.event?.id });
+                }
+                await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
-                setIsLocalStreaming(false);
+                // Do not end local streaming yet; keep streaming summary visible
+                // until we have committed the canonical final event (or timed out).
                 
                 
                 if (realConversationId) {
@@ -383,29 +425,43 @@ export default function ChatPage({ params }: ChatPageProps) {
                         streamingEventId: tempConv.streamingEventId,
                       });
                     }
+
+                    // Wait briefly for message_final if it hasn't arrived yet
+                    if (!finalReceived) {
+                      const timeout = new Promise<void>((resolve) => setTimeout(resolve, 800));
+                      await Promise.race([waitForFinal, timeout]);
+                    }
                     // Merge buffered streaming text from bus into the streaming event
                     const { streamingBus } = await import('@/lib/streaming/streamingBus');
                     const appended = streamingBus.get(assistantPlaceholder.id);
                     const mergedEvents = [...tempConv.events];
                     const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
                     if (idx >= 0) {
-                      const ev = mergedEvents[idx];
-                      const segIdx = ev.segments.findIndex(s => s.type === 'text');
-                      if (segIdx >= 0) {
-                      const seg = ev.segments[segIdx];
-                      if (seg.type === 'text') {
-                        const newSeg = { ...seg, text: (seg.text || '') + appended };
-                        const newSegments = [...ev.segments];
-                        newSegments[segIdx] = newSeg;
-                        mergedEvents[idx] = { ...ev, segments: newSegments };
-                        if (DEBUG_STREAM) {
-                          console.log('[STREAM][new] Merge applied', {
-                            appendedLength: appended?.length || 0,
-                            segIdx,
-                            newTextLen: (newSeg.text || '').length,
-                          });
-                        }
+                      // If we already received message_final, ensure the canonical event is present
+                      if (lastFinalEvent) {
+                        mergedEvents[idx] = lastFinalEvent;
                       }
+                      const ev = mergedEvents[idx];
+                      const hasNonTextSegments = ev.segments.some(s => s.type !== 'text');
+                      // Only merge appended streaming text if the event is still a plain text placeholder
+                      if (!hasNonTextSegments && appended && appended.length > 0) {
+                        const segIdx = ev.segments.findIndex(s => s.type === 'text');
+                        if (segIdx >= 0) {
+                          const seg = ev.segments[segIdx];
+                          if (seg.type === 'text') {
+                            const newSeg = { ...seg, text: (seg.text || '') + appended };
+                            const newSegments = [...ev.segments];
+                            newSegments[segIdx] = newSeg;
+                            mergedEvents[idx] = { ...ev, segments: newSegments };
+                            if (DEBUG_STREAM) {
+                              console.log('[STREAM][new] Merge applied', {
+                                appendedLength: appended?.length || 0,
+                                segIdx,
+                                newTextLen: (newSeg.text || '').length,
+                              });
+                            }
+                          }
+                        }
                       }
                     }
                     const realConv = {

@@ -1016,11 +1016,7 @@ export async function POST(request: NextRequest) {
                 case 'done':
                   console.log('🔚 [Chat API] Processing done event from provider');
                   
-                  // Send immediate done event to frontend to unblock UI
-                  sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
-                  console.log('🔚 [Chat API] Sent immediate done event to frontend');
-                  
-                  // Handle database saves immediately for both new and existing conversations
+                  // 1) Persist any pending events first
                   if (isNewConversation) {
                     console.log('🔚 [Chat API] Saving events for new conversation...');
                     const saveStartTime = Date.now();
@@ -1048,16 +1044,26 @@ export async function POST(request: NextRequest) {
                     }
                   }
 
-                  // Emit final canonical assistant event to client for store append
+                  // 2) Emit message_final before complete so clients can commit canonical event
                   if (currentEvent) {
                     try {
+                      if (process.env.NODE_ENV !== 'production') {
+                        console.log('[API] emitting message_final to client', { eventId: currentEvent.id });
+                      }
                       send({ type: 'message_final', event: currentEvent });
                     } catch (e) {
                       console.warn('⚠️ [Chat API] Failed to emit message_final:', e);
                     }
                   }
-                  
-                  // Close connection after saving
+
+                  // 3) Emit complete event after message_final
+                  if (process.env.NODE_ENV !== 'production') {
+                    console.log('[API] emitting complete to client');
+                  }
+                  sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
+                  console.log('🔚 [Chat API] Sent complete event to frontend');
+
+                  // 4) Close connection
                   controller.close();
                   isClosed = true;
                   console.log('🔚 [Chat API] Closed connection, frontend should be unblocked');

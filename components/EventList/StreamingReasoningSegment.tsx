@@ -46,6 +46,8 @@ export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingRea
     }
     return null;
   }, [parts]);
+
+  // no debug logs
   // Only show when we actually have an active, in-progress part
   if (!hasContent || !activePart) return null;
 

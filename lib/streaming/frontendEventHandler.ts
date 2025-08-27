@@ -230,12 +230,20 @@ export class FrontendEventHandler {
         await this.handleMCPApprovalRequestEvent(data);
         break;
       case 'complete':
+        if (this.options.debug && process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.log('[FE] complete received');
+        }
         await this.handleCompleteEvent(data);
         break;
       case 'message_final':
         // Final, canonical assistant event from server
         if ((data as any).event && this.options.onMessageFinal) {
           try {
+            if (this.options.debug && process.env.NODE_ENV !== 'production') {
+              // eslint-disable-next-line no-console
+              console.log('[FE] message_final received', { eventId: (data as any).event.id });
+            }
             this.options.onMessageFinal((data as any).event as Event);
           } catch (e) {
             if (this.options.debug) console.error('onMessageFinal error:', e);

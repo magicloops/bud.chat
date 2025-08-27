@@ -73,7 +73,10 @@ export function useEventChat({
     // Set up streaming state
     updateState({ isStreaming: true, streamingEventId: null });
     
-    // Create event builder for assistant response
+    // Create assistant event for streaming and event builder up-front
+    const assistantEvent = createTextEvent('assistant', '');
+    addEvent(assistantEvent);
+    updateState({ streamingEventId: assistantEvent.id });
     const eventBuilder = new EventStreamBuilder('assistant');
     eventBuilderRef.current = eventBuilder;
 
@@ -160,10 +163,7 @@ export function useEventChat({
       const decoder = new TextDecoder();
       let conversationId: string | null = null;
       
-      // Create assistant event for streaming
-      const assistantEvent = createTextEvent('assistant', '');
-      addEvent(assistantEvent);
-      updateState({ streamingEventId: assistantEvent.id });
+      // Assistant event already created above
 
       while (true) {
         const { done, value } = await reader.read();
@@ -238,7 +238,7 @@ export function useEventChat({
                   // Final event will include tool call + result
                   break;
                 }
-                  
+
                 case 'complete':
                   // Rely on message_final for commit
                   break;

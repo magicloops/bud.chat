@@ -66,7 +66,7 @@ export const EventItemSequential = memo(function EventItemSequential({
   // Streaming header status: reasoning vs tools vs typing
   const [headerStatus, setHeaderStatus] = useState<'thinking' | 'using-tools' | 'typing'>('thinking');
   useEffect(() => {
-    if (!isStreamingActive) return;
+    if (!(isStreamingActive || isStreaming)) return;
     const compute = () => {
       const tools = streamingBus.getTools(event.id);
       if (tools && tools.some(t => t.status === 'in_progress' || t.status === 'finalized')) {
@@ -91,7 +91,7 @@ export const EventItemSequential = memo(function EventItemSequential({
     const unsubC = streamingBus.subscribe(event.id, compute);
     compute();
     return () => { unsubA(); unsubB(); unsubC(); };
-  }, [isStreamingActive, event.id]);
+  }, [isStreamingActive, isStreaming, event.id]);
   
   // Extract text content for fallback and editing
   const textContent = event.segments
@@ -301,7 +301,7 @@ export const EventItemSequential = memo(function EventItemSequential({
             )}
 
             {/* Steps panel on top (handles both streaming and non-streaming) */}
-            {(isStreamingActive || (hasSegments && (hasReasoningSegments || hasToolCalls))) && (
+            {((isStreamingActive || isStreaming) || (hasSegments && (hasReasoningSegments || hasToolCalls))) && (
               <div className="mb-2">
                 <StepsPanel event={event} allEvents={allEvents} isStreaming={isStreamingActive || isStreaming} />
               </div>

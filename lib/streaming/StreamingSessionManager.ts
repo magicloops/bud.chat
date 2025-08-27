@@ -64,11 +64,26 @@ class StreamingSessionManager {
         }
         break;
       // Reasoning overlay
-      case 'reasoning_summary_part_added':
+      case 'reasoning_summary_part_added': {
+        if (typeof payload.summary_index === 'number') {
+          streamingBus.startReasoningPart(eventId, payload.summary_index, { sequence_number: payload.sequence_number, created_at: Date.now() });
+          const initial = payload.part?.text;
+          if (initial) streamingBus.appendReasoningPart(eventId, payload.summary_index, initial, { sequence_number: payload.sequence_number });
+        }
+        break;
+      }
       case 'reasoning_summary_text_delta':
       case 'reasoning_summary_delta': {
-        const delta = typeof payload.delta === 'string' ? payload.delta : payload.delta?.text || payload.part?.text || '';
-        if (delta) streamingBus.appendReasoning(eventId, delta);
+        if (typeof payload.summary_index === 'number') {
+          const text = typeof payload.delta === 'string' ? payload.delta : payload.delta?.text || '';
+          if (text) streamingBus.appendReasoningPart(eventId, payload.summary_index, text, { sequence_number: payload.sequence_number });
+        }
+        break;
+      }
+      case 'reasoning_summary_part_done': {
+        if (typeof payload.summary_index === 'number') {
+          streamingBus.completeReasoningPart(eventId, payload.summary_index);
+        }
         break;
       }
       case 'reasoning_summary_done':

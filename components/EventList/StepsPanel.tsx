@@ -48,33 +48,52 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
     return () => { unsubA(); unsubB(); };
   }, [isStreaming, event.id]);
 
+  // Gather reasoning content availability from either persisted segments or streaming bus
+  const streamingParts = isStreaming ? streamingBus.getReasoningParts(event.id) : [];
+  const hasStreamingReasoningContent = streamingParts.some(p => (p.text || '').trim().length > 0);
+  const hasPersistedReasoningContent = ordered.some(seg => seg.type === 'reasoning' && (seg as any).parts?.some((p: any) => (p.text || '').trim().length > 0));
+  const hasAnyReasoningContent = hasPersistedReasoningContent || hasStreamingReasoningContent;
+
+  // Helper: build a transient reasoning segment from streaming parts for the Show Reasoning panel
+  const buildStreamingReasoningSegment = (): any => ({
+    type: 'reasoning',
+    id: `streaming-reasoning-${event.id}`,
+    output_index: 0,
+    sequence_number: 0,
+    parts: streamingParts
+      .filter(p => (p.text || '').trim().length > 0)
+      .map(p => ({
+        summary_index: p.summary_index,
+        type: 'summary_text' as const,
+        text: p.text,
+        sequence_number: p.sequence_number ?? 0,
+        is_complete: !!p.is_complete,
+        created_at: p.created_at ?? Date.now(),
+      })),
+    streaming: false,
+  });
+
   return (
     <div className={className}>
       {/* During streaming: show overlays until text starts; then hide reasoning overlay and show collapsible */}
       {isStreaming ? (
         <>
+          {/* Ephemeral thinking overlay: only before text starts */}
           {!textStarted && (
             <StreamingReasoningSegment eventId={event.id} isStreaming={true} />
           )}
           {/* Tools overlay can still show during streaming regardless of text */}
           <StreamingToolsOverlay eventId={event.id} />
-          {textStarted && (
-            ordered.map((segment, idx) => {
-              if (segment.type === 'reasoning') {
-                const key = (segment as any).id || `${segment.type}-${idx}`;
-                return (
-                  <ReasoningSegment
-                    key={key}
-                    // @ts-expect-error segment shape is compatible
-                    segment={segment as any}
-                    isStreaming={false}
-                    autoExpanded={false}
-                    isLastSegment={idx === ordered.length - 1}
-                  />
-                );
-              }
-              return null;
-            })
+          {/* Show Reasoning toggle: visible during streaming whenever content exists (from persisted or streaming parts) */}
+          {hasAnyReasoningContent && (
+            <ReasoningSegment
+              // During streaming, prefer transient segment from bus; otherwise fall back to persisted ordering
+              // @ts-expect-error segment shape is compatible
+              segment={hasPersistedReasoningContent ? (ordered.find(s => s.type === 'reasoning') as any) : buildStreamingReasoningSegment()}
+              isStreaming={false}
+              autoExpanded={false}
+              isLastSegment={true}
+            />
           )}
         </>
       ) : (
