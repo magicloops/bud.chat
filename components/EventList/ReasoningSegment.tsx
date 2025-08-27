@@ -5,11 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
-import {
-  Brain,
-  ChevronDown,
-  Loader2
-} from 'lucide-react';
+import { ChevronDown, Loader2 } from 'lucide-react';
 
 interface ReasoningSegmentProps {
   segment: {
@@ -116,7 +112,6 @@ export function ReasoningSegment({
           }}
           className="reasoning-toggle text-xs px-2 py-1 h-auto"
         >
-          <Brain className="h-3 w-3 mr-1" />
           {isExpanded ? 'Hide' : 'Show'} Reasoning
           <ChevronDown className={cn(
             "h-3 w-3 ml-1 transition-transform",
@@ -126,24 +121,10 @@ export function ReasoningSegment({
       
       {shouldShowReasoning && (
         <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
-          <div className="reasoning-header mb-2 flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">
-              Model Reasoning
-              {isReasoningStreaming && (
-                <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
-              )}
-            </span>
-            {segment.effort_level && (
-              <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
-                {segment.effort_level} effort
-              </Badge>
-            )}
-          </div>
-          
           <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-            <div className="reasoning-parts space-y-2">
+            <div className="reasoning-parts space-y-4">
               {partsToRender.map((part, index) => (
-                <div key={part.summary_index || index} className="reasoning-part">
+                <div key={part.summary_index || index} className="reasoning-part py-1">
                   {isReasoningStreaming && !part.is_complete && (
                     <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" />

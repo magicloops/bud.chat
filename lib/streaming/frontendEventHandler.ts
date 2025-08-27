@@ -25,7 +25,7 @@ export interface StreamEvent {
     // Progress events
     | 'progress_update' | 'progress_hide'
     // Internal-only event types
-    | 'finalize_only';
+    | 'finalize_only' | 'message_final';
   
   // Existing fields
   content?: string;
@@ -34,6 +34,7 @@ export interface StreamEvent {
   args?: object;
   output?: object | string | null;
   error?: string;
+  event?: Event; // for message_final
   
   // MCP-specific fields
   server_label?: string;
@@ -397,7 +398,7 @@ export class FrontendEventHandler {
     
     if (!item_id || !part || summary_index === undefined) return;
     
-    // Initialize or get existing reasoning data
+    // Initialize or get existing reasoning data (for final assembly only)
     let reasoningData = this.currentReasoningData.get(item_id);
     if (!reasoningData) {
       reasoningData = {
@@ -421,8 +422,17 @@ export class FrontendEventHandler {
     
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
-    
-    // Do not update store/UI on each token; only on part completion
+
+    // Overlay: start a new reasoning part for the active assistant placeholder
+    if (this.assistantPlaceholder) {
+      streamingBus.startReasoningPart(this.assistantPlaceholder.id, summary_index, {
+        sequence_number: sequence_number,
+        created_at: Date.now()
+      });
+      if (part?.text) {
+        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index, part.text, { sequence_number });
+      }
+    }
   }
 
   private async handleReasoningSummaryTextDelta(data: StreamEvent): Promise<void> {
@@ -461,13 +471,14 @@ export class FrontendEventHandler {
     reasoningData.streaming_part_index = summary_index;
     
     
-    // Do not update store/UI on each token; only on part completion
-    // Also stream to overlay bus keyed by assistant placeholder event id
+    // Stream to overlay bus per-part keyed by (eventId, summary_index)
     if (this.assistantPlaceholder) {
       const overlayDelta = typeof delta === 'string' 
         ? delta 
         : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
-      if (overlayDelta) streamingBus.appendReasoning(this.assistantPlaceholder.id, overlayDelta);
+      if (overlayDelta) {
+        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index!, overlayDelta, { sequence_number });
+      }
     }
   }
 
@@ -488,9 +499,13 @@ export class FrontendEventHandler {
       ...prevPart,
       is_complete: true
     };
-    
-    
-    // Update UI state
+
+    // Overlay: mark complete for the streaming UI
+    if (this.assistantPlaceholder) {
+      streamingBus.completeReasoningPart(this.assistantPlaceholder.id, summary_index);
+    }
+
+    // Update UI state (for local assembly if needed)
     this.updateReasoningInState(item_id, reasoningData);
   }
 

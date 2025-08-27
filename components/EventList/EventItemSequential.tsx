@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
 import StreamingTextSegment from './StreamingTextSegment';
+import { streamingBus } from '@/lib/streaming/streamingBus';
 import StepsPanel from './StepsPanel';
 import {
   Copy,
@@ -61,6 +62,36 @@ export const EventItemSequential = memo(function EventItemSequential({
   // Determine if this event is the active streaming placeholder
   const session = streamingSessionManager.getState();
   const isStreamingActive = isAssistant && session.active && session.assistantEventId === event.id;
+  
+  // Streaming header status: reasoning vs tools vs typing
+  const [headerStatus, setHeaderStatus] = useState<'thinking' | 'using-tools' | 'typing'>('thinking');
+  useEffect(() => {
+    if (!isStreamingActive) return;
+    const compute = () => {
+      const tools = streamingBus.getTools(event.id);
+      if (tools && tools.some(t => t.status === 'in_progress' || t.status === 'finalized')) {
+        setHeaderStatus('using-tools');
+        return;
+      }
+      const parts = streamingBus.getReasoningParts(event.id);
+      if (parts && parts.length > 0 && parts.some(p => !p.is_complete)) {
+        setHeaderStatus('thinking');
+        return;
+      }
+      const text = streamingBus.get(event.id);
+      if (text && text.length > 0) {
+        setHeaderStatus('typing');
+        return;
+      }
+      // Default to thinking at stream start
+      setHeaderStatus('thinking');
+    };
+    const unsubA = streamingBus.subscribeTools(event.id, compute);
+    const unsubB = streamingBus.subscribeReasoningParts(event.id, compute);
+    const unsubC = streamingBus.subscribe(event.id, compute);
+    compute();
+    return () => { unsubA(); unsubB(); unsubC(); };
+  }, [isStreamingActive, event.id]);
   
   // Extract text content for fallback and editing
   const textContent = event.segments
@@ -252,7 +283,13 @@ export const EventItemSequential = memo(function EventItemSequential({
                 {isUser ? 'You' : assistantName}
               </span>
               <span className="text-xs text-muted-foreground">
-                · {isStreaming ? (hasReasoningSegments || hasToolCalls ? 'thinking...' : 'typing...') : formatEventDuration(event, _index)}
+                · {isStreamingActive
+                    ? headerStatus === 'using-tools'
+                      ? 'using tools...'
+                      : headerStatus === 'typing'
+                        ? 'typing...'
+                        : 'thinking...'
+                    : formatEventDuration(event, _index)}
               </span>
             </div>
           )}

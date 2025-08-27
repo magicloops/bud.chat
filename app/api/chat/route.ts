@@ -815,23 +815,34 @@ export async function POST(request: NextRequest) {
                         });
                       }
                     } else if (segment.type === 'reasoning') {
-                      // Send reasoning segment
+                      // Signal reasoning segment start (for UI overlay gating)
                       send({
                         type: 'reasoning_start',
                         item_id: segment.id,
                         output_index: segment.output_index,
                         sequence_number: segment.sequence_number
                       });
-                      
-                      // Send reasoning content if available
-                      if (segment.parts && segment.parts.length > 0) {
+
+                      // Emit standardized reasoning part events so the frontend can stream per-part
+                      if (Array.isArray(segment.parts) && segment.parts.length > 0) {
                         for (const part of segment.parts) {
+                          // Part added (with initial text if provided)
                           send({
-                            type: 'reasoning_content',
+                            type: 'reasoning_summary_part_added',
                             item_id: segment.id,
-                            content: part.text,
-                            summary_index: part.summary_index
+                            summary_index: part.summary_index,
+                            part: { type: 'summary_text', text: part.text },
+                            sequence_number: part.sequence_number ?? segment.sequence_number
                           });
+                          // Mark part done if complete
+                          if (part.is_complete) {
+                            send({
+                              type: 'reasoning_summary_part_done',
+                              item_id: segment.id,
+                              summary_index: part.summary_index,
+                              sequence_number: part.sequence_number ?? segment.sequence_number
+                            });
+                          }
                         }
                       }
                     }

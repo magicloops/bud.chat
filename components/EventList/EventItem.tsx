@@ -23,7 +23,6 @@ import {
   ChevronRight,
   CheckCircle,
   XCircle,
-  Brain,
   Loader2
 } from 'lucide-react';
 import {
@@ -355,7 +354,6 @@ export const EventItem = memo(function EventItem({
                       onClick={() => setShowReasoning(!showReasoning)}
                       className="reasoning-toggle text-xs px-2 py-1 h-auto"
                     >
-                      <Brain className="h-3 w-3 mr-1" />
                       {showReasoning ? 'Hide' : 'Show'} Reasoning
                       <ChevronDown className={cn(
                         "h-3 w-3 ml-1 transition-transform",
@@ -367,12 +365,9 @@ export const EventItem = memo(function EventItem({
                   {shouldShowReasoning && (
                     <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
                       <div className="reasoning-header mb-2 flex items-center gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">
-                          Model Reasoning
-                          {isReasoningStreaming && (
-                            <Loader2 className="h-3 w-3 ml-2 animate-spin inline" />
-                          )}
-                        </span>
+                        {isReasoningStreaming && (
+                          <Loader2 className="h-3 w-3 animate-spin inline text-muted-foreground" />
+                        )}
                         {reasoningEffortLevel && (
                           <Badge variant="outline" className="text-xs py-0 px-1 h-auto">
                             {reasoningEffortLevel} effort

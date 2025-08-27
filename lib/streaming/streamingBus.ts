@@ -3,9 +3,12 @@ type Callback = () => void;
 class StreamingBus {
   private buffers = new Map<string, string>();
   private subs = new Map<string, Set<Callback>>();
-  // Reasoning buffers keyed by eventId (assistant placeholder id)
+  // Reasoning buffers (legacy, combined text per event)
   private reasoning = new Map<string, string>();
   private reasoningSubs = new Map<string, Set<Callback>>();
+  // Reasoning parts per event: eventId -> summary_index -> part state
+  private reasoningParts = new Map<string, Map<number, { summary_index: number; text: string; is_complete: boolean; sequence_number?: number; created_at?: number }>>();
+  private reasoningPartsSubs = new Map<string, Set<Callback>>();
   // Tool call overlays keyed by assistant event id
   private tools = new Map<string, Map<string, { id: string; name: string; display_name?: string; server_label?: string; status: 'in_progress' | 'finalized' | 'completed' | 'failed'; args?: string; error?: string }>>();
   private toolsSubs = new Map<string, Set<Callback>>();
@@ -82,6 +85,60 @@ class StreamingBus {
 
   private emitReasoning(eventId: string) {
     const set = this.reasoningSubs.get(eventId);
+    if (!set) return;
+    set.forEach(fn => fn());
+  }
+
+  // Reasoning Parts API (overlay)
+  startReasoningPart(eventId: string, summaryIndex: number, meta?: { sequence_number?: number; created_at?: number }) {
+    let map = this.reasoningParts.get(eventId);
+    if (!map) { map = new Map(); this.reasoningParts.set(eventId, map); }
+    if (!map.has(summaryIndex)) {
+      map.set(summaryIndex, { summary_index: summaryIndex, text: '', is_complete: false, sequence_number: meta?.sequence_number, created_at: meta?.created_at });
+    }
+    this.emitReasoningParts(eventId);
+  }
+  appendReasoningPart(eventId: string, summaryIndex: number, delta: string, meta?: { sequence_number?: number }) {
+    let map = this.reasoningParts.get(eventId);
+    if (!map) { map = new Map(); this.reasoningParts.set(eventId, map); }
+    const prev = map.get(summaryIndex) || { summary_index: summaryIndex, text: '', is_complete: false };
+    map.set(summaryIndex, {
+      ...prev,
+      text: (prev.text || '') + (delta || ''),
+      sequence_number: meta?.sequence_number ?? prev.sequence_number,
+    });
+    this.emitReasoningParts(eventId);
+  }
+  completeReasoningPart(eventId: string, summaryIndex: number) {
+    const map = this.reasoningParts.get(eventId);
+    if (!map) return;
+    const prev = map.get(summaryIndex);
+    if (!prev) return;
+    map.set(summaryIndex, { ...prev, is_complete: true });
+    this.emitReasoningParts(eventId);
+  }
+  clearReasoningParts(eventId: string) {
+    this.reasoningParts.delete(eventId);
+    this.emitReasoningParts(eventId);
+  }
+  getReasoningParts(eventId: string): Array<{ summary_index: number; text: string; is_complete: boolean; sequence_number?: number; created_at?: number }> {
+    const map = this.reasoningParts.get(eventId);
+    if (!map) return [];
+    return Array.from(map.values()).sort((a, b) => a.summary_index - b.summary_index);
+  }
+  subscribeReasoningParts(eventId: string, cb: Callback): () => void {
+    let set = this.reasoningPartsSubs.get(eventId);
+    if (!set) { set = new Set(); this.reasoningPartsSubs.set(eventId, set); }
+    set.add(cb);
+    return () => {
+      const s = this.reasoningPartsSubs.get(eventId);
+      if (!s) return;
+      s.delete(cb);
+      if (s.size === 0) this.reasoningPartsSubs.delete(eventId);
+    };
+  }
+  private emitReasoningParts(eventId: string) {
+    const set = this.reasoningPartsSubs.get(eventId);
     if (!set) return;
     set.forEach(fn => fn());
   }

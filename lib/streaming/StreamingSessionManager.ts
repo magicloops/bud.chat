@@ -133,6 +133,7 @@ class StreamingSessionManager {
     const eventId = this.state.assistantEventId;
     streamingBus.clear(eventId);
     streamingBus.clearReasoning(eventId);
+    streamingBus.clearReasoningParts(eventId);
     streamingBus.clearTools(eventId);
     this.reset();
   }
@@ -150,4 +151,3 @@ class StreamingSessionManager {
 }
 
 export const streamingSessionManager = new StreamingSessionManager();
-
