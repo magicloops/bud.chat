@@ -14,6 +14,7 @@ interface ConversationWithJoins {
   assistant_avatar: string | null;
   model_config_overrides: Database['public']['Tables']['conversations']['Row']['model_config_overrides'];
   mcp_config_overrides: Database['public']['Tables']['conversations']['Row']['mcp_config_overrides'];
+  builtin_tools_config_overrides: Database['public']['Tables']['conversations']['Row']['builtin_tools_config_overrides'];
   buds: {
     id: string;
     default_json: Database['public']['Tables']['buds']['Row']['default_json'];
@@ -56,6 +57,7 @@ export async function GET(
         assistant_avatar,
         model_config_overrides,
         mcp_config_overrides,
+        builtin_tools_config_overrides,
         buds:source_bud_id (
           id,
           default_json
@@ -150,7 +152,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { title, assistant_name, assistant_avatar, model_config_overrides, mcp_config_overrides } = body;
+    const { title, assistant_name, assistant_avatar, model_config_overrides, mcp_config_overrides, builtin_tools_config_overrides } = body;
 
     // Verify user has access through workspace membership
     const { data: conversation, error: convError } = await supabase
@@ -187,6 +189,7 @@ export async function PATCH(
     if (assistant_avatar !== undefined) updateData.assistant_avatar = assistant_avatar;
     if (model_config_overrides !== undefined) updateData.model_config_overrides = model_config_overrides;
     if (mcp_config_overrides !== undefined) updateData.mcp_config_overrides = mcp_config_overrides;
+    if (builtin_tools_config_overrides !== undefined) updateData.builtin_tools_config_overrides = builtin_tools_config_overrides;
 
     // Update conversation
     const { data: updatedConversation, error: updateError } = await supabase

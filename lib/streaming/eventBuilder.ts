@@ -1,6 +1,6 @@
 // EventStreamBuilder for building events during streaming
 
-import { Event, Segment, Role, ReasoningData } from '@/lib/types/events';
+import { Event, Segment, Role, ReasoningData, ReasoningPart } from '@/lib/types/events';
 import { ToolCallId, EventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 
@@ -12,6 +12,7 @@ export class EventStreamBuilder {
   private pendingToolCalls: Map<string, { id: string; name: string; args: string }> = new Map();
   private ts: number;
   private reasoningData: ReasoningData | null = null;
+  private reasoningSegments: Map<string, Segment> = new Map();
 
   constructor(role: Role = 'assistant', eventId?: string) {
     this.role = role;
@@ -32,6 +33,54 @@ export class EventStreamBuilder {
     }
 
     this.currentTextSegment.text += text;
+  }
+
+  /**
+   * Add or update a reasoning segment by item_id
+   */
+  upsertReasoningSegment(params: {
+    id: string;
+    output_index?: number;
+    sequence_number?: number;
+    parts?: ReasoningPart[];
+    combined_text?: string;
+    effort_level?: 'low' | 'medium' | 'high';
+    reasoning_tokens?: number;
+    streaming_part_index?: number | undefined;
+  }): void {
+    type ReasoningSeg = Extract<Segment, { type: 'reasoning' }>;
+    const existing = this.reasoningSegments.get(params.id) as ReasoningSeg | undefined;
+    // Merge parts if provided
+    const mergedParts: ReasoningPart[] = existing?.parts ? existing.parts.map(p => ({ ...p })) : [];
+    const incomingParts: ReasoningPart[] = params.parts ?? [];
+    for (const p of incomingParts) {
+      const idx = mergedParts.findIndex(ep => ep.summary_index === p.summary_index);
+      if (idx >= 0) mergedParts[idx] = { ...mergedParts[idx], ...p };
+      else mergedParts.push(p);
+    }
+
+    const next: ReasoningSeg = {
+      type: 'reasoning',
+      id: params.id,
+      output_index: params.output_index ?? existing?.output_index ?? 0,
+      sequence_number: params.sequence_number ?? existing?.sequence_number ?? 0,
+      parts: mergedParts,
+      combined_text: params.combined_text ?? existing?.combined_text,
+      effort_level: params.effort_level ?? existing?.effort_level,
+      reasoning_tokens: params.reasoning_tokens ?? existing?.reasoning_tokens,
+      streaming: params.streaming_part_index !== undefined,
+      streaming_part_index: params.streaming_part_index
+    };
+
+    this.reasoningSegments.set(params.id, next);
+
+    // Replace or append in segments array
+    const idx = this.segments.findIndex(s => s.type === 'reasoning' && (s as ReasoningSeg).id === params.id);
+    if (idx >= 0) {
+      this.segments[idx] = next;
+    } else {
+      this.segments.push(next);
+    }
   }
 
   /**
@@ -207,7 +256,9 @@ export class EventStreamBuilder {
       }
       return true;
     });
-    
+
+    // Ensure any reasoning segments tracked are included (already ensured in upsert)
+
     console.log('🔧 [EVENTBUILDER] After cleanup - Final segments:', this.segments.length);
 
     return {

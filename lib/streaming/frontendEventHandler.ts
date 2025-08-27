@@ -1,13 +1,14 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
+import { streamingBus } from '@/lib/streaming/streamingBus';
 import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 import { ProgressState, ActivityType } from '@/lib/types/progress';
-import { ToolCallId, generateEventId } from '@/lib/types/branded';
+import { ToolCallId } from '@/lib/types/branded';
 // import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+  type: 'token' | 'text_token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
     // MCP event types (remote MCP tools)
     | 'mcp_tool_start' | 'mcp_tool_arguments_delta' | 'mcp_tool_finalized' | 'mcp_tool_complete' 
     | 'mcp_list_tools' | 'mcp_approval_request'
@@ -17,10 +18,14 @@ export interface StreamEvent {
     | 'reasoning_summary_delta' | 'reasoning_summary_done'
     // Unified segments reasoning events
     | 'reasoning_start' | 'reasoning_complete'
+    // Built-in tool events
+    | 'web_search_call_in_progress' | 'web_search_call_searching' | 'web_search_call_completed'
+    | 'code_interpreter_call_in_progress' | 'code_interpreter_call_interpreting' | 'code_interpreter_call_completed'
+    | 'code_interpreter_call_code_delta' | 'code_interpreter_call_code_done'
     // Progress events
     | 'progress_update' | 'progress_hide'
     // Internal-only event types
-    | 'finalize_only';
+    | 'finalize_only' | 'message_final';
   
   // Existing fields
   content?: string;
@@ -29,6 +34,7 @@ export interface StreamEvent {
   args?: object;
   output?: object | string | null;
   error?: string;
+  event?: Event; // for message_final
   
   // MCP-specific fields
   server_label?: string;
@@ -64,6 +70,10 @@ export interface StreamEvent {
   // Progress fields
   activity?: ActivityType;
   hideProgress?: boolean;
+  
+  // Built-in tool fields
+  status?: 'in_progress' | 'searching' | 'completed' | 'failed' | 'interpreting';
+  code?: string; // For code interpreter streaming code
 }
 
 export interface LocalStateUpdater {
@@ -76,6 +86,7 @@ export class FrontendEventHandler {
     private storeInstance: typeof useEventChatStore | null,
     private options: {
       debug?: boolean;
+      onMessageFinal?: (event: Event) => void;
     } = {}
   ) {}
 
@@ -83,6 +94,7 @@ export class FrontendEventHandler {
   private localStateUpdater: LocalStateUpdater | null = null;
   private assistantPlaceholder: Event | null = null;
   private hasCreatedPostToolPlaceholder: boolean = false;
+  private useLocalStreaming: boolean = false;
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -96,10 +108,11 @@ export class FrontendEventHandler {
   /**
    * Set local state updater for optimistic flows
    */
-  setLocalStateUpdater(updater: LocalStateUpdater, placeholder: Event): void {
+  setLocalStateUpdater(updater: LocalStateUpdater, placeholder: Event, options?: { useLocalStreaming?: boolean }): void {
     this.localStateUpdater = updater;
     this.assistantPlaceholder = placeholder;
     this.hasCreatedPostToolPlaceholder = false; // Reset flag for new stream
+    this.useLocalStreaming = !!options?.useLocalStreaming;
   }
 
   /**
@@ -219,6 +232,16 @@ export class FrontendEventHandler {
       case 'complete':
         await this.handleCompleteEvent(data);
         break;
+      case 'message_final':
+        // Final, canonical assistant event from server
+        if (data.event && this.options.onMessageFinal) {
+          try {
+            this.options.onMessageFinal(data.event as Event);
+          } catch (e) {
+            if (this.options.debug) console.error('onMessageFinal error:', e);
+          }
+        }
+        break;
       case 'error':
         await this.handleErrorEvent(data);
         break;
@@ -228,6 +251,31 @@ export class FrontendEventHandler {
       case 'progress_hide':
         await this.handleProgressHide(data);
         break;
+      // Built-in tool event handlers
+      case 'web_search_call_in_progress':
+        await this.handleWebSearchInProgress(data);
+        break;
+      case 'web_search_call_searching':
+        await this.handleWebSearchSearching(data);
+        break;
+      case 'web_search_call_completed':
+        await this.handleWebSearchCompleted(data);
+        break;
+      case 'code_interpreter_call_in_progress':
+        await this.handleCodeInterpreterInProgress(data);
+        break;
+      case 'code_interpreter_call_interpreting':
+        await this.handleCodeInterpreterInterpreting(data);
+        break;
+      case 'code_interpreter_call_completed':
+        await this.handleCodeInterpreterCompleted(data);
+        break;
+      case 'code_interpreter_call_code_delta':
+        await this.handleCodeInterpreterCodeDelta(data);
+        break;
+      case 'code_interpreter_call_code_done':
+        await this.handleCodeInterpreterCodeDone(data);
+        break;
     }
   }
 
@@ -235,57 +283,42 @@ export class FrontendEventHandler {
    * Handle token events (text streaming)
    */
   private async handleTokenEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      // Local state update for optimistic flow
-      this.updateLocalStateToken(data);
-    } else {
-      // Store state update for existing conversations
-      this.updateStoreStateToken(data);
-    }
+    if (!this.assistantPlaceholder || !data.content) return;
+    streamingBus.append(this.assistantPlaceholder.id, data.content);
   }
 
   /**
    * Handle tool start events
    */
   private async handleToolStartEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateToolStart(data);
-    } else {
-      this.updateStoreStateToolStart(data);
-    }
+    if (!this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
+    streamingBus.startTool(this.assistantPlaceholder.id, data.tool_id, data.tool_name, {
+      display_name: data.display_name,
+      server_label: data.server_label
+    });
   }
 
   /**
    * Handle tool finalized events
    */
   private async handleToolFinalizedEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateToolFinalized(data);
-    } else {
-      this.updateStoreStateToolFinalized(data);
-    }
+    if (!this.assistantPlaceholder || !data.tool_id) return;
+    streamingBus.finalizeTool(this.assistantPlaceholder.id, data.tool_id, data.arguments || (data.args ? JSON.stringify(data.args) : undefined));
   }
 
   /**
    * Handle tool result events
    */
-  private async handleToolResultEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateToolResult(data);
-    } else {
-      this.updateStoreStateToolResult(data);
-    }
+  private async handleToolResultEvent(_data: StreamEvent): Promise<void> {
+    // Overlay-only; final event contains results
   }
 
   /**
    * Handle tool complete events
    */
   private async handleToolCompleteEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateToolComplete(data);
-    } else {
-      this.updateStoreStateToolComplete(data);
-    }
+    if (!this.assistantPlaceholder || !data.tool_id) return;
+    streamingBus.completeTool(this.assistantPlaceholder.id, data.tool_id, { error: data.error });
   }
 
   /**
@@ -295,12 +328,8 @@ export class FrontendEventHandler {
   /**
    * Handle MCP tool start events
    */
-  private async handleMCPToolStartEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateMCPToolStart(data);
-    } else {
-      this.updateStoreStateMCPToolStart(data);
-    }
+  private async handleMCPToolStartEvent(_data: StreamEvent): Promise<void> {
+    // Overlay handled via generic tool handlers above or separate flows
   }
 
   /**
@@ -314,23 +343,15 @@ export class FrontendEventHandler {
   /**
    * Handle MCP tool finalized events
    */
-  private async handleMCPToolFinalizedEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateMCPToolFinalized(data);
-    } else {
-      this.updateStoreStateMCPToolFinalized(data);
-    }
+  private async handleMCPToolFinalizedEvent(_data: StreamEvent): Promise<void> {
+    // Overlay handled via generic tool handlers above
   }
 
   /**
    * Handle MCP tool complete events
    */
-  private async handleMCPToolCompleteEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateMCPToolComplete(data);
-    } else {
-      this.updateStoreStateMCPToolComplete(data);
-    }
+  private async handleMCPToolCompleteEvent(_data: StreamEvent): Promise<void> {
+    // Overlay handled via generic tool handlers above
   }
 
   /**
@@ -353,23 +374,15 @@ export class FrontendEventHandler {
   /**
    * Handle complete events
    */
-  private async handleCompleteEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateComplete(data);
-    } else {
-      this.updateStoreStateComplete(data);
-    }
+  private async handleCompleteEvent(_data: StreamEvent): Promise<void> {
+    // No-op; message_final handles commit, container clears overlays
   }
 
   /**
    * Handle error events
    */
-  private async handleErrorEvent(data: StreamEvent): Promise<void> {
-    if (this.isLocalState()) {
-      this.updateLocalStateError(data);
-    } else {
-      this.updateStoreStateError(data);
-    }
+  private async handleErrorEvent(_data: StreamEvent): Promise<void> {
+    // Container handles error rollback
   }
 
   /**
@@ -385,7 +398,7 @@ export class FrontendEventHandler {
     
     if (!item_id || !part || summary_index === undefined) return;
     
-    // Initialize or get existing reasoning data
+    // Initialize or get existing reasoning data (for final assembly only)
     let reasoningData = this.currentReasoningData.get(item_id);
     if (!reasoningData) {
       reasoningData = {
@@ -409,9 +422,17 @@ export class FrontendEventHandler {
     
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
-    
-    // Update UI state
-    this.updateReasoningInState(item_id, reasoningData);
+
+    // Overlay: start a new reasoning part for the active assistant placeholder
+    if (this.assistantPlaceholder) {
+      streamingBus.startReasoningPart(this.assistantPlaceholder.id, summary_index, {
+        sequence_number: sequence_number,
+        created_at: Date.now()
+      });
+      if (part?.text) {
+        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index, part.text, { sequence_number });
+      }
+    }
   }
 
   private async handleReasoningSummaryTextDelta(data: StreamEvent): Promise<void> {
@@ -426,30 +447,39 @@ export class FrontendEventHandler {
     if (!reasoningData) return;
     
     // Find the reasoning part to update by index
-    let reasoningPart = reasoningData.parts[summary_index];
-    if (!reasoningPart) {
-      // Create part if it doesn't exist (defensive programming)
-      reasoningPart = {
-        summary_index,
-        type: 'summary_text',
-        text: '',
-        sequence_number: sequence_number || 0,
-        is_complete: false,
-        created_at: Date.now()
-      };
-      reasoningData.parts[summary_index] = reasoningPart;
-    }
-    
-    // Append delta text
+    const existingPart = reasoningData.parts[summary_index];
+    const basePart = existingPart || {
+      summary_index,
+      type: 'summary_text' as const,
+      text: '',
+      sequence_number: sequence_number || 0,
+      is_complete: false,
+      created_at: Date.now()
+    };
+
+    // Append delta text immutably (avoid mutating possibly frozen objects)
     const deltaText = typeof delta === 'string' ? delta : delta.text || '';
-    reasoningPart.text += deltaText;
+    const updatedPart = {
+      ...basePart,
+      text: (basePart.text || '') + deltaText,
+      // keep latest sequence number if provided
+      sequence_number: sequence_number ?? basePart.sequence_number
+    };
+    reasoningData.parts[summary_index] = updatedPart;
     
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
     
     
-    // Update UI state
-    this.updateReasoningInState(item_id, reasoningData);
+    // Stream to overlay bus per-part keyed by (eventId, summary_index)
+    if (this.assistantPlaceholder) {
+      const overlayDelta = typeof delta === 'string' 
+        ? delta 
+        : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
+      if (overlayDelta) {
+        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index!, overlayDelta, { sequence_number });
+      }
+    }
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
@@ -463,11 +493,19 @@ export class FrontendEventHandler {
     const reasoningData = this.currentReasoningData.get(item_id);
     if (!reasoningData || !reasoningData.parts[summary_index]) return;
     
-    // Mark this specific part as complete
-    reasoningData.parts[summary_index].is_complete = true;
-    
-    
-    // Update UI state
+    // Mark this specific part as complete (immutably)
+    const prevPart = reasoningData.parts[summary_index];
+    reasoningData.parts[summary_index] = {
+      ...prevPart,
+      is_complete: true
+    };
+
+    // Overlay: mark complete for the streaming UI
+    if (this.assistantPlaceholder) {
+      streamingBus.completeReasoningPart(this.assistantPlaceholder.id, summary_index);
+    }
+
+    // Update UI state (for local assembly if needed)
     this.updateReasoningInState(item_id, reasoningData);
   }
 
@@ -493,13 +531,21 @@ export class FrontendEventHandler {
     // Clear streaming part index
     reasoningData.streaming_part_index = undefined;
     
-    // Mark all parts as complete
-    Object.values(reasoningData.parts).forEach(part => {
-      part.is_complete = true;
-    });
+    // Mark all parts as complete (immutably)
+    for (const idx of Object.keys(reasoningData.parts)) {
+      const i = Number(idx);
+      const prev = reasoningData.parts[i];
+      if (prev) {
+        reasoningData.parts[i] = { ...prev, is_complete: true };
+      }
+    }
     
     // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
+    // Finalize overlay text for this event
+    if (this.assistantPlaceholder && reasoningData.combined_text) {
+      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+    }
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -554,13 +600,21 @@ export class FrontendEventHandler {
     // Clear streaming state
     reasoningData.streaming_part_index = undefined;
     
-    // Mark all parts as complete
-    Object.values(reasoningData.parts).forEach(part => {
-      part.is_complete = true;
-    });
+    // Mark all parts as complete (immutably)
+    for (const idx of Object.keys(reasoningData.parts)) {
+      const i = Number(idx);
+      const prev = reasoningData.parts[i];
+      if (prev) {
+        reasoningData.parts[i] = { ...prev, is_complete: true };
+      }
+    }
     
     // Update UI state - reasoning is now complete
     this.updateReasoningInState(item_id, reasoningData, true);
+    // Finalize overlay text for this event
+    if (this.assistantPlaceholder && reasoningData.combined_text) {
+      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
+    }
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -607,56 +661,22 @@ export class FrontendEventHandler {
     
   }
 
-  private updateReasoningInState(item_id: string, reasoningData: ReasoningData, isComplete = false): void {
-    if (this.isLocalState()) {
-      this.updateLocalStateReasoning(item_id, reasoningData, isComplete);
-    } else {
-      this.updateStoreStateReasoning(item_id, reasoningData, isComplete);
-    }
-  }
-
-  private updateLocalStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
+  private updateReasoningInState(item_id: string, reasoningData: ReasoningData, _isComplete = false): void {
+    // Do not write to store during streaming; reasoning is committed via message_final
     if (!this.localStateUpdater || !this.assistantPlaceholder) return;
-
     this.localStateUpdater(events => {
       return events.map(event => 
         event.id === this.assistantPlaceholder!.id
           ? {
               ...event,
               segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
-              // Don't update ts during reasoning streaming to prevent infinite re-renders
             }
           : event
       );
     });
   }
 
-  private updateStoreStateReasoning(item_id: string, reasoningData: ReasoningData, _isComplete: boolean): void {
-    if (!this.conversationId || !this.storeInstance) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    // Find the assistant event being streamed
-    const streamingEventId = conversation.streamingEventId;
-    if (!streamingEventId) return;
-
-    const updatedEvents = conversation.events.map(event =>
-      event.id === streamingEventId
-        ? {
-            ...event,
-            segments: this.updateReasoningSegments(event.segments, item_id, reasoningData)
-            // Don't update ts during reasoning streaming to prevent infinite re-renders
-          }
-        : event
-    );
-
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: updatedEvents
-    });
-  }
+  // Removed store-backed reasoning updates
 
   /**
    * Helper method to update reasoning segments in the segments array
@@ -668,11 +688,13 @@ export class FrontendEventHandler {
       id: item_id,
       output_index: reasoningData.output_index,
       sequence_number: reasoningData.sequence_number || 0,
-      parts: Object.values(reasoningData.parts),
+      // Deep-copy parts to avoid freezing internal mutable references
+      parts: Object.values(reasoningData.parts).map(p => ({ ...p })),
       combined_text: reasoningData.combined_text,
       effort_level: reasoningData.effort_level,
       reasoning_tokens: reasoningData.reasoning_tokens,
-      streaming: reasoningData.streaming_part_index !== undefined
+      streaming: reasoningData.streaming_part_index !== undefined,
+      streaming_part_index: reasoningData.streaming_part_index
     };
 
     // Find existing reasoning segment with the same ID and update it, or add new one
@@ -693,136 +715,34 @@ export class FrontendEventHandler {
 
 
   /**
-   * LOCAL STATE UPDATES (for optimistic /chat/new flow)
+   * LOCAL STATE UPDATES (kept minimal; overlays only)
    */
 
   private updateLocalStateToken(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.content) return;
-
-    this.localStateUpdater(events => {
-      // Find the event to update
-      const eventIndex = events.findIndex(e => e.id === this.assistantPlaceholder!.id);
-      if (eventIndex === -1) return events; // Return same reference if no changes
-      
-      const event = events[eventIndex];
-      // Find the text segment to update
-      const textSegmentIndex = event.segments.findIndex(s => s.type === 'text');
-      if (textSegmentIndex === -1) return events; // Return same reference if no text segment
-      
-      // Only create new objects for what actually changed
-      const newEvents = [...events];
-      const newEvent = { ...event };
-      const newSegments = [...event.segments];
-      const textSegment = newSegments[textSegmentIndex];
-      
-      // Update only the text segment
-      const typedTextSegment = textSegment as { type: 'text'; text: string; id?: string; sequence_number?: number; output_index?: number };
-      newSegments[textSegmentIndex] = {
-        ...typedTextSegment,
-        text: typedTextSegment.text + data.content
-      };
-      
-      newEvent.segments = newSegments;
-      newEvents[eventIndex] = newEvent;
-      
-      return newEvents;
-    });
+    if (!this.assistantPlaceholder || !data.content) return;
+    // Route tokens to external streaming bus to avoid parent re-renders
+    streamingBus.append(this.assistantPlaceholder.id, data.content);
   }
 
   private updateLocalStateToolStart(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
-
-    this.localStateUpdater(events => {
-      return events.map(event => {
-        if (event.id === this.assistantPlaceholder!.id) {
-          // Check if tool already exists
-          const toolExists = event.segments.some(
-            s => s.type === 'tool_call' && s.id === data.tool_id
-          );
-          
-          if (!toolExists) {
-            // Only add new tool if it doesn't exist
-            const newSegment = {
-              type: 'tool_call' as const,
-              id: data.tool_id! as ToolCallId,
-              name: data.tool_name!,
-              args: {}
-            };
-            
-            return {
-              ...event,
-              segments: [
-                ...event.segments,
-                newSegment
-              ],
-              ts: Date.now()
-            };
-          }
-        }
-        return event;
-      });
+    if (!this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
+    streamingBus.startTool(this.assistantPlaceholder.id, data.tool_id, data.tool_name, {
+      display_name: data.display_name,
+      server_label: data.server_label
     });
   }
 
   private updateLocalStateToolFinalized(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.args) return;
-
-    this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
-              ...event,
-              segments: event.segments.map(segment => {
-                if (segment.type === 'tool_call' && segment.id === data.tool_id) {
-                  return { ...segment, args: data.args! };
-                }
-                return segment;
-              }),
-              ts: Date.now()
-            }
-          : event
-      );
-    });
+    if (!this.assistantPlaceholder || !data.tool_id) return;
+    streamingBus.finalizeTool(this.assistantPlaceholder.id, data.tool_id, data.arguments || (data.args ? JSON.stringify(data.args) : undefined));
   }
 
   private updateLocalStateToolResult(data: StreamEvent): void {
-    if (!this.localStateUpdater || !data.tool_id || !data.output) return;
-
-    const toolResultEvent: Event = {
-      id: generateEventId(),
-      role: 'tool',
-      segments: [{
-        type: 'tool_result',
-        id: data.tool_id as ToolCallId,
-        output: typeof data.output === 'object' && data.output !== null ? data.output : { result: data.output }
-      }],
-      ts: Date.now()
-    };
-
-    this.localStateUpdater(events => [...events, toolResultEvent]);
+    // Do not add standalone tool events during streaming; overlay only
   }
 
   private updateLocalStateToolComplete(_data: StreamEvent): void {
-    // Create a new assistant placeholder for the next streaming response
-    // But only create it once, even if there are multiple tool calls
-    if (!this.localStateUpdater || this.hasCreatedPostToolPlaceholder) {
-      return;
-    }
-    
-    const newAssistantPlaceholder: Event = {
-      id: generateEventId(),
-      role: 'assistant',
-      segments: [{ type: 'text', text: '' }],
-      ts: Date.now()
-    };
-    
-    this.localStateUpdater(events => {
-      return [...events, newAssistantPlaceholder];
-    });
-    
-    // Update the assistant placeholder reference for future token updates
-    this.assistantPlaceholder = newAssistantPlaceholder;
-    this.hasCreatedPostToolPlaceholder = true;
+    // No new placeholders and no store churn; overlay remains until completed
   }
 
   private updateLocalStateComplete(_data: StreamEvent): void {
@@ -842,136 +762,65 @@ export class FrontendEventHandler {
     });
   }
 
-  /**
-   * MCP LOCAL STATE UPDATES
-   */
-
-  private updateLocalStateMCPToolStart(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.tool_name) {
-      return;
-    }
-
-    this.localStateUpdater(events => {
-      return events.map(event => {
-        if (event.id === this.assistantPlaceholder!.id) {
-          // Check if tool already exists
-          const toolExists = event.segments.some(
-            s => s.type === 'tool_call' && s.id === data.tool_id
-          );
-          
-          if (!toolExists) {
-            // Only add new tool if it doesn't exist
-            return {
-              ...event,
-              segments: [
-                ...event.segments,
-                {
-                  type: 'tool_call' as const,
-                  id: data.tool_id! as ToolCallId,
-                  name: data.tool_name!,
-                  args: {},
-                  // Add sequence_number and output_index for proper ordering
-                  sequence_number: data.sequence_number,
-                  output_index: data.output_index,
-                  // Add MCP-specific fields directly
-                  server_label: data.server_label,
-                  server_type: data.server_type,
-                  display_name: data.display_name
-                }
-              ],
-              ts: Date.now()
-            };
-          }
-        }
-        return event;
-      });
-    });
-  }
-
-  private updateLocalStateMCPToolFinalized(data: StreamEvent): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id || !data.args) return;
-
-    this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
-              ...event,
-              segments: event.segments.map(segment => {
-                if (segment.type === 'tool_call' && segment.id === data.tool_id) {
-                  return { ...segment, args: data.args! };
-                }
-                return segment;
-              }),
-              ts: Date.now()
-            }
-          : event
-      );
-    });
-  }
-
-  private updateLocalStateMCPToolComplete(data: StreamEvent): void {
-    // For Responses API, tool results are included as segments in the assistant event
-    if (!this.localStateUpdater || !this.assistantPlaceholder || !data.tool_id) return;
-
-    this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
-              ...event,
-              segments: [
-                ...event.segments,
-                {
-                  type: 'tool_result' as const,
-                  id: data.tool_id! as ToolCallId,
-                  output: typeof data.output === 'object' && data.output !== null ? data.output : {},
-                  error: data.error
-                }
-              ],
-              ts: Date.now()
-            }
-          : event
-      );
-    });
-  }
+  // Removed MCP local update helpers; overlays handle visibility
 
   /**
-   * STORE STATE UPDATES (for existing /chat/[id] flow)
-   * NOTE: During streaming, we keep updates LOCAL and only update store on completion
+   * STORE STATE UPDATES — removed for streaming phase (message_final only)
    */
 
-  private updateStoreStateToken(data: StreamEvent): void {
-    // For store mode, only update when we have a local state updater (means we're tracking locally)
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToken(data);
-    }
-    // If no local state updater, we don't update the store during streaming (prevents infinite loops)
-  }
-
-  private updateStoreStateToolStart(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToolStart(data);
-    }
-  }
+  // Removed store token/tool update helpers
 
   private updateStoreStateToolFinalized(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateToolFinalized(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.args) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: event.segments.map(segment => {
+              if (segment.type === 'tool_call' && segment.id === data.tool_id) {
+                return { ...segment, args: data.args! } as Extract<Segment, { type: 'tool_call' }>;
+              }
+              return segment;
+            }),
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
   private updateStoreStateToolResult(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater) {
-      this.updateLocalStateToolResult(data);
-    }
+    if (!this.conversationId || !this.storeInstance || !data.tool_id) return;
+    const store = this.storeInstance.getState();
+    const conversation = store.conversations[this.conversationId];
+    if (!conversation || !conversation.streamingEventId) return;
+    const updatedEvents = conversation.events.map(event =>
+      event.id === conversation.streamingEventId
+        ? {
+            ...event,
+            segments: [
+              ...event.segments,
+              {
+                type: 'tool_result' as const,
+                id: data.tool_id as ToolCallId,
+                output: typeof data.output === 'object' && data.output !== null ? data.output : {},
+                error: data.error
+              }
+            ],
+            ts: Date.now()
+          }
+        : event
+    );
+    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
   }
 
-  private updateStoreStateToolComplete(data: StreamEvent): void {
-    // Delegate to local state updater which will create a new assistant placeholder
-    if (this.localStateUpdater) {
-      this.updateLocalStateToolComplete(data);
+  private updateStoreStateToolComplete(_data: StreamEvent): void {
+    // For Responses API, new assistant placeholders after tools are not needed here.
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[STREAM][handler] Store tool complete (no new assistant placeholder)');
     }
   }
 
@@ -1010,25 +859,16 @@ export class FrontendEventHandler {
    * MCP STORE STATE UPDATES
    */
 
-  private updateStoreStateMCPToolStart(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateMCPToolStart(data);
-    }
+  private updateStoreStateMCPToolStart(_data: StreamEvent): void {
+    // No-op: we do not mutate store mid-stream for tool starts; overlays handle visibility
   }
 
   private updateStoreStateMCPToolFinalized(data: StreamEvent): void {
-    // Delegate to local state updater which will update the store optimistically
-    if (this.localStateUpdater && this.assistantPlaceholder) {
-      this.updateLocalStateMCPToolFinalized(data);
-    }
+    this.updateStoreStateToolFinalized(data);
   }
 
   private updateStoreStateMCPToolComplete(data: StreamEvent): void {
-    // Delegate to local state updater for MCP tool completion
-    if (this.localStateUpdater) {
-      this.updateLocalStateMCPToolComplete(data);
-    }
+    this.updateStoreStateToolComplete(data);
   }
 
   /**
@@ -1057,6 +897,152 @@ export class FrontendEventHandler {
   }
 
   /**
+   * BUILT-IN TOOL EVENT HANDLERS
+   */
+
+  /**
+   * Handle web search in progress events
+   */
+  private async handleWebSearchInProgress(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
+    } else {
+      this.updateStoreStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
+    }
+  }
+
+  /**
+   * Handle web search searching events
+   */
+  private async handleWebSearchSearching(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Update progress state to show searching activity
+    this.updateProgressState('web_search', true);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStatus(data, 'searching');
+    } else {
+      this.updateStoreStateBuiltInToolStatus(data, 'searching');
+    }
+  }
+
+  /**
+   * Handle web search completed events
+   */
+  private async handleWebSearchCompleted(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Hide progress when search completes
+    this.updateProgressState(null, false);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolComplete(data, 'web_search_call');
+    } else {
+      this.updateStoreStateBuiltInToolComplete(data, 'web_search_call');
+    }
+  }
+
+  /**
+   * Handle code interpreter in progress events
+   */
+  private async handleCodeInterpreterInProgress(data: StreamEvent): Promise<void> {
+    const { item_id, output_index, sequence_number } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
+    } else {
+      this.updateStoreStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
+    }
+  }
+
+  /**
+   * Handle code interpreter interpreting events
+   */
+  private async handleCodeInterpreterInterpreting(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Update progress state to show interpreting activity
+    this.updateProgressState('code_interpreter', true);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolStatus(data, 'interpreting');
+    } else {
+      this.updateStoreStateBuiltInToolStatus(data, 'interpreting');
+    }
+  }
+
+  /**
+   * Handle code interpreter completed events
+   */
+  private async handleCodeInterpreterCompleted(data: StreamEvent): Promise<void> {
+    const { item_id } = data;
+    
+    if (!item_id) return;
+    
+    // Hide progress when interpretation completes
+    this.updateProgressState(null, false);
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateBuiltInToolComplete(data, 'code_interpreter_call');
+    } else {
+      this.updateStoreStateBuiltInToolComplete(data, 'code_interpreter_call');
+    }
+    // Clear code overlay buffer
+    if (item_id) streamingBus.clearCode(item_id);
+  }
+
+  /**
+   * Handle code interpreter code delta events (streaming code)
+   */
+  private async handleCodeInterpreterCodeDelta(data: StreamEvent): Promise<void> {
+    const { item_id, delta } = data;
+    
+    if (!item_id || !delta) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateCodeDelta(data);
+    } else {
+      this.updateStoreStateCodeDelta(data);
+    }
+    // Stream code overlay
+    if (data.item_id && data.delta && typeof data.delta === 'string') {
+      streamingBus.appendCode(data.item_id, data.delta);
+    }
+  }
+
+  /**
+   * Handle code interpreter code done events
+   */
+  private async handleCodeInterpreterCodeDone(data: StreamEvent): Promise<void> {
+    const { item_id, code } = data;
+    
+    if (!item_id) return;
+    
+    if (this.isLocalState()) {
+      this.updateLocalStateCodeDone(data);
+    } else {
+      this.updateStoreStateCodeDone(data);
+    }
+    // Finalize code overlay
+    if (data.item_id && data.code) {
+      streamingBus.setCode(data.item_id, data.code);
+    }
+  }
+
+  /**
    * PROGRESS STATE MANAGEMENT
    */
   
@@ -1078,12 +1064,8 @@ export class FrontendEventHandler {
       startTime: activity ? Date.now() : undefined
     };
 
-    // Update UI state based on current mode
-    if (this.isLocalState()) {
-      this.updateLocalStateProgress();
-    } else {
-      this.updateStoreStateProgress();
-    }
+    // Update UI state only via local overlay; no store writes during streaming
+    this.updateLocalStateProgress();
   }
 
   private updateLocalStateProgress(): void {
@@ -1101,30 +1083,7 @@ export class FrontendEventHandler {
     });
   }
 
-  private updateStoreStateProgress(): void {
-    if (!this.storeInstance || !this.conversationId) return;
-
-    // Update the current event with progress state
-    const state = this.storeInstance.getState();
-    const conversation = state.conversations[this.conversationId];
-    if (!conversation || conversation.events.length === 0) return;
-
-    // Find the last assistant event
-    const lastAssistantEvent = conversation.events
-      .slice()
-      .reverse()
-      .find(event => event.role === 'assistant');
-
-    if (lastAssistantEvent) {
-      this.storeInstance.getState().updateEvent(
-        this.conversationId!,
-        lastAssistantEvent.id,
-        {
-          progressState: { ...this.progressState }
-        }
-      );
-    }
-  }
+  private updateStoreStateProgress(): void { /* no-op */ }
 
   /**
    * Get current progress state
@@ -1134,9 +1093,87 @@ export class FrontendEventHandler {
   }
 
   /**
+   * BUILT-IN TOOL STATE UPDATES
+   */
+
+  /**
+   * Handle built-in tool start for local state
+   */
+  private updateLocalStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
+    if (!this.assistantPlaceholder || !data.item_id) return;
+    streamingBus.startTool(this.assistantPlaceholder.id, data.item_id, toolDisplayName);
+  }
+
+  /**
+   * Handle built-in tool status update for local state
+   */
+  private updateLocalStateBuiltInToolStatus(data: StreamEvent, status: string): void {
+    // Status reflected in overlay badge via completeTool/finalizeTool transitions; no-op here
+  }
+
+  /**
+   * Handle built-in tool complete for local state
+   */
+  private updateLocalStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
+    if (!this.assistantPlaceholder || !data.item_id) return;
+    streamingBus.completeTool(this.assistantPlaceholder.id, data.item_id);
+  }
+
+  /**
+   * Handle code delta streaming for local state
+   */
+  private updateLocalStateCodeDelta(data: StreamEvent): void {
+    if (!this.assistantPlaceholder || !data.item_id || typeof data.delta !== 'string') return;
+    streamingBus.appendCode(data.item_id, data.delta);
+  }
+
+  /**
+   * Handle code done for local state
+   */
+  private updateLocalStateCodeDone(data: StreamEvent): void {
+    if (!data.item_id) return;
+    streamingBus.setCode(data.item_id, data.code || '');
+  }
+
+  /**
+   * Handle built-in tool start for store state
+   */
+  private updateStoreStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
+    return;
+  }
+
+  /**
+   * Handle built-in tool status update for store state
+   */
+  private updateStoreStateBuiltInToolStatus(data: StreamEvent, status: 'in_progress' | 'searching' | 'completed' | 'failed' | 'interpreting'): void {
+    return;
+  }
+
+  /**
+   * Handle built-in tool complete for store state
+   */
+  private updateStoreStateBuiltInToolComplete(data: StreamEvent, _toolType: string): void {
+    return;
+  }
+
+  /**
+   * Handle code delta streaming for store state
+   */
+  private updateStoreStateCodeDelta(data: StreamEvent): void {
+    return;
+  }
+
+  /**
+   * Handle code done for store state
+   */
+  private updateStoreStateCodeDone(data: StreamEvent): void {
+    return;
+  }
+
+  /**
    * Check if we're using local state
    */
   private isLocalState(): boolean {
-    return !!this.localStateUpdater && !!this.assistantPlaceholder;
+    return !!this.localStateUpdater && !!this.assistantPlaceholder && this.useLocalStreaming;
   }
 }

@@ -112,7 +112,7 @@ export function BudCard({ bud, onClick, onEdit, onDelete, showActions = false }:
           </div>
           
           <div className="text-xs text-muted-foreground">
-            {new Date(bud.created_at).toLocaleDateString()}
+            {new Date(bud.created_at ?? Date.now()).toLocaleDateString()}
           </div>
         </div>
       </CardContent>

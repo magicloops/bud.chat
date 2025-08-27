@@ -6,7 +6,19 @@ import { EventId, ToolCallId, ConversationId, generateEventId, generateToolCallI
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export type Segment = 
-  | { type: 'text'; text: string; id?: string; sequence_number?: number; output_index?: number }
+  | { 
+      type: 'text'; 
+      text: string; 
+      id?: string; 
+      sequence_number?: number; 
+      output_index?: number;
+      citations?: Array<{
+        url: string;
+        title: string;
+        start_index: number;
+        end_index: number;
+      }>;
+    }
   | { 
       type: 'tool_call'; 
       id: ToolCallId; 
@@ -29,10 +41,31 @@ export type Segment =
       output_index: number;
       sequence_number: number;
       parts: ReasoningPart[];
-      combined_text?: string;
+      combined_text?: string; // Deprecated in UI; prefer rendering parts
       effort_level?: 'low' | 'medium' | 'high';
       reasoning_tokens?: number;
       // Streaming state (client-side only, not persisted)
+      streaming?: boolean;
+      streaming_part_index?: number; // Which part is currently streaming
+    }
+  | {
+      type: 'web_search_call';
+      id: string; // item_id from OpenAI
+      output_index: number;
+      sequence_number: number;
+      status: 'in_progress' | 'searching' | 'completed' | 'failed';
+      // For streaming state tracking
+      streaming?: boolean;
+    }
+  | {
+      type: 'code_interpreter_call';
+      id: string; // item_id from OpenAI
+      output_index: number;
+      sequence_number: number;
+      status: 'in_progress' | 'interpreting' | 'completed' | 'failed';
+      // Code content (can be streaming)
+      code?: string;
+      // For streaming state tracking
       streaming?: boolean;
     };
 

@@ -19,7 +19,7 @@ import {
   useBudCreateLoading,
   useDeleteBud
 } from '@/state/budStore';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
 
 interface BudSelectionGridProps {
   workspaceId: string
@@ -66,11 +66,12 @@ export function BudSelectionGrid({ workspaceId }: BudSelectionGridProps) {
     router.push(`/chat/new?bud=${budId}`);
   };
 
-  const handleCreateBud = async (config: BudConfig, name: string) => {
+  const handleCreateBud = async (config: BudConfig, name: string, builtInToolsConfig?: BuiltInToolsConfig) => {
     await createBud({
       name,
       config,
-      workspaceId
+      workspaceId,
+      builtInToolsConfig
     });
     // No need to reload - the store automatically updates buds list
   };

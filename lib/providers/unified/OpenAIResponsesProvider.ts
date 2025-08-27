@@ -28,11 +28,15 @@ interface ResponsesCreateParams {
   model: string;
   input: ResponsesInputItem[];
   max_output_tokens: number;
+  include?: string[];
   reasoning?: {
-    effort: 'low' | 'medium' | 'high';
-    summary: 'auto' | 'none';
+    effort: 'minimal' | 'low' | 'medium' | 'high';
+    summary: 'auto' | 'concise' | 'detailed';
   };
-  tools?: ResponsesMCPTool[];
+  text?: {
+    verbosity: 'low' | 'medium' | 'high';
+  };
+  tools?: (ResponsesMCPTool | ResponsesBuiltInTool)[];
 }
 
 interface ResponsesInputItem {
@@ -54,6 +58,12 @@ interface ResponsesMCPTool {
   require_approval: 'never' | 'always' | { never?: { tool_names: string[] }; always?: { tool_names: string[] } };
   allowed_tools?: string[];
   headers?: Record<string, string>;
+}
+
+interface ResponsesBuiltInTool {
+  type: 'web_search_preview' | 'code_interpreter';
+  search_context_size?: 'low' | 'medium' | 'high';
+  container?: string;
 }
 
 export class OpenAIResponsesProvider extends OpenAIBaseProvider {
@@ -87,6 +97,47 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       [ProviderFeature.STREAMING]: true,
     };
   }
+
+  private buildToolsArray(request: UnifiedChatRequest): (ResponsesMCPTool | ResponsesBuiltInTool)[] {
+    const tools: (ResponsesMCPTool | ResponsesBuiltInTool)[] = [];
+    
+    // Add remote MCP tools if configured
+    if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
+      const mcpTools = request.mcpConfig.remote_servers.map(server => ({
+        type: 'mcp' as const,
+        server_label: server.server_label,
+        server_url: server.server_url,
+        require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
+        allowed_tools: server.allowed_tools,
+        headers: server.headers
+      }));
+      tools.push(...mcpTools);
+    }
+    
+    // Add built-in tools if configured
+    if (request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0) {
+      for (const toolType of request.builtInToolsConfig.enabled_tools) {
+        const toolSettings = (request.builtInToolsConfig.tool_settings[toolType] as {
+          search_context_size?: 'low' | 'medium' | 'high'
+          container?: string
+        } | undefined) || {};
+        
+        if (toolType === 'web_search_preview') {
+          tools.push({
+            type: 'web_search_preview',
+            search_context_size: toolSettings.search_context_size || 'medium'
+          });
+        } else if (toolType === 'code_interpreter') {
+          tools.push({
+            type: 'code_interpreter',
+            container: toolSettings.container || 'default'
+          });
+        }
+      }
+    }
+    
+    return tools;
+  }
   
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
@@ -96,29 +147,57 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         model: this.getModelName(request.model),
         input: inputItems,
         max_output_tokens: request.maxTokens || 8000,
+        include: ['reasoning.encrypted_content'],
       };
       
-      // Add remote MCP tools if configured
-      if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        params.tools = request.mcpConfig.remote_servers.map(server => ({
-          type: 'mcp' as const,
-          server_label: server.server_label,
-          server_url: server.server_url,
-          require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
-          allowed_tools: server.allowed_tools,
-          headers: server.headers
-        }));
+      // Add tools (MCP and built-in)
+      const tools = this.buildToolsArray(request);
+      if (tools.length > 0) {
+        params.tools = tools;
       }
       
-      // Add reasoning configuration
+      // Add reasoning configuration - prefer new reasoningConfig over legacy reasoningEffort
+      let reasoningEffort = request.reasoningConfig?.effort || request.reasoningEffort || 'low';
+      
+      // Validate reasoning effort compatibility with built-in tools
+      const hasBuiltInTools = !!(request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0);
+      if (hasBuiltInTools && reasoningEffort === 'minimal') {
+        console.warn('⚠️ [OpenAI Responses] Minimal reasoning effort not compatible with built-in tools, using "low" instead');
+        reasoningEffort = 'low';
+      }
+      
+      // Set appropriate summary default based on model
+      const summaryDefault = request.model.startsWith('gpt-5') ? 'detailed' : 'auto';
+      
       params.reasoning = {
-        effort: request.reasoningEffort || 'medium',
-        summary: 'auto'
+        effort: reasoningEffort as 'minimal' | 'low' | 'medium' | 'high',
+        summary: request.reasoningConfig?.summary || summaryDefault
       };
+      
+      // Add verbosity configuration for GPT-5 series models
+      if (request.textGenerationConfig?.verbosity) {
+        params.text = {
+          verbosity: request.textGenerationConfig.verbosity
+        };
+      }
       
       // Use the OpenAI SDK's responses API
       // Note: The SDK types may not be fully aligned with our custom types
       const response = await this.client.responses.create(params as Parameters<typeof this.client.responses.create>[0]);
+      
+      // Log the response ID for debugging and potential manual verification
+      try {
+        const r = response as unknown as Record<string, unknown>;
+        console.log('🔍 [OpenAI Responses] Response ID:', {
+          id: r && 'id' in r ? (r as { id?: string }).id : undefined,
+          status: r && 'status' in r ? (r as { status?: string }).status : undefined,
+          model: r && 'model' in r ? (r as { model?: string }).model : undefined,
+          created_at: r && 'created_at' in r ? (r as { created_at?: unknown }).created_at : undefined,
+          store: r && 'store' in r ? (r as { store?: unknown }).store : undefined,
+          reasoning_effort: (r as { reasoning?: { effort?: unknown } }).reasoning?.effort,
+          output_count: Array.isArray((r as { output?: unknown[] }).output) ? ((r as { output?: unknown[] }).output as unknown[])?.length : 0
+        });
+      } catch {}
       
       // Convert response output to Event
       const event = this.convertResponseToEvent(response);
@@ -148,26 +227,39 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         input: inputItems,
         max_output_tokens: request.maxTokens || 8000,
         stream: true,
+        include: ['reasoning.encrypted_content'],
       };
       
-      // Add remote MCP tools if configured
-      if (request.mcpConfig?.remote_servers && request.mcpConfig.remote_servers.length > 0) {
-        params.tools = request.mcpConfig.remote_servers.map(server => ({
-          type: 'mcp' as const,
-          server_label: server.server_label,
-          server_url: server.server_url,
-          require_approval: server.require_approval || 'never', // Default to 'never' to allow tool execution
-          allowed_tools: server.allowed_tools,
-          headers: server.headers
-        }));
+      // Add tools (MCP and built-in)
+      const tools = this.buildToolsArray(request);
+      if (tools.length > 0) {
+        params.tools = tools;
       }
       
-      // Add reasoning configuration
+      // Add reasoning configuration - prefer new reasoningConfig over legacy reasoningEffort
+      let reasoningEffort = request.reasoningConfig?.effort || request.reasoningEffort || 'low';
+      
+      // Validate reasoning effort compatibility with built-in tools
+      const hasBuiltInTools = !!(request.builtInToolsConfig?.enabled_tools && request.builtInToolsConfig.enabled_tools.length > 0);
+      if (hasBuiltInTools && reasoningEffort === 'minimal') {
+        console.warn('⚠️ [OpenAI Responses] Minimal reasoning effort not compatible with built-in tools, using "low" instead');
+        reasoningEffort = 'low';
+      }
+      
+      // Set appropriate summary default based on model
+      const summaryDefault = request.model.startsWith('gpt-5') ? 'detailed' : 'auto';
+      
       params.reasoning = {
-        effort: request.reasoningEffort || 'medium',
-        summary: 'auto'
+        effort: reasoningEffort as 'minimal' | 'low' | 'medium' | 'high',
+        summary: request.reasoningConfig?.summary || summaryDefault
       };
       
+      // Add verbosity configuration for GPT-5 series models
+      if (request.textGenerationConfig?.verbosity) {
+        params.text = {
+          verbosity: request.textGenerationConfig.verbosity
+        };
+      }
       
       // Use the OpenAI SDK's responses API with streaming
       // Note: The SDK types may not be fully aligned with our custom types
@@ -189,8 +281,44 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       // Track the current message ID for text segments
       let currentMessageId: string | undefined;
       
+      // Debug: Collect all stream events to understand OpenAI's response structure
+      const debugResponseData: {
+        response_id?: string;
+        reasoning_items: Array<{id: string; summary: unknown[]; output_index?: number; sequence_number?: number}>;
+        message_items: Array<{id: string; role: string; content_preview: string}>;
+        raw_events: Array<{type: string; id?: string; item_id?: string; data?: unknown}>;
+        completion_events: Array<{type: string; timestamp: number; action: string}>;
+      } = {
+        reasoning_items: [],
+        message_items: [],
+        raw_events: [],
+        completion_events: []
+      };
+      
+      let streamCompleted = false;
+      
       // Transform the processed stream to our unified format
       for await (const streamEvent of processedStream as AsyncGenerator<ExtendedStreamEvent>) {
+        // Check for duplicate completion attempts
+        if (streamCompleted) {
+          console.log('⚠️ [DEBUG] Stream already completed, skipping event:', {
+            type: streamEvent.type,
+            timestamp: Date.now()
+          });
+          continue;
+        }
+        // Debug: Capture raw stream events
+        debugResponseData.raw_events.push({
+          type: streamEvent.type,
+          id: streamEvent.id as string | undefined,
+          item_id: streamEvent.item_id as string | undefined,
+          data: streamEvent.type === 'reasoning_start' || streamEvent.type === 'message_start' ? 
+            { output_index: streamEvent.output_index, sequence_number: streamEvent.sequence_number } : 
+            undefined
+        });
+        
+        
+        
         // Log unhandled events
         const handledTypes = [
           'token', 'text_start', 'message_start', 'reasoning_start', 'reasoning_summary_text_delta', 
@@ -201,6 +329,9 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           'mcp_tool_complete', 'mcp_tool_arguments_delta', 'mcp_list_tools',
           'mcp_call_in_progress', 'mcp_call_completed', 'mcp_call_failed',
           'mcp_list_tools_in_progress', 'mcp_list_tools_completed', 'mcp_list_tools_failed',
+          'web_search_call_in_progress', 'web_search_call_searching', 'web_search_call_completed',
+          'response.output_text.annotation.added',
+          'response.created', 'response.in_progress', 'response.completed',
           'error', 'complete', 'finalize_only', 'progress_update', 'progress_hide'
         ];
         
@@ -220,9 +351,60 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         }
         
         switch (streamEvent.type) {
+          case 'response.created':
+          case 'response.in_progress':
+            // Handle response lifecycle events - just capture response ID for now
+            const respObj = streamEvent.response as Record<string, unknown> | undefined;
+            if (respObj && 'id' in respObj && !debugResponseData.response_id) {
+              debugResponseData.response_id = (respObj as { id?: string }).id;
+            }
+            break;
+            
+          case 'response.completed':
+            // Handle response completion - set final metadata and complete
+            console.log('🔚 [DEBUG] Processing response.completed event');
+            debugResponseData.completion_events.push({
+              type: 'response.completed',
+              timestamp: Date.now(),
+              action: 'processing'
+            });
+            
+            const completedResponse = streamEvent.response as Record<string, unknown> | undefined;
+            if (completedResponse && 'id' in completedResponse && !debugResponseData.response_id) {
+              debugResponseData.response_id = (completedResponse as { id?: string }).id;
+            }
+            
+            // Set final response metadata from completed response
+            if (completedResponse) {
+              const r = completedResponse as Record<string, unknown>;
+              currentEvent.response_metadata = {
+                ...currentEvent.response_metadata,
+                openai_response_id: (r as { id?: string }).id,
+                model: (r as { model?: string }).model
+              };
+            }
+            
+            streamCompleted = true;
+            debugResponseData.completion_events.push({
+              type: 'response.completed',
+              timestamp: Date.now(),
+              action: 'sending_done'
+            });
+            console.log('🔚 [DEBUG] Sending done event from response.completed');
+            yield { type: 'done' };
+            console.log('🔚 [DEBUG] Returned after done event from response.completed');
+            return;
+            
           case 'message_start':
             // Capture the message ID for the text content that follows
             currentMessageId = streamEvent.item_id as string;
+            
+            // Debug: Track message item
+            debugResponseData.message_items.push({
+              id: currentMessageId,
+              role: 'assistant',
+              content_preview: '[message starting...]'
+            });
             // console.log('💬 [Responses Provider] Message started with ID:', currentMessageId);
             break;
             
@@ -285,6 +467,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               streaming: true // Mark as streaming
             };
             currentEvent.segments.push(reasoningSegment);
+            
+            // Debug: Track reasoning item
+            debugResponseData.reasoning_items.push({
+              id: reasoningSegment.id,
+              summary: [],
+              output_index: reasoningSegment.output_index,
+              sequence_number: reasoningSegment.sequence_number
+            });
             
             yield {
               type: 'segment',
@@ -567,6 +757,92 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             // MCP call lifecycle events
             break;
             
+          case 'web_search_call_in_progress':
+          case 'web_search_call_searching':
+          case 'web_search_call_completed':
+            // Pass through built-in Web Search events so the frontend can render segments
+            yield {
+              type: streamEvent.type,
+              data: {
+                item_id: streamEvent.item_id,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_in_progress':
+          case 'code_interpreter_call_interpreting':
+          case 'code_interpreter_call_completed':
+            // Pass through Code Interpreter lifecycle events
+            yield {
+              type: streamEvent.type,
+              data: {
+                item_id: streamEvent.item_id,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_code_delta':
+            // Pass through streaming code delta
+            yield {
+              type: 'code_interpreter_call_code_delta',
+              data: {
+                item_id: streamEvent.item_id,
+                delta: streamEvent.delta,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+
+          case 'code_interpreter_call_code_done':
+            // Pass through final code content
+            yield {
+              type: 'code_interpreter_call_code_done',
+              data: {
+                item_id: streamEvent.item_id,
+                code: streamEvent.code,
+                output_index: streamEvent.output_index,
+                sequence_number: streamEvent.sequence_number
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } as any;
+            break;
+            
+          case 'response.output_text.annotation.added':
+            // Handle URL citations - add to the current text segment (optimized)
+            const ann = (streamEvent as { annotation?: { type?: string; url: string; title?: string; start_index?: number; end_index?: number } }).annotation;
+            if (ann?.type === 'url_citation') {
+              // Find the text segment that contains this citation
+              const textSegmentIndex = currentEvent.segments.findIndex(s => s.type === 'text');
+              if (textSegmentIndex >= 0) {
+                const textSegment = currentEvent.segments[textSegmentIndex] as { type: 'text'; text: string; citations?: Array<{url: string; title: string; start_index: number; end_index: number}> };
+                
+                // Add citations array if it doesn't exist
+                if (!textSegment.citations) {
+                  textSegment.citations = [];
+                }
+                
+                // Add the citation
+                textSegment.citations.push({
+                  url: ann.url,
+                  title: ann.title || 'Source',
+                  start_index: ann.start_index || 0,
+                  end_index: ann.end_index || 0
+                });
+                
+                // Don't yield individual citation events - just batch them with the final result
+                // This prevents excessive yielding that slows down the stream
+              }
+            }
+            break;
+            
           case 'progress_update':
             // Pass through progress updates to frontend
             yield {
@@ -592,41 +868,60 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'complete':
-            // Log what we've collected in currentEvent before finishing
-            // console.log('🔍 [Responses Provider] Final currentEvent structure:', {
-            //   id: currentEvent.id,
-            //   role: currentEvent.role,
-            //   segments_count: currentEvent.segments.length,
-            //   segments: currentEvent.segments.map((seg, idx) => ({
-            //     index: idx,
-            //     type: seg.type,
-            //     ...(seg.type === 'text' ? { 
-            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            //       id: (seg as any).id,
-            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            //       text_length: (seg as any).text?.length,
-            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            //       text_preview: (seg as any).text?.substring(0, 50) + '...'
-            //     } : {}),
-            //     ...(seg.type === 'reasoning' ? {
-            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            //       id: (seg as any).id,
-            //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            //       parts_count: (seg as any).parts?.length
-            //     } : {})
-            //   }))
-            // });
+            // Fallback completion event - set metadata if we haven't received response.completed
+            console.log('🔚 [DEBUG] Processing complete fallback event');
+            debugResponseData.completion_events.push({
+              type: 'complete',
+              timestamp: Date.now(),
+              action: 'processing'
+            });
             
+            // If we don't have response metadata yet, we can't get usage info but set what we can
+            if (!currentEvent.response_metadata?.openai_response_id && debugResponseData.response_id) {
+              currentEvent.response_metadata = {
+                ...currentEvent.response_metadata,
+                openai_response_id: debugResponseData.response_id
+              };
+            }
+            
+            streamCompleted = true;
+            debugResponseData.completion_events.push({
+              type: 'complete',
+              timestamp: Date.now(),
+              action: 'sending_done'
+            });
+            console.log('🔚 [DEBUG] Sending done event from complete fallback');
             yield { type: 'done' };
+            console.log('🔚 [DEBUG] Returned after done event from complete fallback');
             return;
             
           case 'finalize_only':
             // Just finalize without sending done
             break;
         }
-      }
-      
-      yield { type: 'done' };
+        }
+        
+        // Stream ended without completion event - this should NOT happen
+        if (!streamCompleted) {
+          debugResponseData.completion_events.push({
+            type: 'stream_end_fallback',
+            timestamp: Date.now(),
+            action: 'processing'
+          });
+          console.log('⚠️ [DEBUG] Stream ended without completion event - sending fallback done');
+          debugResponseData.completion_events.push({
+            type: 'stream_end_fallback',
+            timestamp: Date.now(),
+            action: 'sending_done'
+          });
+          yield { type: 'done' };
+          console.log('🔚 [DEBUG] Sent fallback done event from stream end');
+        } else {
+          console.log('✅ [DEBUG] Stream ended after proper completion');
+        }
+        
+        // Log completion event summary
+        console.log('📊 [DEBUG] Completion events summary:', debugResponseData.completion_events);
       
     } catch (error) {
       console.error('🔴 [Responses Provider] Stream error:', error);
@@ -641,6 +936,21 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   private convertEventsToInputItems(events: Event[]): ResponsesInputItem[] {
     const items: ResponsesInputItem[] = [];
     let messageIndex = 0;
+    
+    // Debug: Collect all reasoning segments from our stored events
+    const storedReasoningSegments = events.flatMap(e => 
+      e.segments
+        .filter((s): s is Extract<typeof e.segments[number], { type: 'reasoning' }> => s.type === 'reasoning')
+        .map((s) => ({
+          id: s.id,
+          partsCount: s.parts.length || 0,
+          combinedText: s.combined_text || '',
+          outputIndex: s.output_index,
+          sequenceNumber: s.sequence_number,
+          isEmpty: s.parts.length === 0 && !(s.combined_text && s.combined_text.trim())
+        }))
+    );
+    
     
     for (const event of events) {
       if (event.role === 'system' || event.role === 'user') {
@@ -666,8 +976,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               text: part.text
             })) || [];
             
-            // Include all reasoning segments, even with empty summaries
-            // They're required to maintain the reasoning->output relationship for tool calls
+            // Always include reasoning segments, even if empty
+            // OpenAI requires all reasoning segments that are referenced by messages
             items.push({
               id: segment.id,
               type: 'reasoning',
@@ -725,6 +1035,12 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
         }
       }
     }
+    
+    const finalReasoningItems = items.filter(item => item.type === 'reasoning');
+    const originalReasoningIds = storedReasoningSegments.map(s => s.id);
+    const finalReasoningIds = finalReasoningItems.map(item => item.id);
+    const skippedReasoningIds = originalReasoningIds.filter(id => !finalReasoningIds.includes(id));
+    
     
     return items;
   }

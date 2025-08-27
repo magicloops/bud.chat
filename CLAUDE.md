@@ -180,9 +180,8 @@ type Segment =
 ## API Patterns
 
 ### API Routes Overview
-- `/api/chat-new` - Create new conversations
-- `/api/chat-events` - Streaming chat with events (primary endpoint)
-- `/api/chat-responses` - OpenAI Responses API integration for reasoning models
+- `/api/chat` - Unified endpoint (creates/continues chats and streams responses)
+- `/api/chat-new` - Legacy new conversation entry (use `/api/chat`)
 - `/api/buds` - Bud CRUD operations
 - `/api/workspaces` - Workspace management
 - `/api/conversations` - Conversation management
@@ -241,9 +240,7 @@ app/                              # Next.js app router
 ├── (chat)/                       # Chat interface pages  
 ├── (workspace)/[workspaceId]/    # Workspace-scoped routes
 ├── api/                          # API route handlers
-│   ├── chat-new/                 # New conversation creation
-│   ├── chat-events/              # Event-based streaming
-│   ├── chat-responses/           # OpenAI Responses API
+│   ├── chat/                     # Unified chat endpoint (POST streams)
 │   ├── buds/                     # Bud management
 │   ├── workspaces/               # Workspace operations
 │   └── mcp/                      # MCP server management

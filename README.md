@@ -37,7 +37,7 @@ render.yaml     # Render services & migrations
 
 ### Data Flow
 
-1. **Client** sends `/api/chat` with a partial message.
+1. **Client** sends `/api/chat` with a partial message (unified streaming endpoint).
 2. **Edge Runtime (Next.js)* verifies Supabase JWT, writes a *pending* row to `message`.
 3. **Server function** calls OpenAI Responses API.  
    * Streams tokens → `LISTEN/NOTIFY` channel `new_token`.

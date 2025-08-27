@@ -24,6 +24,25 @@ export interface BudConfig {
     cssVariables: Record<string, string>
   }
   mcpConfig?: MCPBudConfig
+  reasoningConfig?: ReasoningConfig
+  textGenerationConfig?: TextGenerationConfig
+}
+
+// Built-in Tools Configuration (for OpenAI's built-in tools)
+export interface BuiltInToolsConfig {
+  enabled_tools: string[] // Array of tool types: "web_search_preview", "code_interpreter"
+  tool_settings: Record<string, Record<string, unknown>> // Tool-specific settings
+}
+
+// Reasoning Configuration (for OpenAI Responses API)
+export interface ReasoningConfig {
+  effort?: 'minimal' | 'low' | 'medium' | 'high'
+  summary?: 'auto' | 'concise' | 'detailed'
+}
+
+// Text Generation Configuration (for GPT-5 series)
+export interface TextGenerationConfig {
+  verbosity?: 'low' | 'medium' | 'high'
 }
 
 // Remote MCP Configuration (for OpenAI-hosted MCP servers)
@@ -53,15 +72,34 @@ export interface MCPConversationOverrides {
   tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 }
 
+export interface ReasoningConversationOverrides {
+  effort?: 'minimal' | 'low' | 'medium' | 'high'
+  summary?: 'auto' | 'concise' | 'detailed'
+}
+
+export interface TextGenerationConversationOverrides {
+  verbosity?: 'low' | 'medium' | 'high'
+}
+
+export interface BuiltInToolsConversationOverrides {
+  enabled_tools?: string[] // Override enabled tools for this conversation
+  tool_settings?: Record<string, Record<string, unknown>> // Tool-specific settings overrides
+}
+
 // Database types (actively used)
 export type Conversation = Database['public']['Tables']['conversations']['Row']
 export type Workspace = Database['public']['Tables']['workspaces']['Row']
 export type WorkspaceMember = Database['public']['Tables']['workspace_members']['Row']
 
-// Properly typed Bud with BudConfig for default_json and MCPBudConfig for mcp_config
-export type Bud = Omit<Database['public']['Tables']['buds']['Row'], 'default_json' | 'mcp_config'> & {
+// Properly typed Bud with BudConfig for default_json, MCPBudConfig for mcp_config, 
+// and BuiltInToolsConfig for builtin_tools_config
+export type Bud = Omit<
+  Database['public']['Tables']['buds']['Row'], 
+  'default_json' | 'mcp_config' | 'builtin_tools_config'
+> & {
   default_json: BudConfig
   mcp_config: MCPBudConfig | null
+  builtin_tools_config: BuiltInToolsConfig
 }
 
 // Message Role (still used in MCP)

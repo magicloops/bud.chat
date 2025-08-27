@@ -13,8 +13,7 @@ import {
   useAddConversationToWorkspace,
   useEventChatStore,
   Conversation,
-  ConversationMeta,
-  Event
+  ConversationMeta
 } from '@/state/eventChatStore';
 import { 
   createGreetingEvent, 
@@ -270,20 +269,10 @@ export default function ChatPage({ params }: ChatPageProps) {
     loadBud();
   }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation]);
   
-  // Local streaming state for new conversations
-  const [streamingEvents, setStreamingEvents] = useState<Event[] | null>(null);
+  // Local streaming flag for new conversations (leaf components handle rendering)
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
-  
-  // Clear streaming events when store conversation is ready (for seamless transitions)
-  useEffect(() => {
-    if (!isNewConversation && existingConversation && existingConversation.events.length > 0 && streamingEvents) {
-      setStreamingEvents(null);
-      setIsLocalStreaming(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNewConversation, existingConversation]); // Intentionally omit streamingEvents to prevent infinite loops
 
-  // Message handler for new conversations
+  // Message handler for new conversations  
   const handleSendMessage = useCallback(async (content: string) => {
     if (!selectedWorkspace || !isNewConversation) return;
 
@@ -292,10 +281,9 @@ export default function ChatPage({ params }: ChatPageProps) {
     
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
-    const newEvents = [...currentEvents, userEvent, assistantPlaceholder];
+    // debug logs removed
     
-    // Set local streaming state instead of updating store immediately
-    setStreamingEvents(newEvents);
+    // Set local streaming flag; rendering uses leaf streaming component
     setIsLocalStreaming(true);
     
     // Only update store with user event + placeholder (no streaming updates)
@@ -327,31 +315,55 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
+      // Track the final event emitted by the server so we can commit
+      // canonical segments to the real conversation even if 'complete'
+      // arrives before 'message_final'. We also gate the route swap on
+      // receiving message_final (with a timeout fallback) to avoid the
+      // missing "Show Reasoning" button after swap.
+      let lastFinalEvent: import('@/state/eventChatStore').Event | null = null;
+      let finalReceived = false;
+      let resolveFinal: (() => void) | null = null;
+      const waitForFinal = new Promise<void>((resolve) => { resolveFinal = resolve; });
+
       const eventHandler = new FrontendEventHandler(
         tempConversationId,
         useEventChatStore,
-        { debug: true }
+        { 
+          debug: true,
+          onMessageFinal: (finalEvent) => {
+            // Replace the assistant placeholder in the temp conversation with the canonical final event
+            const store = useEventChatStore.getState();
+            const tempConv = store.conversations[tempConversationId];
+            if (!tempConv) return;
+            const events = [...tempConv.events];
+            // Match the client-side assistant placeholder id
+            const idx = events.findIndex(e => e.id === assistantPlaceholder.id);
+            if (idx >= 0) {
+              events[idx] = finalEvent;
+            } else {
+              events.push(finalEvent);
+            }
+            store.setConversation(tempConversationId, {
+              ...tempConv,
+              events,
+              // keep streaming true until 'complete', but event content is now canonical
+            });
+
+            // Cache for real conversation assembly after 'complete'
+            lastFinalEvent = finalEvent;
+            finalReceived = true;
+            if (resolveFinal) resolveFinal();
+          }
+        }
       );
       
-      // Set up local state updater for streaming and track final events
-      let finalStreamingEvents: Event[] = newEvents; // Track events outside React state
-      
-      // Create a stable updater that doesn't cause re-renders
-      const stableUpdater = (updater: (events: Event[]) => Event[]) => {
-        setStreamingEvents(prevEvents => {
-          if (!prevEvents) return prevEvents;
-          const updated = updater(prevEvents);
-          // Only update if the events actually changed
-          if (updated === prevEvents) return prevEvents;
-          finalStreamingEvents = updated; // Keep sync'd copy for transition
-          return updated;
-        });
-      };
-      
-      eventHandler.setLocalStateUpdater(stableUpdater, assistantPlaceholder);
+      // No local state updater needed for tokens; FrontendEventHandler will write to streaming bus
+      // Use local streaming mode to avoid store writes during /chat/new
+      eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: true });
       
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
+      // debug logs removed
 
       const decoder = new TextDecoder();
       let realConversationId: string | null = null;
@@ -373,18 +385,57 @@ export default function ChatPage({ params }: ChatPageProps) {
                 if (selectedWorkspace && realConversationId) {
                   addConversationToWorkspace(selectedWorkspace, realConversationId);
                 }
+                // debug logs removed
+              } else if (data.type === 'message_final') {
+                await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
-                setIsLocalStreaming(false);
+                // Do not end local streaming yet; keep streaming summary visible
+                // until we have committed the canonical final event (or timed out).
                 
                 
-                if (realConversationId && finalStreamingEvents) {
+                if (realConversationId) {
                   // Create final conversation with completed streaming events
-                  const tempConv = store.conversations[tempConversationId];
+                  const latestStore = useEventChatStore.getState();
+                  const tempConv = latestStore.conversations[tempConversationId];
                   if (tempConv) {
+                    // debug logs removed
+
+                    // Wait briefly for message_final if it hasn't arrived yet
+                    if (!finalReceived) {
+                      const timeout = new Promise<void>((resolve) => setTimeout(resolve, 800));
+                      await Promise.race([waitForFinal, timeout]);
+                    }
+                    // Merge buffered streaming text from bus into the streaming event
+                    const { streamingBus } = await import('@/lib/streaming/streamingBus');
+                    const appended = streamingBus.get(assistantPlaceholder.id);
+                    const mergedEvents = [...tempConv.events];
+                    const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
+                    if (idx >= 0) {
+                      // If we already received message_final, ensure the canonical event is present
+                      if (lastFinalEvent) {
+                        mergedEvents[idx] = lastFinalEvent;
+                      }
+                      const ev = mergedEvents[idx];
+                      const hasNonTextSegments = ev.segments.some(s => s.type !== 'text');
+                      // Only merge appended streaming text if the event is still a plain text placeholder
+                      if (!hasNonTextSegments && appended && appended.length > 0) {
+                        const segIdx = ev.segments.findIndex(s => s.type === 'text');
+                        if (segIdx >= 0) {
+                          const seg = ev.segments[segIdx];
+                          if (seg.type === 'text') {
+                            const newSeg = { ...seg, text: (seg.text || '') + appended };
+                            const newSegments = [...ev.segments];
+                            newSegments[segIdx] = newSeg;
+                            mergedEvents[idx] = { ...ev, segments: newSegments };
+                            // debug logs removed
+                          }
+                        }
+                      }
+                    }
                     const realConv = {
                       ...tempConv,
                       id: realConversationId,
-                      events: finalStreamingEvents, // Use final streaming events
+                      events: mergedEvents,
                       isStreaming: false,
                       streamingEventId: undefined,
                       meta: { 
@@ -393,31 +444,37 @@ export default function ChatPage({ params }: ChatPageProps) {
                       }
                     };
                     
-                    store.setConversation(realConversationId, realConv);
-                    store.removeConversation(tempConversationId);
-                    store.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
+                    // debug logs removed
+                    // Set real conversation first so EventStream can immediately render it
+                    latestStore.setConversation(realConversationId, realConv);
+                    // Clear buses for this event after final text is in store
+                    streamingBus.clear(assistantPlaceholder.id);
+                    streamingBus.clearReasoning(assistantPlaceholder.id);
                     
+                    // Defer removal of the temp conversation until after route swap
+                    // to avoid a brief empty render between temp -> real
+                    setTimeout(() => {
+                      const s = useEventChatStore.getState();
+                      s.removeConversation(tempConversationId);
+                      if (selectedWorkspace) {
+                        s.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
+                      }
+                    }, 0);
+
                     // Update URL using Next.js router - this will trigger pathname updates
+                    // debug logs removed
                     router.replace(`/chat/${realConversationId}`);
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
                     
                     // Clear local streaming state since store now has the data
-                    setStreamingEvents(null);
                     setIsLocalStreaming(false);
                   } else {
                     console.error('No temp conversation found for transition');
                   }
                 } else {
-                  console.error('🚨 ERROR CONDITION:', {
-                    realConversationId: realConversationId,
-                    finalStreamingEvents: finalStreamingEvents,
-                    finalStreamingEventsCount: finalStreamingEvents?.length,
-                    dataType: data.type,
-                    dataKeys: Object.keys(data)
-                  });
-                  console.error('Missing realConversationId or finalStreamingEvents');
+                  console.error('Missing realConversationId when stream completed');
                 }
               } else {
                 await eventHandler.handleStreamEvent(data);
@@ -431,9 +488,10 @@ export default function ChatPage({ params }: ChatPageProps) {
     } catch (error) {
       console.error('Failed to start streaming:', error);
       setIsLocalStreaming(false);
-      setStreamingEvents(null);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud?.id, router]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router]);
+
+  // No periodic flush; leaf components subscribe to streaming bus
 
   // Show loading state
   if ((!isNewConversation && isLoading) || (isNewConversation && budLoading)) {
@@ -469,7 +527,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   // Show loading state only if neither cached conversation nor fresh data is available
   // In cache-first approach, we always try to show something
-  if (!isNewConversation && !isTempConversation && !existingConversation && !conversationData && !streamingEvents && isLoading) {
+  if (!isNewConversation && !isTempConversation && !existingConversation && !conversationData && isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -485,16 +543,14 @@ export default function ChatPage({ params }: ChatPageProps) {
     : 'Type your message...';
 
   // Determine which data source to use
-  const shouldUseStreamingEvents = streamingEvents && streamingEvents.length > 0;
-  
   return (
     <EventStream
       conversationId={isNewConversation ? undefined : workingConversationId}
-      events={shouldUseStreamingEvents ? streamingEvents : isNewConversation && existingConversation?.events ? existingConversation.events : undefined}
+      events={isNewConversation && existingConversation?.events ? existingConversation.events : undefined}
       onSendMessage={isNewConversation ? handleSendMessage : undefined}
       placeholder={placeholder}
       budData={bud || undefined}
-      isStreaming={shouldUseStreamingEvents ? isLocalStreaming : undefined}
+      isStreaming={isNewConversation ? (isLocalStreaming || !!existingConversation?.isStreaming) : undefined}
     />
   );
 

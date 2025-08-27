@@ -12,16 +12,29 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Sparkles } from 'lucide-react';
 import { EmojiPicker } from '@/components/EmojiPicker';
 import { MCPConfigurationPanel, MCPConfiguration } from '@/components/MCP';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig, ReasoningConfig, TextGenerationConfig } from '@/lib/types';
 import { getBudConfig, getDefaultBudConfig, validateBudConfig, BUD_TEMPLATES } from '@/lib/budHelpers';
-import { getModelsForUI, supportsTemperature } from '@/lib/modelMapping';
+import { 
+  getModelsForUI, 
+  supportsTemperature, 
+  getAvailableBuiltInTools, 
+  supportsBuiltInTools,
+  supportsReasoning,
+  supportsReasoningEffort,
+  supportsReasoningSummary,
+  supportsVerbosity,
+  getAvailableReasoningEfforts,
+  getAvailableReasoningSummaryTypes,
+  getAvailableVerbosityLevels
+} from '@/lib/modelMapping';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface BudFormProps {
   bud?: Bud
   workspaceId: string
   open: boolean
   onClose: () => void
-  onSave: (config: BudConfig, name: string) => Promise<void>
+  onSave: (config: BudConfig, name: string, builtInToolsConfig?: BuiltInToolsConfig) => Promise<void>
   loading?: boolean
 }
 
@@ -32,6 +45,16 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>(
     config.mcpConfig || {}
   );
+  const [builtInToolsConfig, setBuiltInToolsConfig] = useState<BuiltInToolsConfig>(() => {
+    // Initialize built-in tools config from bud or default
+    if (bud?.builtin_tools_config) {
+      return bud.builtin_tools_config;
+    }
+    return {
+      enabled_tools: [],
+      tool_settings: {}
+    };
+  });
   const [errors, setErrors] = useState<string[]>([]);
 
   // Reset form when bud changes
@@ -40,10 +63,18 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
       const budConfig = getBudConfig(bud);
       setConfig(budConfig);
       setMcpConfig(budConfig.mcpConfig || {});
+      setBuiltInToolsConfig(bud.builtin_tools_config || {
+        enabled_tools: [],
+        tool_settings: {}
+      });
     } else {
       const defaultConfig = getDefaultBudConfig();
       setConfig(defaultConfig);
       setMcpConfig({});
+      setBuiltInToolsConfig({
+        enabled_tools: [],
+        tool_settings: {}
+      });
     }
     setErrors([]);
   }, [bud]);
@@ -66,7 +97,13 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
         ...config,
         mcpConfig: Object.keys(mcpConfig).length > 0 ? mcpConfig : undefined
       };
-      await onSave(finalConfig, config.name);
+      
+      // Pass built-in tools config separately since it's stored in a separate DB column
+      const finalBuiltInToolsConfig = builtInToolsConfig.enabled_tools.length > 0 
+        ? builtInToolsConfig 
+        : { enabled_tools: [], tool_settings: {} };
+        
+      await onSave(finalConfig, config.name, finalBuiltInToolsConfig);
       onClose();
     } catch (error) {
       console.error('Failed to save bud:', error);
@@ -248,6 +285,250 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
             </CardContent>
           </Card>
           
+          {/* Built-in Tools Configuration */}
+          {supportsBuiltInTools(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Built-in Tools
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Enable OpenAI&apos;s built-in tools for enhanced capabilities. These tools are only available for {config.model}.
+                </p>
+                
+                {getAvailableBuiltInTools(config.model).map(tool => (
+                  <div key={tool.type} className="space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id={tool.type}
+                        checked={builtInToolsConfig.enabled_tools.includes(tool.type)}
+                        onCheckedChange={(checked) => {
+                          const updatedTools = checked
+                            ? [...builtInToolsConfig.enabled_tools, tool.type]
+                            : builtInToolsConfig.enabled_tools.filter(t => t !== tool.type);
+                          
+                          const updatedConfig = {
+                            ...builtInToolsConfig,
+                            enabled_tools: updatedTools
+                          };
+                          
+                          setBuiltInToolsConfig(updatedConfig);
+                        }}
+                      />
+                      <div className="grid gap-1.5 leading-none">
+                        <label 
+                          htmlFor={tool.type}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                        >
+                          {tool.name}
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {tool.description}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Tool-specific settings */}
+                    {builtInToolsConfig.enabled_tools.includes(tool.type) && (
+                      <div className="ml-6 space-y-2">
+                        {tool.type === 'web_search_preview' && (
+                          <div>
+                            <label className="text-xs font-medium">Search Context Size</label>
+                            <Select
+                              value={(
+                                builtInToolsConfig.tool_settings[tool.type] as { search_context_size?: string } | undefined
+                              )?.search_context_size ?? 'medium'}
+                              onValueChange={(value) => {
+                                setBuiltInToolsConfig({
+                                  ...builtInToolsConfig,
+                                  tool_settings: {
+                                    ...builtInToolsConfig.tool_settings,
+                                    [tool.type]: {
+                                      ...builtInToolsConfig.tool_settings[tool.type],
+                                      search_context_size: value
+                                    }
+                                  }
+                                });
+                              }}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="low">Low - Minimal context</SelectItem>
+                                <SelectItem value="medium">Medium - Balanced context</SelectItem>
+                                <SelectItem value="high">High - Maximum context</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {getAvailableBuiltInTools(config.model).length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No built-in tools are available for this model.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Reasoning Configuration */}
+          {supportsReasoning(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Reasoning Configuration
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Configure how {config.model} approaches reasoning for better performance and control.
+                </p>
+                
+                {supportsReasoningEffort(config.model) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Reasoning Effort</label>
+                    <Select
+                      value={config.reasoningConfig?.effort || 'medium'}
+                      onValueChange={(value) => {
+                        setConfig({
+                          ...config,
+                          reasoningConfig: {
+                            ...config.reasoningConfig,
+                            effort: value as 'minimal' | 'low' | 'medium' | 'high'
+                          }
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableReasoningEfforts(config.model, builtInToolsConfig.enabled_tools.length > 0).map(effort => (
+                          <SelectItem key={effort} value={effort}>
+                            <div className="flex flex-col">
+                              <span className="capitalize">{effort}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {effort === 'minimal' && 'Fastest response, minimal reasoning'}
+                                {effort === 'low' && 'Fast response, basic reasoning'}
+                                {effort === 'medium' && 'Balanced speed and reasoning quality'}
+                                {effort === 'high' && 'Thorough reasoning, slower response'}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Controls how much computational effort the model puts into reasoning before responding.
+                    </p>
+                  </div>
+                )}
+                
+                {supportsReasoningSummary(config.model) && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Reasoning Summary</label>
+                    <Select
+                      value={config.reasoningConfig?.summary || (config.model.startsWith('gpt-5') ? 'detailed' : 'auto')}
+                      onValueChange={(value) => {
+                        setConfig({
+                          ...config,
+                          reasoningConfig: {
+                            ...config.reasoningConfig,
+                            summary: value as 'auto' | 'concise' | 'detailed'
+                          }
+                        });
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableReasoningSummaryTypes(config.model).map(summaryType => (
+                          <SelectItem key={summaryType} value={summaryType}>
+                            <div className="flex flex-col">
+                              <span className="capitalize">{summaryType}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {summaryType === 'auto' && 'Automatic summary generation'}
+                                {summaryType === 'concise' && 'Brief reasoning summary'}
+                                {summaryType === 'detailed' && 'Comprehensive reasoning explanation'}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Choose how detailed the reasoning explanation should be in the response.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          
+          {/* Verbosity Configuration */}
+          {supportsVerbosity(config.model) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Response Verbosity
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Control how verbose and detailed the model&apos;s responses are.
+                </p>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">Verbosity Level</label>
+                  <Select
+                    value={config.textGenerationConfig?.verbosity || 'medium'}
+                    onValueChange={(value) => {
+                      setConfig({
+                        ...config,
+                        textGenerationConfig: {
+                          ...config.textGenerationConfig,
+                          verbosity: value as 'low' | 'medium' | 'high'
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getAvailableVerbosityLevels(config.model).map(verbosity => (
+                        <SelectItem key={verbosity} value={verbosity}>
+                          <div className="flex flex-col">
+                            <span className="capitalize">{verbosity}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {verbosity === 'low' && 'Concise, minimal commentary'}
+                              {verbosity === 'medium' && 'Balanced detail and brevity'}
+                              {verbosity === 'high' && 'Detailed explanations and examples'}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Affects response length and detail level. High verbosity provides more thorough explanations.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
           {/* MCP Configuration */}
           <MCPConfigurationPanel
             workspaceId={workspaceId}
@@ -264,7 +545,7 @@ export function BudForm({ bud, workspaceId, open, onClose, onSave, loading = fal
               value={config.greeting || ''}
               onChange={(e) => setConfig({...config, greeting: e.target.value})}
               rows={3}
-              placeholder="Hello! I'm here to help you with..."
+              placeholder="Hello! I&apos;m here to help you with..."
             />
             <p className="text-xs text-muted-foreground mt-1">
               This message will appear when starting a new conversation with this bud.

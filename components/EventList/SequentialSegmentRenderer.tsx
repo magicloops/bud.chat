@@ -1,13 +1,14 @@
 'use client';
 
 import React from 'react';
-import { ReasoningSegment } from './ReasoningSegment';
-import { ToolCallSegment } from './ToolCallSegment';
+// Legacy segment renderers are no longer used for steps
 import { TextSegment } from './TextSegment';
+import StreamingTextSegment from './StreamingTextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
+// Steps UI is rendered by EventItem; keep this renderer focused on content
 
 interface SequentialSegmentRendererProps {
   event: Event;
@@ -42,45 +43,52 @@ export function SequentialSegmentRenderer({
     return aSeq - bSeq;
   });
 
+  let firstTextRendered = false;
+
   const renderSegment = (segment: Segment, index: number) => {
-    const key = segment.type === 'reasoning' || segment.type === 'tool_call' 
+    const key = segment.type === 'reasoning' || segment.type === 'tool_call' || 
+                segment.type === 'web_search_call' || segment.type === 'code_interpreter_call'
       ? segment.id || `${segment.type}-${index}`
       : `${segment.type}-${index}`;
 
     switch (segment.type) {
       case 'reasoning':
-        return (
-          <ReasoningSegment
-            key={key}
-            segment={segment}
-            isStreaming={isStreaming}
-            autoExpanded={segment.streaming || isStreaming}
-            isLastSegment={index === sortedSegments.length - 1}
-          />
-        );
+        // Hidden; shown via StepsOverlay/StepsDropdown
+        return null;
         
       case 'tool_call':
-        return (
-          <ToolCallSegment
-            key={key}
-            segment={segment}
-            event={event}
-            allEvents={allEvents}
-            isStreaming={isStreaming}
-          />
-        );
+        // Hidden; shown via StepsOverlay/StepsDropdown
+        return null;
         
-      case 'text':
+      case 'text': {
+        // When streaming, render a streaming text segment for the first text segment only
+        if (isStreaming && !firstTextRendered) {
+          firstTextRendered = true;
+          return (
+            <StreamingTextSegment
+              key={key}
+              eventId={event.id}
+              baseText={segment.text || ''}
+              isStreaming={true}
+            />
+          );
+        }
         return (
           <TextSegment
             key={key}
             segment={segment}
           />
         );
+      }
         
       case 'tool_result':
         // Tool results are rendered inline with their corresponding tool calls
         // So we don't render them separately here
+        return null;
+        
+      case 'web_search_call':
+      case 'code_interpreter_call':
+        // Hidden; shown via StepsOverlay/StepsDropdown
         return null;
         
       default:
@@ -95,18 +103,13 @@ export function SequentialSegmentRenderer({
   const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
   const hasContent = sortedSegments.length > 0;
   
-  // Check if we should show typing indicator
-  // Only show if: assistant role, streaming, and only has empty text segment(s)
-  const shouldShowTypingIndicator = event.role === 'assistant' && 
-    isStreaming && 
-    sortedSegments.length > 0 &&
-    sortedSegments.every(seg => 
-      seg.type === 'text' && (!seg.text || !seg.text.trim())
-    );
+  // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
+  const shouldShowTypingIndicator = false;
 
   return (
     <div className={className}>
       {sortedSegments.map(renderSegment)}
+      {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}
       {shouldShowTypingIndicator && (

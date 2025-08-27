@@ -45,7 +45,7 @@ import {
   useUpdateBud,
   useDeleteBud
 } from '@/state/budStore';
-import { Bud, BudConfig } from '@/lib/types';
+import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
 import { getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers';
 
 interface BudsManagementPageProps {
@@ -91,21 +91,23 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
   // Get unique models for filter
   const availableModels = [...new Set(buds.map(bud => getBudModel(bud as unknown as Bud)))];
 
-  const handleCreateBud = async (config: BudConfig, name: string) => {
+  const handleCreateBud = async (config: BudConfig, name: string, builtInToolsConfig?: BuiltInToolsConfig) => {
     await createBud({
       name,
       config,
-      workspaceId
+      workspaceId,
+      builtInToolsConfig
     });
     // No need to reload - store automatically updates
   };
 
-  const handleEditBud = async (config: BudConfig, name: string) => {
+  const handleEditBud = async (config: BudConfig, name: string, builtInToolsConfig?: BuiltInToolsConfig) => {
     if (!editingBud) return;
     
     await updateBud(editingBud.id, {
       name,
-      config
+      config,
+      builtInToolsConfig
     });
     // No need to reload - store automatically updates
     setEditingBud(null);
@@ -334,7 +336,7 @@ export default function BudsManagementPage({ params }: BudsManagementPageProps) 
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(bud.created_at).toLocaleDateString()}
+                        {new Date(bud.created_at ?? Date.now()).toLocaleDateString()}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

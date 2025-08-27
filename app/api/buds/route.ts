@@ -4,13 +4,14 @@ import { createClient } from '@/lib/supabase/server';
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
 import { WorkspaceId, toWorkspaceId, generateBudId } from '@/lib/types/branded';
 // import { BudId } from '@/lib/types/branded'; // Type not currently used
-import { BudConfig } from '@/lib/types';
+import { BudConfig, BuiltInToolsConfig } from '@/lib/types';
 
 export interface CreateBudRequest {
   name: string
   config: BudConfig
   workspaceId: string
   isPublic?: boolean
+  builtInToolsConfig?: BuiltInToolsConfig
 }
 
 // Helper to validate workspace membership
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient();
     const body: CreateBudRequest = await request.json();
 
-    const { name, config, workspaceId } = body;
+    const { name, config, workspaceId, builtInToolsConfig } = body;
 
     // Validate required fields
     if (!name || !config || !workspaceId) {
@@ -126,6 +127,7 @@ export async function POST(request: NextRequest) {
         name,
         default_json: budConfig,
         mcp_config: mcpConfig || {},
+        builtin_tools_config: builtInToolsConfig || { enabled_tools: [], tool_settings: {} },
         workspace_id: validatedWorkspaceId,
         owner_user_id: user.id
       })

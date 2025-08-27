@@ -8,6 +8,10 @@ import { ToolCallId } from '@/lib/types/branded';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
+import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
+import StreamingTextSegment from './StreamingTextSegment';
+import { streamingBus } from '@/lib/streaming/streamingBus';
+import StepsPanel from './StepsPanel';
 import {
   Copy,
   Edit,
@@ -55,6 +59,40 @@ export const EventItemSequential = memo(function EventItemSequential({
   const isAssistant = event.role === 'assistant';
   const isTool = event.role === 'tool';
   
+  // Determine if this event is the active streaming placeholder
+  const session = streamingSessionManager.getState();
+  const isStreamingActive = isAssistant && session.active && session.assistantEventId === event.id;
+  
+  // Streaming header status: reasoning vs tools vs typing
+  const [headerStatus, setHeaderStatus] = useState<'thinking' | 'using-tools' | 'typing'>('thinking');
+  useEffect(() => {
+    if (!(isStreamingActive || isStreaming)) return;
+    const compute = () => {
+      const tools = streamingBus.getTools(event.id);
+      if (tools && tools.some(t => t.status === 'in_progress' || t.status === 'finalized')) {
+        setHeaderStatus('using-tools');
+        return;
+      }
+      const parts = streamingBus.getReasoningParts(event.id);
+      if (parts && parts.length > 0 && parts.some(p => !p.is_complete)) {
+        setHeaderStatus('thinking');
+        return;
+      }
+      const text = streamingBus.get(event.id);
+      if (text && text.length > 0) {
+        setHeaderStatus('typing');
+        return;
+      }
+      // Default to thinking at stream start
+      setHeaderStatus('thinking');
+    };
+    const unsubA = streamingBus.subscribeTools(event.id, compute);
+    const unsubB = streamingBus.subscribeReasoningParts(event.id, compute);
+    const unsubC = streamingBus.subscribe(event.id, compute);
+    compute();
+    return () => { unsubA(); unsubB(); unsubC(); };
+  }, [isStreamingActive, isStreaming, event.id]);
+  
   // Extract text content for fallback and editing
   const textContent = event.segments
     .filter(s => s.type === 'text')
@@ -82,6 +120,8 @@ export const EventItemSequential = memo(function EventItemSequential({
   const hasSegments = event.segments && event.segments.length > 0;
   const hasReasoningSegments = event.segments.some(s => s.type === 'reasoning');
   const hasToolCalls = event.segments.some(s => s.type === 'tool_call');
+  // Outer steps toggle removed; rely on inner Reasoning/Tool controls
+
   
   // Load bud data if conversation has a source_bud_id
   const bud = useBud(conversation?.meta?.source_bud_id || '');
@@ -243,7 +283,13 @@ export const EventItemSequential = memo(function EventItemSequential({
                 {isUser ? 'You' : assistantName}
               </span>
               <span className="text-xs text-muted-foreground">
-                · {isStreaming ? (hasReasoningSegments || hasToolCalls ? 'thinking...' : 'typing...') : formatEventDuration(event, _index)}
+                · {isStreamingActive
+                    ? headerStatus === 'using-tools'
+                      ? 'using tools...'
+                      : headerStatus === 'typing'
+                        ? 'typing...'
+                        : 'thinking...'
+                    : formatEventDuration(event, _index)}
               </span>
             </div>
           )}
@@ -253,14 +299,25 @@ export const EventItemSequential = memo(function EventItemSequential({
             {isStreaming && !hasSegments && (
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
             )}
-            
-            {/* Sequential segment rendering */}
-            {hasSegments && (
-              <SequentialSegmentRenderer
-                event={event}
-                allEvents={allEvents}
-                isStreaming={isStreaming}
-              />
+
+            {/* Steps panel on top (handles both streaming and non-streaming) */}
+            {((isStreamingActive || isStreaming) || (hasSegments && (hasReasoningSegments || hasToolCalls))) && (
+              <div className="mb-2">
+                <StepsPanel event={event} allEvents={allEvents} isStreaming={isStreamingActive || isStreaming} />
+              </div>
+            )}
+
+            {/* Content: stream text for active placeholder; otherwise render segments */}
+            {isStreamingActive ? (
+              <StreamingTextSegment eventId={event.id} baseText={''} isStreaming={true} />
+            ) : (
+              hasSegments && (
+                <SequentialSegmentRenderer
+                  event={event}
+                  allEvents={allEvents}
+                  isStreaming={isStreaming}
+                />
+              )
             )}
             
             

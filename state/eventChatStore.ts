@@ -38,6 +38,7 @@ export interface EventConversationMeta {
   assistant_avatar?: string
   model_config_overrides?: Record<string, unknown>
   mcp_config_overrides?: Record<string, unknown>
+  builtin_tools_config_overrides?: Record<string, unknown>
   created_at: string
 }
 
@@ -122,6 +123,7 @@ export const useEventChatStore = create<EventChatStore>()(
         
         // Conversation actions
         setConversation: (id, conversation) => set((state) => {
+          const existing = state.conversations[id];
           state.conversations[id] = conversation;
           
           // Auto-sync: when setting a full conversation, also create/update the summary

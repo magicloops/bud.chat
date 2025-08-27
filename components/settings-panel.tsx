@@ -9,14 +9,28 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ChevronRight, HelpCircle, Palette, PanelRightClose, Save, Wrench, Sparkles } from 'lucide-react';
 import { useModel } from '@/contexts/model-context';
 import { useToast } from '@/hooks/use-toast';
-import { BudConfig } from '@/lib/types';
+import { BudConfig, BuiltInToolsConfig, ReasoningConfig, TextGenerationConfig } from '@/lib/types';
 import { useConversation, useSetConversation } from '@/state/eventChatStore';
 import { useBud, useUpdateBud } from '@/state/budStore';
 import { EmojiPicker } from '@/components/EmojiPicker';
-import { getModelsForUI, getDefaultModel, supportsTemperature } from '@/lib/modelMapping';
+import { 
+  getModelsForUI, 
+  getDefaultModel, 
+  supportsTemperature, 
+  supportsBuiltInTools, 
+  getAvailableBuiltInTools,
+  supportsReasoning,
+  supportsReasoningEffort,
+  supportsReasoningSummary,
+  supportsVerbosity,
+  getAvailableReasoningEfforts,
+  getAvailableReasoningSummaryTypes,
+  getAvailableVerbosityLevels
+} from '@/lib/modelMapping';
 import { MCPConfigurationPanel } from '@/components/MCP/MCPConfigurationPanel';
 import type { MCPConfiguration } from '@/components/MCP/MCPConfigurationPanel';
 
@@ -29,6 +43,9 @@ interface ConversationOverrides {
   maxTokens?: number
   avatar?: string
   mcpConfig?: MCPConfiguration
+  builtInToolsConfig?: BuiltInToolsConfig
+  reasoningConfig?: ReasoningConfig
+  textGenerationConfig?: TextGenerationConfig
 }
 
 interface SettingsPanelProps {
@@ -71,9 +88,13 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const budConfig = bud?.default_json as unknown as BudConfig | undefined;
   const conversationOverrides = conversation?.meta.model_config_overrides as ConversationOverrides | undefined;
   const mcpOverrides = conversation?.meta.mcp_config_overrides as MCPConfiguration | undefined;
+  const builtInToolsOverrides = conversation?.meta.builtin_tools_config_overrides as BuiltInToolsConfig | undefined;
   
   // MCP config comes from top-level mcp_config field, not nested in default_json
   const budMcpConfig = bud?.mcp_config as MCPConfiguration | undefined;
+  
+  // Built-in tools config comes from top-level builtin_tools_config field
+  const budBuiltInToolsConfig = bud?.builtin_tools_config as BuiltInToolsConfig | undefined;
 
   // Form state with default values from bud config and overrides from conversation
   const [chatName, setChatName] = useState('');
@@ -85,6 +106,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [avatar, setAvatar] = useState('');
   const [currentTheme, setCurrentTheme] = useState<{name: string, cssVariables: Record<string, string>} | undefined>(undefined);
   const [mcpConfig, setMcpConfig] = useState<MCPConfiguration>({});
+  const [builtInToolsConfig, setBuiltInToolsConfig] = useState<BuiltInToolsConfig>({ enabled_tools: [], tool_settings: {} });
+  const [reasoningConfig, setReasoningConfig] = useState<ReasoningConfig>({});
+  const [textGenerationConfig, setTextGenerationConfig] = useState<TextGenerationConfig>({});
 
   // Track original values for change detection
   const [originalValues, setOriginalValues] = useState({
@@ -96,7 +120,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     maxTokens: undefined as number | undefined,
     avatar: '',
     mcpConfig: {} as MCPConfiguration,
-    customTheme: undefined as {name: string, cssVariables: Record<string, string>} | undefined
+    customTheme: undefined as {name: string, cssVariables: Record<string, string>} | undefined,
+    builtInToolsConfig: { enabled_tools: [], tool_settings: {} } as BuiltInToolsConfig,
+    reasoningConfig: {} as ReasoningConfig,
+    textGenerationConfig: {} as TextGenerationConfig
   });
 
   // Update form values when props change
@@ -109,15 +136,6 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       return; // Don't update until bud is loaded
     }
 
-    // Debug logging
-    console.log('🔧 Settings Panel - Data loaded:', {
-      panelMode,
-      conversation: conversation?.meta,
-      bud: bud?.default_json,
-      conversationOverrides,
-      mcpOverrides,
-      budConfig: budConfig ? { name: budConfig.name, avatar: budConfig.avatar, model: budConfig.model, mcpConfig: budConfig.mcpConfig } : null
-    });
     
     // Get available models to validate
     const availableModels = getModelsForUI().map(m => m.value);
@@ -139,6 +157,14 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = budConfig?.maxTokens || undefined;
       const finalAvatar = budConfig?.avatar || '';
       const finalMcpConfig = budMcpConfig || {};
+      const finalBuiltInToolsConfig = normalizeBuiltInToolsConfig(budBuiltInToolsConfig);
+      const finalReasoningConfig = budConfig?.reasoningConfig || {};
+      const finalTextGenerationConfig = budConfig?.textGenerationConfig || {};
+      
+      console.log('🔧 [Settings Panel] Bud mode final config:', {
+        budBuiltInToolsConfig,
+        finalBuiltInToolsConfig
+      });
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -148,6 +174,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       setMaxTokens(finalMaxTokens);
       setAvatar(finalAvatar);
       setMcpConfig(finalMcpConfig);
+      setBuiltInToolsConfig(finalBuiltInToolsConfig);
+      setReasoningConfig(finalReasoningConfig);
+      setTextGenerationConfig(finalTextGenerationConfig);
       
       // Set original values for bud mode
       setOriginalValues({
@@ -159,7 +188,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         maxTokens: finalMaxTokens,
         avatar: finalAvatar,
         mcpConfig: finalMcpConfig,
-        customTheme: budConfig?.customTheme
+        customTheme: budConfig?.customTheme,
+        builtInToolsConfig: finalBuiltInToolsConfig,
+        reasoningConfig: finalReasoningConfig,
+        textGenerationConfig: finalTextGenerationConfig
       });
     } else {
       // Chat mode: Use conversation overrides with bud fallbacks
@@ -169,7 +201,6 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       
       // Validate model exists in available options
       const validModel = availableModels.includes(chatModel) ? chatModel : getDefaultModel();
-      console.log('🔧 Settings Panel - Chat mode model:', { conversationModel: conversationOverrides?.model, budConfigModel: budConfig?.model, finalModel: chatModel, validModel, availableModels: availableModels.slice(0, 3) });
       
       const finalChatName = newChatName;
       const finalAssistantName = newAssistantName;
@@ -178,6 +209,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       const finalMaxTokens = conversationOverrides?.maxTokens || budConfig?.maxTokens || undefined;
       const finalAvatar = conversationOverrides?.avatar || conversation?.meta.assistant_avatar || budConfig?.avatar || '';
       const finalMcpConfig = mcpOverrides || budMcpConfig || {};
+      const finalBuiltInToolsConfig = normalizeBuiltInToolsConfig(builtInToolsOverrides || budBuiltInToolsConfig);
+      const finalReasoningConfig = conversationOverrides?.reasoningConfig || budConfig?.reasoningConfig || {};
+      const finalTextGenerationConfig = conversationOverrides?.textGenerationConfig || budConfig?.textGenerationConfig || {};
       
       setChatName(finalChatName);
       setAssistantName(finalAssistantName);
@@ -187,6 +221,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
       setMaxTokens(finalMaxTokens);
       setAvatar(finalAvatar);
       setMcpConfig(finalMcpConfig);
+      setBuiltInToolsConfig(finalBuiltInToolsConfig);
+      setReasoningConfig(finalReasoningConfig);
+      setTextGenerationConfig(finalTextGenerationConfig);
       
       // Set original values for chat mode
       setOriginalValues({
@@ -198,7 +235,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         maxTokens: finalMaxTokens,
         avatar: finalAvatar,
         mcpConfig: finalMcpConfig,
-        customTheme: budConfig?.customTheme
+        customTheme: budConfig?.customTheme,
+        builtInToolsConfig: finalBuiltInToolsConfig,
+        reasoningConfig: finalReasoningConfig,
+        textGenerationConfig: finalTextGenerationConfig
       });
     }
     
@@ -233,6 +273,21 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     }
     
     return normalized;
+  };
+
+  // Ensure built-in tools config always has required shape
+  const normalizeBuiltInToolsConfig = (
+    cfg?: Partial<BuiltInToolsConfig> | null
+  ): BuiltInToolsConfig => {
+    let enabled: string[] = [];
+    if (cfg && Array.isArray(cfg.enabled_tools)) {
+      enabled = cfg.enabled_tools as string[];
+    }
+    let settings: Record<string, Record<string, unknown>> = {};
+    if (cfg && cfg.tool_settings && typeof cfg.tool_settings === 'object') {
+      settings = cfg.tool_settings as Record<string, Record<string, unknown>>;
+    }
+    return { enabled_tools: enabled, tool_settings: settings };
   };
 
   // Effect to check for changes whenever form values change
@@ -296,6 +351,15 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         break;
       case 'mcpConfig':
         setMcpConfig(value as object);
+        break;
+      case 'builtInToolsConfig':
+        setBuiltInToolsConfig(value as BuiltInToolsConfig);
+        break;
+      case 'reasoningConfig':
+        setReasoningConfig(value as ReasoningConfig);
+        break;
+      case 'textGenerationConfig':
+        setTextGenerationConfig(value as TextGenerationConfig);
         break;
     }
   };
@@ -402,10 +466,15 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           maxTokens: maxTokens,
           avatar: avatar || currentConfig.avatar || '',
           customTheme: currentTheme,
-          mcpConfig: mcpConfig
+          mcpConfig: mcpConfig,
+          reasoningConfig: Object.keys(reasoningConfig).length > 0 ? reasoningConfig : undefined,
+          textGenerationConfig: Object.keys(textGenerationConfig).length > 0 ? textGenerationConfig : undefined
         };
         
-        await updateBud(bud.id, { config: updatedConfig });
+        await updateBud(bud.id, { 
+          config: updatedConfig, 
+          builtInToolsConfig: builtInToolsConfig 
+        });
         
         toast({
           title: 'Saved!',
@@ -438,7 +507,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
         temperature: temperature !== (budConfig?.temperature || 1) ? temperature : undefined,
         maxTokens: maxTokens !== (budConfig?.maxTokens || undefined) ? maxTokens : undefined,
         avatar: avatar !== (budConfig?.avatar || '') ? avatar : undefined,
-        mcpConfig: JSON.stringify(mcpConfig) !== JSON.stringify(budConfig?.mcpConfig || {}) ? mcpConfig : undefined
+        mcpConfig: JSON.stringify(mcpConfig) !== JSON.stringify(budConfig?.mcpConfig || {}) ? mcpConfig : undefined,
+        builtInToolsConfig: JSON.stringify(builtInToolsConfig) !== JSON.stringify(budBuiltInToolsConfig || { enabled_tools: [], tool_settings: {} }) ? builtInToolsConfig : undefined,
+        reasoningConfig: JSON.stringify(reasoningConfig) !== JSON.stringify(budConfig?.reasoningConfig || {}) ? reasoningConfig : undefined,
+        textGenerationConfig: JSON.stringify(textGenerationConfig) !== JSON.stringify(budConfig?.textGenerationConfig || {}) ? textGenerationConfig : undefined
       };
       
       // Remove undefined values
@@ -472,7 +544,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
             assistant_name: assistantName, // Use exact form value
             assistant_avatar: avatar, // Use exact form value
             model_config_overrides: Object.keys(currentOverrides).length > 0 ? currentOverrides : null,
-            mcp_config_overrides: Object.keys(mcpConfig).length > 0 ? mcpConfig : null 
+            mcp_config_overrides: Object.keys(mcpConfig).length > 0 ? mcpConfig : null,
+            builtin_tools_config_overrides: currentOverrides.builtInToolsConfig ? builtInToolsConfig : null 
           })
         });
       } catch (error) {
@@ -493,7 +566,10 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
           mcpConfig: mcpConfig
         };
         
-        await updateBud(bud.id, { config: updatedBudConfig });
+        await updateBud(bud.id, { 
+          config: updatedBudConfig, 
+          builtInToolsConfig: builtInToolsConfig 
+        });
         
         // Set conversation fields to match the updated bud values
         const updatedConversation = {
@@ -516,7 +592,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
               assistant_name: assistantName, // Set to bud name
               assistant_avatar: avatar, // Set to bud avatar
               model_config_overrides: null, // Clear model overrides
-              mcp_config_overrides: null // Clear MCP overrides since they're now in the bud
+              mcp_config_overrides: null, // Clear MCP overrides since they're now in the bud
+              builtin_tools_config_overrides: null // Clear built-in tools overrides since they're now in the bud
             })
           });
         } catch (error) {
@@ -706,6 +783,263 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                   </Select>
                 </div>
 
+                {/* Built-in Tools - only show for supported models */}
+                {supportsBuiltInTools(aiModel) && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <label className="text-sm font-medium">Built-in Tools</label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Enable OpenAI&apos;s built-in tools for enhanced capabilities with {aiModel}.
+                    </p>
+                    
+                    {getAvailableBuiltInTools(aiModel).map(tool => (
+                      <div key={tool.type} className="space-y-3">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id={tool.type}
+                            checked={builtInToolsConfig.enabled_tools.includes(tool.type)}
+                            onCheckedChange={(checked) => {
+                              const updatedTools = checked
+                                ? [...builtInToolsConfig.enabled_tools, tool.type]
+                                : builtInToolsConfig.enabled_tools.filter(t => t !== tool.type);
+                              
+                              const updatedConfig = {
+                                ...builtInToolsConfig,
+                                enabled_tools: updatedTools
+                              };
+                              setBuiltInToolsConfig(updatedConfig);
+                              handleFieldChange('builtInToolsConfig', updatedConfig);
+                            }}
+                          />
+                          <div className="grid gap-1.5 leading-none">
+                            <label 
+                              htmlFor={tool.type}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                            >
+                              {tool.name}
+                            </label>
+                            <p className="text-xs text-muted-foreground">
+                              {tool.description}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Tool-specific settings */}
+                        {builtInToolsConfig.enabled_tools.includes(tool.type) && (
+                          <div className="ml-6 space-y-2">
+                            {tool.type === 'web_search_preview' && (
+                              <div>
+                                <label className="text-xs font-medium">Search Context Size</label>
+                                <Select
+                                  value={(
+                                    builtInToolsConfig.tool_settings[tool.type] as { search_context_size?: string } | undefined
+                                  )?.search_context_size ?? 'medium'}
+                                  onValueChange={(value) => {
+                                    const updatedConfig = {
+                                      ...builtInToolsConfig,
+                                      tool_settings: {
+                                        ...builtInToolsConfig.tool_settings,
+                                        [tool.type]: {
+                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          search_context_size: value
+                                        }
+                                      }
+                                    };
+                                    setBuiltInToolsConfig(updatedConfig);
+                                    handleFieldChange('builtInToolsConfig', updatedConfig);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="low">Low - Minimal context</SelectItem>
+                                    <SelectItem value="medium">Medium - Balanced context</SelectItem>
+                                    <SelectItem value="high">High - Maximum context</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                            
+                            {tool.type === 'code_interpreter' && (
+                              <div>
+                                <label className="text-xs font-medium">Container</label>
+                                <Select
+                                  value={(
+                                    builtInToolsConfig.tool_settings[tool.type] as { container?: string } | undefined
+                                  )?.container ?? 'default'}
+                                  onValueChange={(value) => {
+                                    const updatedConfig = {
+                                      ...builtInToolsConfig,
+                                      tool_settings: {
+                                        ...builtInToolsConfig.tool_settings,
+                                        [tool.type]: {
+                                          ...builtInToolsConfig.tool_settings[tool.type],
+                                          container: value
+                                        }
+                                      }
+                                    };
+                                    setBuiltInToolsConfig(updatedConfig);
+                                    handleFieldChange('builtInToolsConfig', updatedConfig);
+                                  }}
+                                >
+                                  <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="default">Default Python Environment</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Reasoning Configuration - only show for reasoning models */}
+                {supportsReasoning(aiModel) && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <label className="text-sm font-medium">Reasoning Configuration</label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Configure how {aiModel} approaches reasoning for better performance and control.
+                    </p>
+                    
+                    {supportsReasoningEffort(aiModel) && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Reasoning Effort</label>
+                        <Select
+                          value={reasoningConfig.effort || 'medium'}
+                          onValueChange={(value) => {
+                            const updatedConfig = {
+                              ...reasoningConfig,
+                              effort: value as 'minimal' | 'low' | 'medium' | 'high'
+                            };
+                            setReasoningConfig(updatedConfig);
+                            handleFieldChange('reasoningConfig', updatedConfig);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {getAvailableReasoningEfforts(aiModel, builtInToolsConfig.enabled_tools.length > 0).map(effort => (
+                              <SelectItem key={effort} value={effort}>
+                                <div className="flex flex-col">
+                                  <span className="capitalize">{effort}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {effort === 'minimal' && 'Fastest response, minimal reasoning'}
+                                    {effort === 'low' && 'Fast response, basic reasoning'}
+                                    {effort === 'medium' && 'Balanced speed and reasoning quality'}
+                                    {effort === 'high' && 'Thorough reasoning, slower response'}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Controls how much computational effort the model puts into reasoning before responding.
+                        </p>
+                      </div>
+                    )}
+                    
+                    {supportsReasoningSummary(aiModel) && (
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Reasoning Summary</label>
+                        <Select
+                          value={reasoningConfig.summary || (aiModel.startsWith('gpt-5') ? 'detailed' : 'auto')}
+                          onValueChange={(value) => {
+                            const updatedConfig = {
+                              ...reasoningConfig,
+                              summary: value as 'auto' | 'concise' | 'detailed'
+                            };
+                            setReasoningConfig(updatedConfig);
+                            handleFieldChange('reasoningConfig', updatedConfig);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {getAvailableReasoningSummaryTypes(aiModel).map(summaryType => (
+                              <SelectItem key={summaryType} value={summaryType}>
+                                <div className="flex flex-col">
+                                  <span className="capitalize">{summaryType}</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {summaryType === 'auto' && 'Automatic summary generation'}
+                                    {summaryType === 'concise' && 'Brief reasoning summary'}
+                                    {summaryType === 'detailed' && 'Comprehensive reasoning explanation'}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Choose how detailed the reasoning explanation should be in the response.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Verbosity Configuration - only show for verbosity-supporting models */}
+                {supportsVerbosity(aiModel) && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <label className="text-sm font-medium">Response Verbosity</label>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Control how verbose and detailed the model&apos;s responses are.
+                    </p>
+                    
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Verbosity Level</label>
+                      <Select
+                        value={textGenerationConfig.verbosity || 'medium'}
+                        onValueChange={(value) => {
+                          const updatedConfig = {
+                            ...textGenerationConfig,
+                            verbosity: value as 'low' | 'medium' | 'high'
+                          };
+                          setTextGenerationConfig(updatedConfig);
+                          handleFieldChange('textGenerationConfig', updatedConfig);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getAvailableVerbosityLevels(aiModel).map(verbosity => (
+                            <SelectItem key={verbosity} value={verbosity}>
+                              <div className="flex flex-col">
+                                <span className="capitalize">{verbosity}</span>
+                                <span className="text-xs text-muted-foreground">
+                                  {verbosity === 'low' && 'Concise, minimal commentary'}
+                                  {verbosity === 'medium' && 'Balanced detail and brevity'}
+                                  {verbosity === 'high' && 'Detailed explanations and examples'}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Affects response length and detail level. High verbosity provides more thorough explanations.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* AI Goals / Instructions - only show in bud mode */}
                 {panelMode === 'bud' && (
                   <div className="space-y-2">
@@ -716,7 +1050,7 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </div>
                     <Textarea
                       id="ai-goals"
-                      placeholder="Your Bud's goal, personality, and info it needs. (Recommended)"
+                      placeholder="Your Bud&apos;s goal, personality, and info it needs. (Recommended)"
                       className="min-h-[100px]"
                       value={systemPrompt}
                       onChange={(e) => {
