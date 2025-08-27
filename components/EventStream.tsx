@@ -37,7 +37,6 @@ const EventStreamComponent = function EventStream({
   conversationId,
   className 
 }: EventStreamProps) {
-  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
   const isNewConversation = !conversationId && events !== undefined;
   const conversation = useConversation(conversationId || '');
   
@@ -84,15 +83,7 @@ const EventStreamComponent = function EventStream({
     // Add optimistic UI updates
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
-    if (DEBUG_STREAM) {
-      console.log('[STREAM][existing] Creating optimistic pair', {
-        conversationId,
-        userEventId: userEvent.id,
-        assistantId: assistantPlaceholder.id,
-        prevCount: conversation.events.length,
-        nextCount: conversation.events.length + 2,
-      });
-    }
+    // debug logs removed
     
     
     // Add events optimistically to store

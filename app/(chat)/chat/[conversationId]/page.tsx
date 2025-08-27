@@ -33,7 +33,6 @@ interface ChatPageProps {
 }
 
 export default function ChatPage({ params }: ChatPageProps) {
-  const DEBUG_STREAM = process.env.NODE_ENV !== 'production';
   const resolvedParams = use(params);
   const initialConversationId = resolvedParams.conversationId;
   const searchParams = useSearchParams();
@@ -282,15 +281,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     
     const userEvent = createUserEvent(content);
     const assistantPlaceholder = createAssistantPlaceholder();
-    if (DEBUG_STREAM) {
-      console.log('[STREAM][new] Creating optimistic pair', {
-        tempConversationId,
-        userEventId: userEvent.id,
-        assistantId: assistantPlaceholder.id,
-        prevCount: currentEvents.length,
-        nextCount: currentEvents.length + 2,
-      });
-    }
+    // debug logs removed
     
     // Set local streaming flag; rendering uses leaf streaming component
     setIsLocalStreaming(true);
@@ -372,9 +363,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
-      if (DEBUG_STREAM) {
-        console.log('[STREAM][new] Started reader for temp conversation', { tempConversationId });
-      }
+      // debug logs removed
 
       const decoder = new TextDecoder();
       let realConversationId: string | null = null;
@@ -396,12 +385,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                 if (selectedWorkspace && realConversationId) {
                   addConversationToWorkspace(selectedWorkspace, realConversationId);
                 }
-                if (DEBUG_STREAM) {
-                  console.log('[STREAM][new] Conversation created', {
-                    tempConversationId,
-                    realConversationId,
-                  });
-                }
+                // debug logs removed
               } else if (data.type === 'message_final') {
                 await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
@@ -414,14 +398,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                   const latestStore = useEventChatStore.getState();
                   const tempConv = latestStore.conversations[tempConversationId];
                   if (tempConv) {
-                    if (DEBUG_STREAM) {
-                      console.log('[STREAM][new] Completing stream', {
-                        tempConversationId,
-                        realConversationId,
-                        tempEventCount: tempConv.events.length,
-                        streamingEventId: tempConv.streamingEventId,
-                      });
-                    }
+                    // debug logs removed
 
                     // Wait briefly for message_final if it hasn't arrived yet
                     if (!finalReceived) {
@@ -450,13 +427,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                             const newSegments = [...ev.segments];
                             newSegments[segIdx] = newSeg;
                             mergedEvents[idx] = { ...ev, segments: newSegments };
-                            if (DEBUG_STREAM) {
-                              console.log('[STREAM][new] Merge applied', {
-                                appendedLength: appended?.length || 0,
-                                segIdx,
-                                newTextLen: (newSeg.text || '').length,
-                              });
-                            }
+                            // debug logs removed
                           }
                         }
                       }
@@ -473,13 +444,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                       }
                     };
                     
-                    if (DEBUG_STREAM) {
-                      console.log('[STREAM][new] Setting real conversation', {
-                        realConversationId,
-                        mergedEventCount: mergedEvents.length,
-                        lastTwoRoles: mergedEvents.slice(-2).map(e => e.role),
-                      });
-                    }
+                    // debug logs removed
                     // Set real conversation first so EventStream can immediately render it
                     latestStore.setConversation(realConversationId, realConv);
                     // Clear buses for this event after final text is in store
@@ -497,9 +462,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                     }, 0);
 
                     // Update URL using Next.js router - this will trigger pathname updates
-                    if (DEBUG_STREAM) {
-                      console.log('[STREAM][new] Replacing route to real conversation');
-                    }
+                    // debug logs removed
                     router.replace(`/chat/${realConversationId}`);
                     
                     // Update the current conversation ID for this component
@@ -526,7 +489,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       console.error('Failed to start streaming:', error);
       setIsLocalStreaming(false);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router, DEBUG_STREAM]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router]);
 
   // No periodic flush; leaf components subscribe to streaming bus
 
