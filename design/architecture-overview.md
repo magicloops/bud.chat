@@ -110,9 +110,7 @@ This design enables:
 ### 6. API Routes
 
 #### Chat Endpoints
-- `/api/chat-new` - Create new conversations
-- `/api/chat-events` - Streaming chat with events
-- `/api/chat-responses` - OpenAI Responses API integration
+- `/api/chat` - Unified endpoint for creating/continuing chats with streaming
 - `/api/chat/[conversationId]` - Legacy endpoint (being phased out)
 
 #### Resource Management

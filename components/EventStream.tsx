@@ -10,6 +10,7 @@ import { getDefaultModel } from '@/lib/modelMapping';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
+import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
 
 interface EventStreamProps {
   // For local state (new conversations)
@@ -105,6 +106,13 @@ const EventStreamComponent = function EventStream({
     
     
     store.setConversation(conversationId, updatedConversation);
+
+    // Start streaming session (ephemeral UI-only) after placeholder exists
+    streamingSessionManager.start({
+      streamId: crypto.randomUUID(),
+      conversationId,
+      assistantEventId: assistantPlaceholder.id,
+    });
     
     // Use unified frontend event handler for existing conversations
     
@@ -123,12 +131,36 @@ const EventStreamComponent = function EventStream({
       
       // Create unified event handler for existing conversations - use SAME approach as new conversations
       const eventHandler = new FrontendEventHandler(
-        null, // No store updates during streaming - keep it local
+        null, // Avoid store-backed updates during streaming
         null,
-        { debug: true }
+        { 
+          debug: true,
+          onMessageFinal: (finalEvent) => {
+            // Append or replace placeholder with the canonical event
+            const storeNow = useEventChatStore.getState();
+            const convNow = storeNow.conversations[conversationId];
+            if (!convNow) return;
+            const eventsNow = [...convNow.events];
+            const idxNow = eventsNow.findIndex(e => e.id === assistantPlaceholder.id);
+            if (idxNow >= 0) {
+              eventsNow[idxNow] = finalEvent;
+            } else {
+              eventsNow.push(finalEvent);
+            }
+            storeNow.setConversation(conversationId, {
+              ...convNow,
+              events: eventsNow,
+              isStreaming: false,
+              streamingEventId: undefined
+            });
+            // Tear down overlays
+            streamingSessionManager.complete();
+          }
+        }
       );
-      // Provide placeholder so handler can route streaming overlays
-      eventHandler.setLocalStateUpdater(() => {}, assistantPlaceholder, { useLocalStreaming: false });
+      // Provide a no-op local updater but attach the placeholder for streaming overlays
+      const noopUpdater = (_updater: (events: Event[]) => Event[]) => { /* no store churn during streaming */ };
+      eventHandler.setLocalStateUpdater(noopUpdater, assistantPlaceholder, { useLocalStreaming: true });
       
       // Streaming flag only; leaf components handle token rendering
       
@@ -139,66 +171,8 @@ const EventStreamComponent = function EventStream({
       
       // Process streaming response with unified handler
       await eventHandler.processStreamingResponse(response);
-      
-      // After streaming completes, update store with final events including buffered text
-      if (DEBUG_STREAM) {
-        console.log('[STREAM][existing] Completing stream', {
-          conversationId,
-          streamingEventId: assistantPlaceholder.id,
-          currentEventCount: conversation.events.length,
-        });
-      }
-      const bus = (await import('@/lib/streaming/streamingBus')).streamingBus;
-      const appended = bus.get(assistantPlaceholder.id);
-      // Important: read the latest conversation from the store (not the stale closure)
-      const latestStore = useEventChatStore.getState();
-      const latestConv = latestStore.conversations[conversationId];
-      const mergedEvents = latestConv ? [...latestConv.events] : [...conversation.events];
-      const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
-      if (DEBUG_STREAM) {
-        console.log('[STREAM][existing] Merge details', {
-          assistantId: assistantPlaceholder.id,
-          appendedLength: appended?.length || 0,
-          foundEventIndex: mergedEvents.findIndex(e => e.id === assistantPlaceholder.id),
-        });
-      }
-      if (idx >= 0) {
-        const ev = mergedEvents[idx];
-        const segIdx = ev.segments.findIndex(s => s.type === 'text');
-        if (DEBUG_STREAM) {
-          const prevTextLen = segIdx >= 0 && ev.segments[segIdx].type === 'text' ? (ev.segments[segIdx] as { type: 'text'; text: string }).text.length : -1;
-          console.log('[STREAM][existing] Merge indices', { segIdx, prevTextLen });
-        }
-        if (segIdx >= 0 && ev.segments[segIdx].type === 'text') {
-          const seg = ev.segments[segIdx];
-          const newSeg = { ...seg, text: (seg.text || '') + appended };
-          const newSegments = [...ev.segments];
-          newSegments[segIdx] = newSeg;
-          mergedEvents[idx] = { ...ev, segments: newSegments };
-          if (DEBUG_STREAM) {
-            console.log('[STREAM][existing] Merge applied', { newTextLen: (newSeg.text || '').length });
-          }
-        }
-      }
-
-      // After streaming completes, update store with final events
-      const finalConv = {
-        ...(latestConv || conversation),
-        events: mergedEvents,
-        isStreaming: false,
-        streamingEventId: undefined
-      };
-      if (DEBUG_STREAM) {
-        console.log('[STREAM][existing] Setting conversation with merged events', {
-          eventCount: mergedEvents.length,
-          lastTwoRoles: mergedEvents.slice(-2).map(e => e.role),
-        });
-      }
-      store.setConversation(conversationId, finalConv);
-
-      // Now clear the buses for this event so overlays disappear after final text is present
-      bus.clear(assistantPlaceholder.id);
-      bus.clearReasoning(assistantPlaceholder.id);
+      // No merge fallback; onMessageFinal commits the event
+      setIsLocalStreaming(false);
       
       // Clear local streaming state
       setIsLocalStreaming(false);
@@ -207,6 +181,7 @@ const EventStreamComponent = function EventStream({
       
       // Clear local streaming state on error
       setIsLocalStreaming(false);
+      streamingSessionManager.complete();
       
       // Remove optimistic updates on error
       const errorStore = useEventChatStore.getState();
@@ -298,6 +273,8 @@ const EventStreamComponent = function EventStream({
           </div>
         )}
       </div>
+
+      {/* Streaming message renders inline within EventList via EventItemSequential */}
 
       {/* Composer */}
       <div className="flex-shrink-0">

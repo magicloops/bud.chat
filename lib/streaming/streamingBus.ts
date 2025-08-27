@@ -6,6 +6,9 @@ class StreamingBus {
   // Reasoning buffers keyed by eventId (assistant placeholder id)
   private reasoning = new Map<string, string>();
   private reasoningSubs = new Map<string, Set<Callback>>();
+  // Tool call overlays keyed by assistant event id
+  private tools = new Map<string, Map<string, { id: string; name: string; display_name?: string; server_label?: string; status: 'in_progress' | 'finalized' | 'completed' | 'failed'; args?: string; error?: string }>>();
+  private toolsSubs = new Map<string, Set<Callback>>();
   // Code buffers keyed by tool item_id
   private code = new Map<string, string>();
   private codeSubs = new Map<string, Set<Callback>>();
@@ -79,6 +82,56 @@ class StreamingBus {
 
   private emitReasoning(eventId: string) {
     const set = this.reasoningSubs.get(eventId);
+    if (!set) return;
+    set.forEach(fn => fn());
+  }
+
+  // Tools overlay API
+  startTool(eventId: string, toolId: string, name: string, opts?: { display_name?: string; server_label?: string }) {
+    let map = this.tools.get(eventId);
+    if (!map) { map = new Map(); this.tools.set(eventId, map); }
+    map.set(toolId, { id: toolId, name, display_name: opts?.display_name, server_label: opts?.server_label, status: 'in_progress' });
+    this.emitTools(eventId);
+  }
+  finalizeTool(eventId: string, toolId: string, argsJson?: string) {
+    const map = this.tools.get(eventId);
+    if (!map) return;
+    const entry = map.get(toolId);
+    if (!entry) return;
+    entry.status = 'finalized';
+    if (argsJson) entry.args = argsJson;
+    this.emitTools(eventId);
+  }
+  completeTool(eventId: string, toolId: string, opts?: { error?: string }) {
+    const map = this.tools.get(eventId);
+    if (!map) return;
+    const entry = map.get(toolId);
+    if (!entry) return;
+    entry.status = opts?.error ? 'failed' : 'completed';
+    if (opts?.error) entry.error = opts.error;
+    this.emitTools(eventId);
+  }
+  clearTools(eventId: string) {
+    this.tools.delete(eventId);
+    this.emitTools(eventId);
+  }
+  getTools(eventId: string): Array<{ id: string; name: string; display_name?: string; server_label?: string; status: 'in_progress' | 'finalized' | 'completed' | 'failed'; args?: string; error?: string }> {
+    const map = this.tools.get(eventId);
+    return map ? Array.from(map.values()) : [];
+  }
+  subscribeTools(eventId: string, cb: Callback): () => void {
+    let set = this.toolsSubs.get(eventId);
+    if (!set) { set = new Set(); this.toolsSubs.set(eventId, set); }
+    set.add(cb);
+    return () => {
+      const s = this.toolsSubs.get(eventId);
+      if (!s) return;
+      s.delete(cb);
+      if (s.size === 0) this.toolsSubs.delete(eventId);
+    };
+  }
+  private emitTools(eventId: string) {
+    const set = this.toolsSubs.get(eventId);
     if (!set) return;
     set.forEach(fn => fn());
   }

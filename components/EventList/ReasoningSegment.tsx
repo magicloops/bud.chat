@@ -43,7 +43,7 @@ export function ReasoningSegment({
   isLastSegment = false,
   className 
 }: ReasoningSegmentProps) {
-  const [isExpanded, setIsExpanded] = useState(autoExpanded || isStreaming);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [wasManuallyToggled, setWasManuallyToggled] = useState(false);
   const [wasStreaming, setWasStreaming] = useState(autoExpanded || isStreaming || segment.streaming);
   
@@ -93,7 +93,7 @@ export function ReasoningSegment({
   // );
   
   // Auto-show reasoning while streaming, otherwise user controls visibility
-  const shouldShowReasoning = isReasoningStreaming || isExpanded;
+  const shouldShowReasoning = isExpanded;
   
   // Don't render if no content and not streaming (allow empty segments during streaming)
   if (!hasAnyContent && !isReasoningStreaming) {
@@ -106,9 +106,8 @@ export function ReasoningSegment({
       data-testid={`segment-reasoning-${segment.sequence_number || 'no-seq'}`}
       data-type="reasoning"
     >
-      {/* Only show toggle button when not streaming */}
-      {!isReasoningStreaming && (
-        <Button
+      {/* Toggle button (always visible) */}
+      <Button
           variant="ghost"
           size="sm"
           onClick={() => {
@@ -124,7 +123,6 @@ export function ReasoningSegment({
             isExpanded && "rotate-180"
           )} />
         </Button>
-      )}
       
       {shouldShowReasoning && (
         <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">

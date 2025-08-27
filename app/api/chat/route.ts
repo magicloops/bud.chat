@@ -1036,6 +1036,15 @@ export async function POST(request: NextRequest) {
                       console.error('🔴 [Chat API] Error saving existing conversation events:', error);
                     }
                   }
+
+                  // Emit final canonical assistant event to client for store append
+                  if (currentEvent) {
+                    try {
+                      send({ type: 'message_final', event: currentEvent });
+                    } catch (e) {
+                      console.warn('⚠️ [Chat API] Failed to emit message_final:', e);
+                    }
+                  }
                   
                   // Close connection after saving
                   controller.close();
