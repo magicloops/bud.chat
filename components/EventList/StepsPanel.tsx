@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Event } from '@/state/eventChatStore';
-import { Segment } from '@/lib/types/events';
+import { Segment, ReasoningPart } from '@/lib/types/events';
 import { ReasoningSegment } from './ReasoningSegment';
 import { ToolCallSegment } from './ToolCallSegment';
 import { BuiltInToolSegment } from './BuiltInToolSegment';
@@ -51,11 +51,15 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
   // Gather reasoning content availability from either persisted segments or streaming bus
   const streamingParts = isStreaming ? streamingBus.getReasoningParts(event.id) : [];
   const hasStreamingReasoningContent = streamingParts.some(p => (p.text || '').trim().length > 0);
-  const hasPersistedReasoningContent = ordered.some(seg => seg.type === 'reasoning' && (seg as any).parts?.some((p: any) => (p.text || '').trim().length > 0));
+  const hasPersistedReasoningContent = ordered.some(
+    (seg): seg is Extract<Segment, { type: 'reasoning' }> =>
+      seg.type === 'reasoning' && Array.isArray(seg.parts) && seg.parts.some((p: ReasoningPart) => (p.text || '').trim().length > 0)
+  );
   const hasAnyReasoningContent = hasPersistedReasoningContent || hasStreamingReasoningContent;
 
   // Helper: build a transient reasoning segment from streaming parts for the Show Reasoning panel
-  const buildStreamingReasoningSegment = (): any => ({
+  type ReasoningSegmentType = Extract<Segment, { type: 'reasoning' }>;
+  const buildStreamingReasoningSegment = (): ReasoningSegmentType => ({
     type: 'reasoning',
     id: `streaming-reasoning-${event.id}`,
     output_index: 0,
@@ -88,8 +92,11 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
           {hasAnyReasoningContent && (
             <ReasoningSegment
               // During streaming, prefer transient segment from bus; otherwise fall back to persisted ordering
-              // @ts-expect-error segment shape is compatible
-              segment={hasPersistedReasoningContent ? (ordered.find(s => s.type === 'reasoning') as any) : buildStreamingReasoningSegment()}
+              segment={
+                hasPersistedReasoningContent
+                  ? (ordered.find((s): s is ReasoningSegmentType => s.type === 'reasoning') as ReasoningSegmentType)
+                  : buildStreamingReasoningSegment()
+              }
               isStreaming={false}
               autoExpanded={false}
               isLastSegment={true}
@@ -98,14 +105,13 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
         </>
       ) : (
         ordered.map((segment, idx) => {
-          const key = (segment as any).id || `${segment.type}-${idx}`;
+          const key = ('id' in segment && segment.id) ? (segment as { id: string }).id : `${segment.type}-${idx}`;
           switch (segment.type) {
             case 'reasoning':
               return (
                 <ReasoningSegment
                   key={key}
-                  // @ts-expect-error segment shape is compatible
-                  segment={segment as any}
+                  segment={segment as Extract<Segment, { type: 'reasoning' }>}
                   isStreaming={false}
                   autoExpanded={false}
                   isLastSegment={idx === ordered.length - 1}
@@ -115,8 +121,7 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
               return (
                 <ToolCallSegment
                   key={key}
-                  // @ts-expect-error segment shape is compatible
-                  segment={segment as any}
+                  segment={segment as Extract<Segment, { type: 'tool_call' }>}
                   event={event}
                   allEvents={allEvents}
                   isStreaming={false}
@@ -127,8 +132,7 @@ export function StepsPanel({ event, allEvents, isStreaming = false, className }:
               return (
                 <BuiltInToolSegment
                   key={key}
-                  // @ts-expect-error segment shape is compatible
-                  segment={segment as any}
+                  segment={segment as Extract<Segment, { type: 'web_search_call' } | { type: 'code_interpreter_call' }>}
                   isStreaming={false}
                 />
               );

@@ -1047,9 +1047,6 @@ export async function POST(request: NextRequest) {
                   // 2) Emit message_final before complete so clients can commit canonical event
                   if (currentEvent) {
                     try {
-                      if (process.env.NODE_ENV !== 'production') {
-                        console.log('[API] emitting message_final to client', { eventId: currentEvent.id });
-                      }
                       send({ type: 'message_final', event: currentEvent });
                     } catch (e) {
                       console.warn('⚠️ [Chat API] Failed to emit message_final:', e);
@@ -1057,9 +1054,6 @@ export async function POST(request: NextRequest) {
                   }
 
                   // 3) Emit complete event after message_final
-                  if (process.env.NODE_ENV !== 'production') {
-                    console.log('[API] emitting complete to client');
-                  }
                   sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
                   console.log('🔚 [Chat API] Sent complete event to frontend');
 
@@ -1080,32 +1074,22 @@ export async function POST(request: NextRequest) {
             }
           }
           
-          // Send completion
-          send({ type: 'conversationId', conversationId });
-          
-          const finalContent = allNewEvents
-            .filter(e => e.role === 'assistant')
-            .flatMap(e => e.segments)
-            .filter(s => s.type === 'text')
-            .map(s => s.type === 'text' ? s.text : '')
-            .join('');
-          
-          // Note: Final completion and done events are now handled immediately in the 'done' case above
-          // This ensures the frontend gets unblocked as soon as the provider signals completion
-          
+          // Note: Final completion and done events are handled in the 'done' case above
+          // No further sends are needed here.
         } catch (error) {
           console.error('Stream processing error:', error);
           
-          // Send error in the format the frontend expects
-          send({
-            type: 'error',
-            error: error instanceof Error ? error.message : String(error)
-          });
+          // Send error in unified SSE format (encode directly here to avoid helper scope issues)
+          try {
+            controller.enqueue(encoder.encode(
+              streamingFormat.formatSSE(
+                streamingFormat.error(error instanceof Error ? error : new Error(String(error)))
+              )
+            ));
+          } catch {}
           controller.close();
           // Mark closed so later accidental sends are ignored
-          // (provider streams may continue emitting briefly)
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const _ = (isClosed = true);
+          // (provider streams may continue emitting briefly). We already closed the controller.
         }
       }
     });

@@ -4,11 +4,11 @@ import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 import { ProgressState, ActivityType } from '@/lib/types/progress';
-import { ToolCallId, generateEventId } from '@/lib/types/branded';
+import { ToolCallId } from '@/lib/types/branded';
 // import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
-  type: 'token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
+  type: 'token' | 'text_token' | 'tool_start' | 'tool_arguments_delta' | 'tool_finalized' | 'tool_result' | 'tool_complete' | 'complete' | 'error'
     // MCP event types (remote MCP tools)
     | 'mcp_tool_start' | 'mcp_tool_arguments_delta' | 'mcp_tool_finalized' | 'mcp_tool_complete' 
     | 'mcp_list_tools' | 'mcp_approval_request'
@@ -230,21 +230,13 @@ export class FrontendEventHandler {
         await this.handleMCPApprovalRequestEvent(data);
         break;
       case 'complete':
-        if (this.options.debug && process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console
-          console.log('[FE] complete received');
-        }
         await this.handleCompleteEvent(data);
         break;
       case 'message_final':
         // Final, canonical assistant event from server
-        if ((data as any).event && this.options.onMessageFinal) {
+        if (data.event && this.options.onMessageFinal) {
           try {
-            if (this.options.debug && process.env.NODE_ENV !== 'production') {
-              // eslint-disable-next-line no-console
-              console.log('[FE] message_final received', { eventId: (data as any).event.id });
-            }
-            this.options.onMessageFinal((data as any).event as Event);
+            this.options.onMessageFinal(data.event as Event);
           } catch (e) {
             if (this.options.debug) console.error('onMessageFinal error:', e);
           }
@@ -867,8 +859,8 @@ export class FrontendEventHandler {
    * MCP STORE STATE UPDATES
    */
 
-  private updateStoreStateMCPToolStart(data: StreamEvent): void {
-    this.updateStoreStateToolStart(data);
+  private updateStoreStateMCPToolStart(_data: StreamEvent): void {
+    // No-op: we do not mutate store mid-stream for tool starts; overlays handle visibility
   }
 
   private updateStoreStateMCPToolFinalized(data: StreamEvent): void {

@@ -3,8 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { streamingBus } from '@/lib/streaming/streamingBus';
-import { Badge } from '@/components/ui/badge';
-import { Loader2 } from 'lucide-react';
+// no extra UI chrome imports needed here
 
 interface StreamingReasoningSegmentProps {
   eventId: string;

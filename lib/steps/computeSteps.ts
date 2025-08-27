@@ -64,10 +64,8 @@ export function computeStepsForEvent(event: Event): Step[] {
           tool_id: seg.id,
           name: seg.name,
           args: seg.args,
-          // @ts-expect-error optional fields present on Responses path
-          output: (seg as any).output,
-          // @ts-expect-error optional fields present on Responses path
-          error: (seg as any).error,
+          output: seg.output,
+          error: seg.error,
           output_index: safeOut(seg.output_index),
           sequence_number: safeSeq(seg.sequence_number),
         };
@@ -87,4 +85,3 @@ export function computeStepsForEvent(event: Event): Step[] {
 
   return steps;
 }
-

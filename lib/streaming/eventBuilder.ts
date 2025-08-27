@@ -1,6 +1,6 @@
 // EventStreamBuilder for building events during streaming
 
-import { Event, Segment, Role, ReasoningData } from '@/lib/types/events';
+import { Event, Segment, Role, ReasoningData, ReasoningPart } from '@/lib/types/events';
 import { ToolCallId, EventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 
@@ -42,25 +42,24 @@ export class EventStreamBuilder {
     id: string;
     output_index?: number;
     sequence_number?: number;
-    parts?: Array<{ summary_index: number; type: 'summary_text'; text: string; sequence_number: number; is_complete: boolean; created_at: number }>;
+    parts?: ReasoningPart[];
     combined_text?: string;
     effort_level?: 'low' | 'medium' | 'high';
     reasoning_tokens?: number;
     streaming_part_index?: number | undefined;
   }): void {
-    const existing = this.reasoningSegments.get(params.id) as (Segment & { type: 'reasoning' }) | undefined;
+    type ReasoningSeg = Extract<Segment, { type: 'reasoning' }>;
+    const existing = this.reasoningSegments.get(params.id) as ReasoningSeg | undefined;
     // Merge parts if provided
-    let mergedParts: Array<{ summary_index: number; type: 'summary_text'; text: string; sequence_number: number; is_complete: boolean; created_at: number }> = [] as any;
-    const incomingParts = (params.parts ?? []) as any[];
-    const existingParts = (existing?.parts ?? []) as any[];
-    if (existingParts.length > 0) mergedParts = existingParts.map(p => ({ ...p }));
+    const mergedParts: ReasoningPart[] = existing?.parts ? existing.parts.map(p => ({ ...p })) : [];
+    const incomingParts: ReasoningPart[] = params.parts ?? [];
     for (const p of incomingParts) {
       const idx = mergedParts.findIndex(ep => ep.summary_index === p.summary_index);
       if (idx >= 0) mergedParts[idx] = { ...mergedParts[idx], ...p };
       else mergedParts.push(p);
     }
 
-    const next: Segment & { type: 'reasoning' } = {
+    const next: ReasoningSeg = {
       type: 'reasoning',
       id: params.id,
       output_index: params.output_index ?? existing?.output_index ?? 0,
@@ -71,12 +70,12 @@ export class EventStreamBuilder {
       reasoning_tokens: params.reasoning_tokens ?? existing?.reasoning_tokens,
       streaming: params.streaming_part_index !== undefined,
       streaming_part_index: params.streaming_part_index
-    } as any;
+    };
 
     this.reasoningSegments.set(params.id, next);
 
     // Replace or append in segments array
-    const idx = this.segments.findIndex(s => s.type === 'reasoning' && (s as any).id === params.id);
+    const idx = this.segments.findIndex(s => s.type === 'reasoning' && (s as ReasoningSeg).id === params.id);
     if (idx >= 0) {
       this.segments[idx] = next;
     } else {

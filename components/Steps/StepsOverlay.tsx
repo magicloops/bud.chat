@@ -61,7 +61,14 @@ export default function StepsOverlay({ eventId, segments, isStreaming }: StepsOv
   }, [codeItemId]);
 
   // Determine which overlay to show: reasoning text takes priority, then code, else tool status
-  const activeWebSearch = useMemo(() => segments.find(s => s.type === 'web_search_call' && s.status !== 'completed'), [segments]);
+  const activeWebSearch = useMemo(
+    () =>
+      segments.find(
+        (s): s is Extract<Segment, { type: 'web_search_call' }> =>
+          s.type === 'web_search_call' && s.status !== 'completed'
+      ),
+    [segments]
+  );
   const hasReasoning = reasoningText && reasoningText.trim().length > 0;
   const hasCode = codeText && codeText.trim().length > 0;
   const showOverlay = isStreaming && (hasReasoning || hasCode || !!activeWebSearch);

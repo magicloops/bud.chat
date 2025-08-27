@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
 import { ChevronDown, Loader2 } from 'lucide-react';
@@ -25,6 +24,7 @@ interface ReasoningSegmentProps {
     effort_level?: 'low' | 'medium' | 'high';
     reasoning_tokens?: number;
     streaming?: boolean;
+    streaming_part_index?: number;
   };
   isStreaming?: boolean;
   autoExpanded?: boolean; // For streaming segments that should start expanded

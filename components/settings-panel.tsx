@@ -279,13 +279,14 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const normalizeBuiltInToolsConfig = (
     cfg?: Partial<BuiltInToolsConfig> | null
   ): BuiltInToolsConfig => {
-    const enabled = Array.isArray((cfg as any)?.enabled_tools)
-      ? ((cfg as any).enabled_tools as string[])
-      : [];
-    const settings =
-      cfg && typeof (cfg as any).tool_settings === 'object' && (cfg as any).tool_settings !== null
-        ? ((cfg as any).tool_settings as Record<string, Record<string, unknown>>)
-        : {};
+    let enabled: string[] = [];
+    if (cfg && Array.isArray(cfg.enabled_tools)) {
+      enabled = cfg.enabled_tools as string[];
+    }
+    let settings: Record<string, Record<string, unknown>> = {};
+    if (cfg && cfg.tool_settings && typeof cfg.tool_settings === 'object') {
+      settings = cfg.tool_settings as Record<string, Record<string, unknown>>;
+    }
     return { enabled_tools: enabled, tool_settings: settings };
   };
 

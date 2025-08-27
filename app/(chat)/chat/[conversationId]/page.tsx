@@ -403,9 +403,6 @@ export default function ChatPage({ params }: ChatPageProps) {
                   });
                 }
               } else if (data.type === 'message_final') {
-                if (DEBUG_STREAM) {
-                  console.log('[STREAM][new] message_final (page loop)', { eventId: data.event?.id });
-                }
                 await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
                 // Do not end local streaming yet; keep streaming summary visible

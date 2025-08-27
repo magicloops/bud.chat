@@ -415,9 +415,15 @@ export const EventItem = memo(function EventItem({
                         )}
                         
                         {/* Legacy fallback for old reasoning format */}
-                        {!reasoningContent && !hasReasoningSegments && event.reasoning?.parts && Object.keys(event.reasoning.parts).length > 0 && (
+                        {(() => {
+                          const legacyParts = event.reasoning?.parts;
+                          const legacyCount = Object.keys(legacyParts || {}).length;
+                          const hasLegacy = !reasoningContent && !hasReasoningSegments && legacyCount > 0;
+                          if (!hasLegacy || !legacyParts) return null;
+                          const partsArray = Object.values(legacyParts || {});
+                          return (
                           <div className="reasoning-parts space-y-2">
-                            {Object.values(event.reasoning.parts)
+                            {partsArray
                               .sort((a, b) => a.summary_index - b.summary_index)
                               .map((part) => (
                                 <div key={part.summary_index} className="reasoning-part">
@@ -432,7 +438,8 @@ export const EventItem = memo(function EventItem({
                                 </div>
                               ))}
                           </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     </div>
                   )}

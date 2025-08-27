@@ -8,6 +8,9 @@ interface SessionState {
   firstTokenReceived: boolean;
 }
 
+import { streamingBus } from '@/lib/streaming/streamingBus';
+import type { StreamEvent } from '@/lib/streaming/frontendEventHandler';
+
 class StreamingSessionManager {
   private state: SessionState = {
     active: false,
@@ -44,15 +47,11 @@ class StreamingSessionManager {
     this.emit();
   }
 
-  apply(payload: any): void {
+  apply(payload: StreamEvent): void {
     if (!this.state.active || !this.state.assistantEventId) return;
     const eventId = this.state.assistantEventId;
-    const { streamingBus } = require('@/lib/streaming/streamingBus');
 
     switch (payload.type) {
-      case 'session_started':
-        // no-op (start() should have been called)
-        break;
       case 'token':
       case 'text_token':
         if (payload.content) {
@@ -114,27 +113,27 @@ class StreamingSessionManager {
         break;
       // Built-in tool overlays
       case 'web_search_call_in_progress':
-        streamingBus.startTool(eventId, payload.item_id, 'Web Search');
+        if (payload.item_id) streamingBus.startTool(eventId, payload.item_id, 'Web Search');
         break;
       case 'web_search_call_completed':
-        streamingBus.completeTool(eventId, payload.item_id);
+        if (payload.item_id) streamingBus.completeTool(eventId, payload.item_id);
         break;
       case 'code_interpreter_call_in_progress':
-        streamingBus.startTool(eventId, payload.item_id, 'Code Interpreter');
+        if (payload.item_id) streamingBus.startTool(eventId, payload.item_id, 'Code Interpreter');
         break;
       case 'code_interpreter_call_interpreting':
         // show as running
         break;
       case 'code_interpreter_call_completed':
-        streamingBus.completeTool(eventId, payload.item_id);
+        if (payload.item_id) streamingBus.completeTool(eventId, payload.item_id);
         break;
       case 'code_interpreter_call_code_delta':
-        if (typeof payload.delta === 'string') {
+        if (payload.item_id && typeof payload.delta === 'string') {
           streamingBus.appendCode(payload.item_id, payload.delta);
         }
         break;
       case 'code_interpreter_call_code_done':
-        streamingBus.setCode(payload.item_id, payload.code || '');
+        if (payload.item_id) streamingBus.setCode(payload.item_id, payload.code || '');
         break;
     }
   }
@@ -144,7 +143,6 @@ class StreamingSessionManager {
       this.reset();
       return;
     }
-    const { streamingBus } = require('@/lib/streaming/streamingBus');
     const eventId = this.state.assistantEventId;
     streamingBus.clear(eventId);
     streamingBus.clearReasoning(eventId);
