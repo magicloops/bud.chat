@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Send, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Conversation } from '@/state/eventChatStore';
+import { useTypeToFocus } from '@/hooks/useTypeToFocus';
 
 interface EventComposerProps {
   conversation: Conversation
@@ -26,6 +27,12 @@ export function EventComposer({
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Enable autofocus and global type-to-focus when not disabled
+  const appendTyped = useCallback((text: string) => {
+    setMessage((prev) => prev + text);
+  }, []);
+  useTypeToFocus(textareaRef, !disabled, appendTyped);
 
   const handleSend = useCallback(async () => {
     if (!message.trim() || disabled || isLoading) return;
@@ -64,20 +71,28 @@ export function EventComposer({
       <div className="p-4">
         <div className="flex gap-2">
           <div className="flex-1">
-            <Textarea
-              ref={textareaRef}
-              value={message}
-              onChange={handleChange}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              disabled={disabled || isLoading}
-              className="resize-none border-0 shadow-none focus-visible:ring-0 bg-muted/50"
-              rows={1}
-              style={{
-                minHeight: '40px',
-                maxHeight: '120px',
-              }}
-            />
+            <div
+              className="rounded-md transition-shadow border border-transparent
+                         focus-within:border-emerald-400 dark:focus-within:border-emerald-300 focus-within:border
+                         focus-within:shadow-[0_0_12px_rgba(16,185,129,0.6)] dark:focus-within:shadow-[0_0_14px_rgba(52,211,153,0.65)]"
+            >
+              <Textarea
+                ref={textareaRef}
+                value={message}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                // Keep the input editable during streaming/loading; only disable send button
+                autoFocus
+                className="resize-none border-0 bg-muted/50 shadow-none rounded-md
+                           focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                rows={1}
+                style={{
+                  minHeight: '40px',
+                  maxHeight: '120px',
+                }}
+              />
+            </div>
           </div>
           <Button
             onClick={handleSend}

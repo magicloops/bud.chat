@@ -295,6 +295,7 @@ const EventStreamComponent = function EventStream({
             conversation={conversation}
             placeholder={placeholder}
             onSendMessage={handleSendMessage}
+            disabled={isLocalStreaming || !!conversation.isStreaming}
           />
         ) : null}
       </div>
