@@ -170,7 +170,8 @@ export async function POST(request: NextRequest) {
 
     // Add initial events if provided
     if (initialMessages && initialMessages.length > 0) {
-      let lastOrderKey = systemPrompt ? 'a0' : undefined;
+      // Always use null for missing bound (not undefined)
+      let lastOrderKey: string | null = systemPrompt ? 'a0' : null;
       
       for (const message of initialMessages) {
         try {
