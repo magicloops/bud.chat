@@ -127,8 +127,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
             const summary: ConversationSummary = {
               id: conv.id,
               title: conv.title || undefined, // Don't set default title
-              workspace_id: (conv as any).workspace_id,
-              created_at: (conv as any).created_at ?? new Date().toISOString()
+              workspace_id: conv.workspace_id,
+              created_at: (conv.created_at as string | null) ?? new Date().toISOString()
             };
             summaries.push(summary);
             conversationIds.push(conv.id);
@@ -188,8 +188,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         const summary: ConversationSummary = {
           id: conv.id,
           title: conv.title || undefined,
-          workspace_id: (conv as any).workspace_id,
-          created_at: (conv as any).created_at ?? new Date().toISOString(),
+          workspace_id: conv.workspace_id,
+          created_at: (conv.created_at as string | null) ?? new Date().toISOString(),
         };
         setConversationSummary(conv.id, summary);
         newIds.push(conv.id);
