@@ -16,7 +16,7 @@ function isEditableElement(el: Element | null): boolean {
  * onType should append the provided text to the controlled value.
  */
 export function useTypeToFocus(
-  textareaRef: RefObject<HTMLTextAreaElement>,
+  textareaRef: RefObject<HTMLTextAreaElement | null>,
   enabled: boolean,
   onType?: (text: string) => void
 ) {
@@ -64,4 +64,3 @@ export function useTypeToFocus(
 }
 
 export default useTypeToFocus;
-
