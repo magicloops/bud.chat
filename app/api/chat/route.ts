@@ -137,12 +137,12 @@ async function saveEvents(
   conversationId: ConversationId,
   previousOrderKey?: string | null
 ): Promise<string | null> {
-  let orderKey = previousOrderKey;
+  // Normalized last key
+  let orderKey: string | null | undefined = previousOrderKey ?? null;
   const eventInserts: Omit<DatabaseEvent, 'created_at'>[] = [];
-  
+
   for (const event of events) {
     orderKey = generateKeyBetween(orderKey, null);
-    
     eventInserts.push({
       id: event.id,
       conversation_id: conversationId,
@@ -155,19 +155,52 @@ async function saveEvents(
   }
 
   if (eventInserts.length > 0) {
-    const { error } = await supabase
-      .from('events')
-      .insert(eventInserts);
-
-    if (error) {
-      throw new AppError(
-        ErrorCode.DB_QUERY_ERROR,
-        'Failed to save events',
-        { originalError: error }
-      );
+    const { error } = await supabase.from('events').insert(eventInserts);
+    // On unique violation (SQLSTATE 23505), fall back to sequential insert with retry
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const code = (error as any)?.code || (error as any)?.details?.code;
+    if (error && code !== '23505') {
+      throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save events', { originalError: error });
+    }
+    if (error && code === '23505') {
+      // Refetch the current last key and insert one by one
+      let currentLastKey: string | null = previousOrderKey ?? null;
+      for (const e of events) {
+        const key = generateKeyBetween(currentLastKey, null);
+        const row: Omit<DatabaseEvent, 'created_at'> = {
+          id: e.id,
+          conversation_id: conversationId,
+          role: e.role,
+          segments: e.segments,
+          ts: e.ts,
+          order_key: key,
+          response_metadata: e.response_metadata
+        };
+        let ins = await supabase.from('events').insert([row]).select('order_key').single();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let icode = (ins.error as any)?.code || (ins.error as any)?.details?.code;
+        if (ins.error && icode === '23505') {
+          // Race: refetch last and retry once
+          const { data: last } = await supabase
+            .from('events')
+            .select('order_key')
+            .eq('conversation_id', conversationId)
+            .order('order_key', { ascending: false })
+            .limit(1)
+            .single();
+          row.order_key = generateKeyBetween(last?.order_key || null, null);
+          ins = await supabase.from('events').insert([row]).select('order_key').single();
+          icode = (ins.error as any)?.code || (ins.error as any)?.details?.code;
+        }
+        if (ins.error) {
+          throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save event during fallback', { originalError: ins.error });
+        }
+        currentLastKey = ins.data?.order_key || row.order_key;
+        orderKey = currentLastKey;
+      }
     }
   }
-  
+
   return orderKey ?? null;
 }
 

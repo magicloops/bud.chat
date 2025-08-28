@@ -19,8 +19,16 @@ export async function saveEvent(
 ): Promise<DatabaseEvent> {
   const supabase = await createClient();
   
+  // Helper: detect unique constraint violation (race on last-key append)
+  const isUniqueViolation = (err: unknown) => {
+    // Supabase/PG uses SQLSTATE 23505 for unique violations
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const code = (err as any)?.code || (err as any)?.details?.code;
+    return code === '23505';
+  };
+  
   // Generate order key if not provided
-  let orderKey = options.orderKey;
+  let orderKey = options.orderKey ?? null;
   if (!orderKey) {
     // Get the last order key for this conversation
     const { data: lastEvent } = await supabase
@@ -30,7 +38,6 @@ export async function saveEvent(
       .order('order_key', { ascending: false })
       .limit(1)
       .single();
-    
     orderKey = generateKeyBetween(lastEvent?.order_key || null, null);
   }
   
@@ -44,11 +51,31 @@ export async function saveEvent(
     reasoning: event.reasoning
   };
   
-  const { data, error } = await supabase
+  // Try to insert; on unique violation, refetch last key, regenerate once, and retry.
+  let { data, error } = await supabase
     .from('events')
     .insert([dbEvent])
     .select()
     .single();
+  
+  if (error && isUniqueViolation(error)) {
+    // Another writer likely appended at the same time.
+    // Refetch last key and retry once to get a fresh key.
+    const { data: lastEvent } = await supabase
+      .from('events')
+      .select('order_key')
+      .eq('conversation_id', options.conversationId)
+      .order('order_key', { ascending: false })
+      .limit(1)
+      .single();
+    const retryKey = generateKeyBetween(lastEvent?.order_key || null, null);
+    dbEvent.order_key = retryKey;
+    ({ data, error } = await supabase
+      .from('events')
+      .insert([dbEvent])
+      .select()
+      .single());
+  }
   
   if (error) {
     throw new Error(`Failed to save event: ${error.message}`);
@@ -227,6 +254,9 @@ export async function saveEvents(
   if (events.length === 0) return [];
   
   const supabase = await createClient();
+  // Helper: detect unique constraint violation
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const isUniqueViolation = (err: any) => err?.code === '23505' || err?.details?.code === '23505';
   
   // Get the last order key for this conversation
   const { data: lastEvent } = await supabase
@@ -254,10 +284,51 @@ export async function saveEvents(
     };
   });
   
-  const { data, error } = await supabase
+  // Try batch insert first for performance.
+  let { data, error } = await supabase
     .from('events')
     .insert(dbEvents)
     .select();
+  
+  if (error && isUniqueViolation(error)) {
+    // Fallback: insert sequentially with per-item retry after refetching last key.
+    const inserted: DatabaseEvent[] = [] as unknown as DatabaseEvent[];
+    let currentLastKey: string | null = lastEvent?.order_key || null;
+    for (const ev of events) {
+      // Generate next key from the latest committed key
+      const key = generateKeyBetween(currentLastKey, null);
+      const dbEvent = {
+        id: ev.id,
+        conversation_id: conversationId,
+        role: ev.role,
+        segments: ev.segments,
+        ts: ev.ts,
+        order_key: key,
+        reasoning: ev.reasoning
+      };
+      let insertRes = await supabase.from('events').insert([dbEvent]).select().single();
+      if (insertRes.error && isUniqueViolation(insertRes.error)) {
+        // Another writer raced us; refetch last and retry once
+        const { data: lastEvt } = await supabase
+          .from('events')
+          .select('order_key')
+          .eq('conversation_id', conversationId)
+          .order('order_key', { ascending: false })
+          .limit(1)
+          .single();
+        const retryKey = generateKeyBetween(lastEvt?.order_key || null, null);
+        dbEvent.order_key = retryKey;
+        insertRes = await supabase.from('events').insert([dbEvent]).select().single();
+      }
+      if (insertRes.error) {
+        throw new Error(`Failed to save event in fallback: ${insertRes.error.message}`);
+      }
+      // Update last key to the one we just committed
+      currentLastKey = (insertRes.data as DatabaseEvent).order_key;
+      inserted.push(insertRes.data as DatabaseEvent);
+    }
+    return inserted;
+  }
   
   if (error) {
     throw new Error(`Failed to save events: ${error.message}`);
