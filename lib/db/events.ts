@@ -285,7 +285,7 @@ export async function saveEvents(
   });
   
   // Try batch insert first for performance.
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('events')
     .insert(dbEvents)
     .select();

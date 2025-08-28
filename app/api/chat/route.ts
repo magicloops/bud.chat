@@ -130,6 +130,14 @@ async function loadConversationEvents(
   }));
 }
 
+// Internal helper: safely extract Postgrest error code without using `any`.
+function getPostgrestErrorCode(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const e = err as { code?: string; details?: unknown };
+  const details = (e.details as { code?: string } | null | undefined);
+  return e.code ?? details?.code ?? undefined;
+}
+
 // Helper to save events
 async function saveEvents(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -157,8 +165,7 @@ async function saveEvents(
   if (eventInserts.length > 0) {
     const { error } = await supabase.from('events').insert(eventInserts);
     // On unique violation (SQLSTATE 23505), fall back to sequential insert with retry
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (error as any)?.code || (error as any)?.details?.code;
+    const code = getPostgrestErrorCode(error);
     if (error && code !== '23505') {
       throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save events', { originalError: error });
     }
@@ -177,8 +184,7 @@ async function saveEvents(
           response_metadata: e.response_metadata
         };
         let ins = await supabase.from('events').insert([row]).select('order_key').single();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let icode = (ins.error as any)?.code || (ins.error as any)?.details?.code;
+        let icode = getPostgrestErrorCode(ins.error);
         if (ins.error && icode === '23505') {
           // Race: refetch last and retry once
           const { data: last } = await supabase
@@ -190,7 +196,7 @@ async function saveEvents(
             .single();
           row.order_key = generateKeyBetween(last?.order_key || null, null);
           ins = await supabase.from('events').insert([row]).select('order_key').single();
-          icode = (ins.error as any)?.code || (ins.error as any)?.details?.code;
+          icode = getPostgrestErrorCode(ins.error);
         }
         if (ins.error) {
           throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save event during fallback', { originalError: ins.error });
