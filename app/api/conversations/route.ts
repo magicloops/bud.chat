@@ -30,6 +30,10 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const workspaceId = searchParams.get('workspace_id');
+    const limitParam = searchParams.get('limit');
+    const cursor = searchParams.get('cursor'); // ISO timestamp of last item's created_at
+    // parse limit only if provided; when omitted, preserve legacy full-list behavior
+    const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 0, 1), 100) : undefined;
 
     if (!workspaceId) {
       return new Response('workspace_id is required', { status: 400 });
@@ -48,7 +52,8 @@ export async function GET(request: NextRequest) {
       return new Response('Workspace not found or access denied', { status: 404 });
     }
 
-    const { data: conversations, error } = await supabase
+    // Base query
+    let query = supabase
       .from('conversations')
       .select(`
         id,
@@ -68,13 +73,34 @@ export async function GET(request: NextRequest) {
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false });
 
+    // Apply keyset cursor if provided
+    if (cursor) {
+      query = query.lt('created_at', cursor);
+    }
+
+    // If limit specified, fetch limit+1 for has_more detection
+    if (limit !== undefined) {
+      query = query.limit(limit + 1);
+    }
+
+    const { data: conversations, error } = await query;
+
     if (error) {
       console.error('Error fetching conversations:', error);
       return new Response(`Error fetching conversations: ${error.message}`, { status: 500 });
     }
 
     // Compute effective assistant identity for each conversation
-    const conversationsWithEffectiveIdentity = conversations?.map(conversation => {
+    let list = conversations || [];
+
+    // If limited, trim to limit and compute paging
+    let hasMore = false;
+    if (limit !== undefined && list.length > limit) {
+      hasMore = true;
+      list = list.slice(0, limit);
+    }
+
+    const conversationsWithEffectiveIdentity = list.map(conversation => {
       let effectiveAssistantName = conversation.assistant_name;
       let effectiveAssistantAvatar = conversation.assistant_avatar;
 
@@ -99,8 +125,17 @@ export async function GET(request: NextRequest) {
         effective_assistant_name: effectiveAssistantName || 'Assistant',
         effective_assistant_avatar: effectiveAssistantAvatar || '🤖'
       };
-    }) || [];
+    });
 
+    // When limit provided, return paginated response format
+    if (limit !== undefined) {
+      const nextCursor = hasMore && conversationsWithEffectiveIdentity.length > 0
+        ? conversationsWithEffectiveIdentity[conversationsWithEffectiveIdentity.length - 1].created_at
+        : undefined;
+      return Response.json({ items: conversationsWithEffectiveIdentity, has_more: hasMore, next_cursor: nextCursor });
+    }
+
+    // Legacy response: return full array
     return Response.json(conversationsWithEffectiveIdentity);
   } catch (error) {
     console.error('Error in conversations GET:', error);

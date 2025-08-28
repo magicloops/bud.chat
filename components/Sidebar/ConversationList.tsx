@@ -4,9 +4,11 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
   useConversations,
+  useEventChatStore,
   useSetConversation,
   useConversationSummaries,
   useSetConversationSummaries,
+  useSetConversationSummary,
   useWorkspaceConversations,
   useAddConversationToWorkspace,
   useRemoveConversationFromWorkspace,
@@ -53,14 +55,21 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const fullConversations = useConversations();
   
   const setConversationSummaries = useSetConversationSummaries();
+  const setConversationSummary = useSetConversationSummary();
   const setConversation = useSetConversation();
   const _addConversationToWorkspace = useAddConversationToWorkspace();
   const removeConversationFromWorkspace = useRemoveConversationFromWorkspace();
   const setWorkspaceConversations = useSetWorkspaceConversations();
   const _selectedWorkspace = useSelectedWorkspace();
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const _realtimeSetupRef = useRef(false);
   const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const scrollDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const PAGE_SIZE = 30;
   
   // Get conversation summaries for this workspace
   const workspaceConversations = useMemo(() => {
@@ -84,7 +93,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     return conversationId;
   }, [pathname]);
 
-  // Load conversations for the workspace and add them to ChatStore
+  // Load conversations for the workspace and add them to ChatStore (first page)
   useEffect(() => {
     const loadConversations = async () => {
       if (!workspaceId) {
@@ -94,35 +103,49 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       // Check if we already have conversations loaded for this workspace
       const existingIds = workspaceConversationIds || [];
       if (existingIds.length > 0) {
+        // Seed pagination cursor from the last loaded item (optimistic; server will confirm has_more on next fetch)
+        const lastId = existingIds[existingIds.length - 1];
+        const lastSummary = lastId ? conversationSummaries[lastId] : undefined;
+        setHasMore(true);
+        setNextCursor(lastSummary?.created_at || null);
         return;
       }
       
       try {
         setIsLoading(true);
-        
-        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}`);
+        const response = await fetch(`/api/conversations?workspace_id=${workspaceId}&limit=${PAGE_SIZE}`);
         if (response.ok) {
-          const conversationsData = await response.json();
-          
+          const payload = await response.json();
+          // Support both new paginated shape and legacy array for safety
+          const items: DBConversation[] = Array.isArray(payload) ? payload : (payload.items || []);
+
           // Create minimal conversation summaries for sidebar display
           const summaries: ConversationSummary[] = [];
           const conversationIds: string[] = [];
           
-          conversationsData.forEach((conv: DBConversation) => {
+          items.forEach((conv: DBConversation) => {
             const summary: ConversationSummary = {
               id: conv.id,
               title: conv.title || undefined, // Don't set default title
-              workspace_id: conv.workspace_id,
-              created_at: conv.created_at ?? new Date().toISOString()
+              workspace_id: (conv as any).workspace_id,
+              created_at: (conv as any).created_at ?? new Date().toISOString()
             };
-            
             summaries.push(summary);
             conversationIds.push(conv.id);
           });
-          
+
           // Store summaries and workspace conversation IDs
           setConversationSummaries(summaries);
           setWorkspaceConversations(workspaceId, conversationIds);
+
+          // Pagination cursors
+          if (!Array.isArray(payload)) {
+            setHasMore(!!payload.has_more);
+            setNextCursor(payload.next_cursor || null);
+          } else {
+            setHasMore(false);
+            setNextCursor(null);
+          }
         } else {
           console.error('Failed to load conversations:', response.status, response.statusText);
         }
@@ -134,7 +157,81 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     };
 
     loadConversations();
+    // Reset pagination flags when workspace changes
+    return () => {
+      setIsFetchingMore(false);
+      setHasMore(true);
+      setNextCursor(null);
+    };
   }, [workspaceId]);
+
+  // Load more (older) conversations
+  const loadMore = useCallback(async () => {
+    if (!workspaceId || isFetchingMore || !hasMore || !nextCursor) return;
+    try {
+      setIsFetchingMore(true);
+      const url = `/api/conversations?workspace_id=${workspaceId}&limit=${PAGE_SIZE}&cursor=${encodeURIComponent(nextCursor)}`;
+      const response = await fetch(url);
+      if (!response.ok) return;
+      const payload = await response.json();
+      const items: DBConversation[] = Array.isArray(payload) ? payload : (payload.items || []);
+
+      if (items.length === 0) {
+        setHasMore(false);
+        setNextCursor(null);
+        return;
+      }
+
+      // Upsert summaries and append to workspace list
+      const newIds: string[] = [];
+      items.forEach((conv: DBConversation) => {
+        const summary: ConversationSummary = {
+          id: conv.id,
+          title: conv.title || undefined,
+          workspace_id: (conv as any).workspace_id,
+          created_at: (conv as any).created_at ?? new Date().toISOString(),
+        };
+        setConversationSummary(conv.id, summary);
+        newIds.push(conv.id);
+      });
+
+      const existingIds = (useEventChatStore.getState().workspaceConversations[workspaceId] || []) as string[];
+      const deduped = [...existingIds, ...newIds.filter(id => !existingIds.includes(id))];
+      setWorkspaceConversations(workspaceId, deduped);
+
+      if (!Array.isArray(payload)) {
+        setHasMore(!!payload.has_more);
+        setNextCursor(payload.next_cursor || null);
+      } else {
+        setHasMore(false);
+        setNextCursor(null);
+      }
+    } catch (e) {
+      console.error('Failed to load more conversations:', e);
+    } finally {
+      setIsFetchingMore(false);
+    }
+  }, [workspaceId, isFetchingMore, hasMore, nextCursor, setConversationSummary, setWorkspaceConversations]);
+
+  // Attach scroll listener to ScrollArea viewport to trigger load-more near bottom
+  useEffect(() => {
+    const el = containerRef.current?.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+    if (!el) return;
+    const onScroll = () => {
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+      scrollDebounceRef.current = setTimeout(() => {
+        const threshold = 200;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - threshold) {
+          loadMore();
+        }
+      }, 100);
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      if (scrollDebounceRef.current) clearTimeout(scrollDebounceRef.current);
+    };
+  }, [loadMore, workspaceId]);
 
   // Note: Realtime updates are now handled centrally in the event chat store (eventChatStore.ts)
   // This prevents duplicate subscriptions and title conflicts
@@ -261,7 +358,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   }
 
   return (
-    <div className="p-2 space-y-1 min-h-0 w-full max-w-full">
+    <div ref={containerRef} className="p-2 space-y-1 min-h-0 w-full max-w-full">
       {workspaceConversations.map((conversationMeta) => {
         const isSelected = currentConversationId === conversationMeta.id;
         const createdAt = new Date(conversationMeta.created_at);
@@ -326,6 +423,14 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
           </Link>
         );
       })}
+      {/* Footer: loader / all-caught-up */}
+      <div className="py-2 text-center text-xs text-muted-foreground">
+        {isFetchingMore ? (
+          <span>Loading more…</span>
+        ) : (
+          !hasMore && <span>All caught up</span>
+        )}
+      </div>
     </div>
   );
 }
