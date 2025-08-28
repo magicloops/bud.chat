@@ -584,10 +584,15 @@ export async function POST(request: NextRequest) {
           
           while (iteration < maxIterations) {
             iteration++;
+            try {
+              const debugUnresolvedAtTop = eventLog.getUnresolvedToolCalls();
+              console.log(`🔎 [Chat API] Iteration ${iteration}/${maxIterations} — unresolved tool calls at top:`, debugUnresolvedAtTop.map(c => c.id));
+            } catch {}
             
             // Check for pending tool calls
             const pendingToolCalls = eventLog.getUnresolvedToolCalls();
             if (pendingToolCalls.length > 0) {
+              console.log('🔧 [Chat API] Executing pending tool calls:', pendingToolCalls.map(tc => ({ id: tc.id, name: tc.name })));
               // Execute tool calls
               const toolResults = await executeMCPToolCalls(
                 supabase,
@@ -603,6 +608,7 @@ export async function POST(request: NextRequest) {
                 eventLog.addEvent(event);
                 toolResultEvents.push(event);
                 allNewEvents.push(event);
+                console.log('✅ [Chat API] Added tool_result event to EventLog:', { tool_id: result.id, hasError: !!result.error });
                 
                 // Stream tool result
                 send({
@@ -618,6 +624,7 @@ export async function POST(request: NextRequest) {
                   content: result.error ? '❌ Tool failed' : '✅ Tool completed'
                 });
               }
+              console.log('💾 [Chat API] Tool results prepared; count:', toolResultEvents.length);
               
               // Save tool results if not a new conversation
               if (!isNewConversation) {
@@ -753,6 +760,27 @@ export async function POST(request: NextRequest) {
               textGenerationConfig,
               reasoningEffort: body.reasoningEffort // Legacy support
             };
+            try {
+              const unresolvedPreCall = eventLog.getUnresolvedToolCalls();
+              console.log('📤 [Chat API] Preparing provider call — unresolved before call:', unresolvedPreCall.map(c => c.id));
+              if (provider.name === 'Anthropic') {
+                const { EventLog: EventLogClass } = await import('@/lib/types/events');
+                const ev = new EventLogClass(chatRequest.events);
+                // Summarize the final few Anthropic messages
+                const msgs = (ev as any).toProviderMessages('anthropic') as any[];
+                const take = Math.min(6, msgs.length);
+                const summary = msgs.slice(msgs.length - take).map((m, idx) => ({
+                  idx: msgs.length - take + idx,
+                  role: m.role,
+                  blocks: Array.isArray(m.content) ? m.content.map((b: any) => b.type) : [],
+                  tool_use_ids: Array.isArray(m.content) ? m.content.filter((b: any) => b.type === 'tool_use').map((b: any) => b.id) : [],
+                  tool_result_ids: Array.isArray(m.content) ? m.content.filter((b: any) => b.type === 'tool_result').map((b: any) => b.tool_use_id) : []
+                }));
+                console.log('🧾 [Chat API] Anthropic message summary (tail):', summary);
+              }
+            } catch (e) {
+              console.warn('⚠️ [Chat API] Failed to build debug summary for provider messages:', e);
+            }
             
             
             // Stream the response
@@ -760,6 +788,7 @@ export async function POST(request: NextRequest) {
             let hasToolCalls = false;
             let eventStarted = false;
             const startedTools = new Set<string>(); // Track which tools we've already started
+            let breakProviderStreamForTools = false; // When true, exit provider stream to execute tools
             
             for await (const streamEvent of provider.stream(chatRequest)) {
               // Cast to any to handle extended event types from OpenAI Responses API
@@ -1054,7 +1083,7 @@ export async function POST(request: NextRequest) {
                   
                 case 'done':
                   console.log('🔚 [Chat API] Processing done event from provider');
-                  
+
                   // 1) Persist any pending events first
                   if (isNewConversation) {
                     console.log('🔚 [Chat API] Saving events for new conversation...');
@@ -1083,7 +1112,18 @@ export async function POST(request: NextRequest) {
                     }
                   }
 
-                  // 2) Emit message_final before complete so clients can commit canonical event
+                  // 2) Decide whether to close stream now or continue for tool execution
+                  const unresolved = eventLog.getUnresolvedToolCalls();
+                  if (unresolved.length > 0) {
+                    // We have tool calls to execute locally (MCP or otherwise).
+                    // Do NOT send done or close the stream yet. Break provider stream
+                    // so the outer loop can execute tools and re-invoke the model.
+                    console.log('🔄 [Chat API] Unresolved tool calls detected:', unresolved.length, '— continuing to tool execution phase');
+                    breakProviderStreamForTools = true;
+                    break;
+                  }
+
+                  // No unresolved tool calls — emit final event and finalize the stream
                   if (currentEvent) {
                     try {
                       send({ type: 'message_final', event: currentEvent });
@@ -1091,24 +1131,23 @@ export async function POST(request: NextRequest) {
                       console.warn('⚠️ [Chat API] Failed to emit message_final:', e);
                     }
                   }
-
-                  // 3) Emit complete event after message_final
+                  
                   sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
                   console.log('🔚 [Chat API] Sent complete event to frontend');
 
-                  // 4) Close connection
                   controller.close();
                   isClosed = true;
                   console.log('🔚 [Chat API] Closed connection, frontend should be unblocked');
-                  
-                  // For Responses API, tool calls are handled internally by OpenAI
-                  // so we should exit the loop after the stream completes
-                  if (provider.name === 'openai-responses' || !hasToolCalls) {
-                    iteration = maxIterations;
-                  }
+
+                  // Exit the stream processing entirely
+                  iteration = maxIterations; // Ensure outer loop stops
                   console.log('🔚 [Chat API] Done event processed, exiting stream processing');
-                  return; // Exit the stream processing entirely
+                  return;
                   break;
+              }
+              // After handling this stream event, check if we need to exit provider stream to run tools
+              if (breakProviderStreamForTools) {
+                break;
               }
             }
           }

@@ -11,7 +11,6 @@ import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
 import StreamingTextSegment from './StreamingTextSegment';
 import { streamingBus } from '@/lib/streaming/streamingBus';
-import StepsPanel from './StepsPanel';
 import {
   Copy,
   Edit,
@@ -300,25 +299,16 @@ export const EventItemSequential = memo(function EventItemSequential({
               <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
             )}
 
-            {/* Steps panel on top (handles both streaming and non-streaming) */}
-            {((isStreamingActive || isStreaming) || (hasSegments && (hasReasoningSegments || hasToolCalls))) && (
-              <div className="mb-2">
-                <StepsPanel event={event} allEvents={allEvents} isStreaming={isStreamingActive || isStreaming} />
-              </div>
+            {/* Content: render segments inline; renderer handles streaming mode */}
+            {(
+              <SequentialSegmentRenderer
+                event={event}
+                allEvents={allEvents}
+                isStreaming={isStreamingActive || isStreaming}
+              />
             )}
 
-            {/* Content: stream text for active placeholder; otherwise render segments */}
-            {isStreamingActive ? (
-              <StreamingTextSegment eventId={event.id} baseText={''} isStreaming={true} />
-            ) : (
-              hasSegments && (
-                <SequentialSegmentRenderer
-                  event={event}
-                  allEvents={allEvents}
-                  isStreaming={isStreaming}
-                />
-              )
-            )}
+            {/* Steps are now rendered inline within SequentialSegmentRenderer to preserve segment order */}
             
             
             {/* Error Display */}

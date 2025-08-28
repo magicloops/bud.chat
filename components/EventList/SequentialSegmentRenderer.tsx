@@ -1,14 +1,18 @@
 'use client';
 
 import React from 'react';
-// Legacy segment renderers are no longer used for steps
 import { TextSegment } from './TextSegment';
 import StreamingTextSegment from './StreamingTextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
-// Steps UI is rendered by EventItem; keep this renderer focused on content
+import { ReasoningSegment } from './ReasoningSegment';
+import StreamingReasoningSegment from './StreamingReasoningSegment';
+import StreamingToolsOverlay from './StreamingToolsOverlay';
+import { streamingBus } from '@/lib/streaming/streamingBus';
+import { ToolCallSegment } from './ToolCallSegment';
+import { BuiltInToolSegment } from './BuiltInToolSegment';
 
 interface SequentialSegmentRendererProps {
   event: Event;
@@ -44,6 +48,7 @@ export function SequentialSegmentRenderer({
   });
 
   let firstTextRendered = false;
+  let toolsOverlayInserted = false;
 
   const renderSegment = (segment: Segment, index: number) => {
     const key = segment.type === 'reasoning' || segment.type === 'tool_call' || 
@@ -53,24 +58,51 @@ export function SequentialSegmentRenderer({
 
     switch (segment.type) {
       case 'reasoning':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        // During streaming, show live overlay; otherwise show collapsed reasoning
+        return isStreaming ? (
+          <StreamingReasoningSegment key={`stream-reasoning-${key}`} eventId={event.id} isStreaming={true} />
+        ) : (
+          <ReasoningSegment
+            key={key}
+            segment={segment}
+            isStreaming={false}
+            autoExpanded={false}
+            isLastSegment={false}
+          />
+        );
         
       case 'tool_call':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        // Render tool call inline; shows loading until result is available
+        return (
+          <ToolCallSegment
+            key={key}
+            segment={segment}
+            event={event}
+            allEvents={allEvents}
+            isStreaming={isStreaming}
+          />
+        );
         
       case 'text': {
         // When streaming, render a streaming text segment for the first text segment only
         if (isStreaming && !firstTextRendered) {
           firstTextRendered = true;
           return (
-            <StreamingTextSegment
-              key={key}
-              eventId={event.id}
-              baseText={segment.text || ''}
-              isStreaming={true}
-            />
+            <React.Fragment key={`frag-${key}`}>
+              <StreamingTextSegment
+                eventId={event.id}
+                baseText={segment.text || ''}
+                isStreaming={true}
+              />
+              {/* Insert tools overlay immediately after first text if tools already started */}
+              {(() => {
+                if (!toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
+                  toolsOverlayInserted = true;
+                  return <div className="mt-2"><StreamingToolsOverlay eventId={event.id} /></div>;
+                }
+                return null;
+              })()}
+            </React.Fragment>
           );
         }
         return (
@@ -82,14 +114,18 @@ export function SequentialSegmentRenderer({
       }
         
       case 'tool_result':
-        // Tool results are rendered inline with their corresponding tool calls
-        // So we don't render them separately here
+        // Do not render separately; ToolCallSegment displays result when available
         return null;
         
       case 'web_search_call':
       case 'code_interpreter_call':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        return (
+          <BuiltInToolSegment
+            key={key}
+            segment={segment as Extract<Segment, { type: 'web_search_call' } | { type: 'code_interpreter_call' }>}
+            isStreaming={isStreaming}
+          />
+        );
         
       default:
         // Handle any unknown segment types gracefully
@@ -108,7 +144,23 @@ export function SequentialSegmentRenderer({
 
   return (
     <div className={className}>
+      {/* If tools have started before any text/reasoning is rendered, show overlay first */}
+      {(() => {
+        if (isStreaming && !toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
+          toolsOverlayInserted = true;
+          return <div className="mb-2"><StreamingToolsOverlay eventId={event.id} /></div>;
+        }
+        return null;
+      })()}
       {sortedSegments.map(renderSegment)}
+      {/* Fallback: if not yet inserted but tools exist, append at end */}
+      {(() => {
+        if (isStreaming && !toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
+          toolsOverlayInserted = true;
+          return <div className="mt-2"><StreamingToolsOverlay eventId={event.id} /></div>;
+        }
+        return null;
+      })()}
       {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}

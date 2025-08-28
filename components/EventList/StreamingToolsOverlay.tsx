@@ -15,7 +15,14 @@ export default function StreamingToolsOverlay({ eventId }: StreamingToolsOverlay
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const update = () => setTools(streamingBus.getTools(eventId));
+    const update = () => {
+      const next = streamingBus.getTools(eventId);
+      // Debug: log tool overlay updates
+      try {
+        console.log('[UI][ToolsOverlay] update', { eventId, tools: next.map(t => ({ id: t.id, name: t.name, status: t.status })) });
+      } catch {}
+      setTools(next);
+    };
     const unsub = streamingBus.subscribeTools(eventId, update);
     update();
     return () => unsub();
@@ -84,4 +91,3 @@ export default function StreamingToolsOverlay({ eventId }: StreamingToolsOverlay
     </div>
   );
 }
-

@@ -292,6 +292,9 @@ export class FrontendEventHandler {
    */
   private async handleToolStartEvent(data: StreamEvent): Promise<void> {
     if (!this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
+    if (this.options.debug) {
+      console.log('[STREAM][handler] tool_start', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id, name: data.tool_name });
+    }
     streamingBus.startTool(this.assistantPlaceholder.id, data.tool_id, data.tool_name, {
       display_name: data.display_name,
       server_label: data.server_label
@@ -303,6 +306,9 @@ export class FrontendEventHandler {
    */
   private async handleToolFinalizedEvent(data: StreamEvent): Promise<void> {
     if (!this.assistantPlaceholder || !data.tool_id) return;
+    if (this.options.debug) {
+      console.log('[STREAM][handler] tool_finalized', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id });
+    }
     streamingBus.finalizeTool(this.assistantPlaceholder.id, data.tool_id, data.arguments || (data.args ? JSON.stringify(data.args) : undefined));
   }
 
@@ -318,6 +324,9 @@ export class FrontendEventHandler {
    */
   private async handleToolCompleteEvent(data: StreamEvent): Promise<void> {
     if (!this.assistantPlaceholder || !data.tool_id) return;
+    if (this.options.debug) {
+      console.log('[STREAM][handler] tool_complete', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id, error: data.error });
+    }
     streamingBus.completeTool(this.assistantPlaceholder.id, data.tool_id, { error: data.error });
   }
 
