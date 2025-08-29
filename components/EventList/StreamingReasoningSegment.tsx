@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import { streamingBus } from '@/lib/streaming/streamingBus';
+import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 // no extra UI chrome imports needed here
 
 interface StreamingReasoningSegmentProps {
@@ -11,25 +11,31 @@ interface StreamingReasoningSegmentProps {
 }
 
 export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingReasoningSegmentProps) {
-  const [parts, setParts] = useState(() => streamingBus.getReasoningParts(eventId));
+  const [parts, setParts] = useState<Array<{ summary_index: number; text: string; is_complete: boolean; sequence_number?: number; created_at?: number }>>(() => {
+    const draft = getDraft(eventId);
+    const reasoning = draft?.segments?.find(s => s.type === 'reasoning') as any;
+    if (!reasoning || !Array.isArray(reasoning.parts)) return [];
+    return reasoning.parts.map((p: any) => ({ summary_index: p.summary_index, text: p.text, is_complete: !!p.is_complete, sequence_number: p.sequence_number, created_at: p.created_at }));
+  });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const update = () => {
-      const next = streamingBus.getReasoningParts(eventId);
+      const draft = getDraft(eventId);
+      const reasoning = draft?.segments?.find(s => s.type === 'reasoning') as any;
+      const next = reasoning && Array.isArray(reasoning.parts)
+        ? reasoning.parts.map((p: any) => ({ summary_index: p.summary_index, text: p.text, is_complete: !!p.is_complete, sequence_number: p.sequence_number, created_at: p.created_at }))
+        : [];
       setParts(prev => {
-        // Shallow compare by length and last item reference to avoid unnecessary renders
-        if (prev.length === next.length && prev[prev.length - 1] === next[next.length - 1]) return prev;
+        if (prev.length === next.length && prev[prev.length - 1]?.text === next[next.length - 1]?.text) return prev;
         window.dispatchEvent(new CustomEvent('streaming-content-updated'));
         return next;
       });
     };
     intervalRef.current = setInterval(update, 50);
-    const unsub = streamingBus.subscribeReasoningParts(eventId, update);
     // Initial sync
     update();
     return () => {
-      unsub();
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
     };

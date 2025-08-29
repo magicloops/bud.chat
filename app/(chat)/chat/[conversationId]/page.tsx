@@ -331,18 +331,12 @@ export default function ChatPage({ params }: ChatPageProps) {
         { 
           debug: true,
           onMessageFinal: (finalEvent) => {
-            // Replace the assistant placeholder in the temp conversation with the canonical final event
+            // Insert canonical final event by id and remove placeholder to avoid duplicates
             const store = useEventChatStore.getState();
             const tempConv = store.conversations[tempConversationId];
             if (!tempConv) return;
-            const events = [...tempConv.events];
-            // Match the client-side assistant placeholder id
-            const idx = events.findIndex(e => e.id === assistantPlaceholder.id);
-            if (idx >= 0) {
-              events[idx] = finalEvent;
-            } else {
-              events.push(finalEvent);
-            }
+            const filtered = tempConv.events.filter(e => e.id !== finalEvent.id && e.id !== assistantPlaceholder.id);
+            const events = [...filtered, finalEvent];
             store.setConversation(tempConversationId, {
               ...tempConv,
               events,
@@ -387,8 +381,10 @@ export default function ChatPage({ params }: ChatPageProps) {
                 }
                 // debug logs removed
               } else if (data.type === 'message_final') {
+                /* log removed */ null && console.log('[PAGE][message_final]', { id: (data.event && data.event.id) || 'unknown' });
                 await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
+                /* log removed */ null && console.log('[PAGE][complete]');
                 // Do not end local streaming yet; keep streaming summary visible
                 // until we have committed the canonical final event (or timed out).
                 
@@ -402,36 +398,14 @@ export default function ChatPage({ params }: ChatPageProps) {
 
                     // Wait briefly for message_final if it hasn't arrived yet
                     if (!finalReceived) {
+                      /* log removed */ null && console.log('[PAGE][complete] waiting for message_final...');
                       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 800));
                       await Promise.race([waitForFinal, timeout]);
                     }
-                    // Merge buffered streaming text from bus into the streaming event
-                    const { streamingBus } = await import('@/lib/streaming/streamingBus');
-                    const appended = streamingBus.get(assistantPlaceholder.id);
-                    const mergedEvents = [...tempConv.events];
-                    const idx = mergedEvents.findIndex(e => e.id === assistantPlaceholder.id);
-                    if (idx >= 0) {
-                      // If we already received message_final, ensure the canonical event is present
-                      if (lastFinalEvent) {
-                        mergedEvents[idx] = lastFinalEvent;
-                      }
-                      const ev = mergedEvents[idx];
-                      const hasNonTextSegments = ev.segments.some(s => s.type !== 'text');
-                      // Only merge appended streaming text if the event is still a plain text placeholder
-                      if (!hasNonTextSegments && appended && appended.length > 0) {
-                        const segIdx = ev.segments.findIndex(s => s.type === 'text');
-                        if (segIdx >= 0) {
-                          const seg = ev.segments[segIdx];
-                          if (seg.type === 'text') {
-                            const newSeg = { ...seg, text: (seg.text || '') + appended };
-                            const newSegments = [...ev.segments];
-                            newSegments[segIdx] = newSeg;
-                            mergedEvents[idx] = { ...ev, segments: newSegments };
-                            // debug logs removed
-                          }
-                        }
-                      }
-                    }
+                    // Build real conversation events without duplicates: drop placeholder and duplicate final ids
+                    const mergedEvents = lastFinalEvent
+                      ? tempConv.events.filter(e => e.id !== assistantPlaceholder.id && e.id !== lastFinalEvent!.id).concat([lastFinalEvent])
+                      : [...tempConv.events.filter(e => e.id !== assistantPlaceholder.id)];
                     const realConv = {
                       ...tempConv,
                       id: realConversationId,
@@ -447,9 +421,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                     // debug logs removed
                     // Set real conversation first so EventStream can immediately render it
                     latestStore.setConversation(realConversationId, realConv);
-                    // Clear buses for this event after final text is in store
-                    streamingBus.clear(assistantPlaceholder.id);
-                    streamingBus.clearReasoning(assistantPlaceholder.id);
+                    // Clear of legacy streaming buffers not needed
                     
                     // Defer removal of the temp conversation until after route swap
                     // to avoid a brief empty render between temp -> real

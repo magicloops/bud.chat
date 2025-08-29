@@ -465,6 +465,17 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+      // Incremental persistence for new chats: persist initial messages immediately
+      try {
+        currentOrderKey = await saveEvents(
+          supabase,
+          eventLog.getEvents(),
+          conversationId,
+          currentOrderKey
+        );
+      } catch (error) {
+        console.error('🔴 [Chat API] Error saving initial events for new conversation:', error);
+      }
       
       
     } else if (mode === 'continue') {
@@ -626,10 +637,8 @@ export async function POST(request: NextRequest) {
               }
               console.log('💾 [Chat API] Tool results prepared; count:', toolResultEvents.length);
               
-              // Save tool results if not a new conversation
-              if (!isNewConversation) {
-                currentOrderKey = await saveEvents(supabase, toolResultEvents, conversationId, currentOrderKey);
-              }
+              // Incrementally save tool results (both new and continue modes)
+              currentOrderKey = await saveEvents(supabase, toolResultEvents, conversationId, currentOrderKey);
               
               continue;
             }
@@ -797,6 +806,18 @@ export async function POST(request: NextRequest) {
               switch (extendedEvent.type) {
                 case 'event':
                   if (extendedEvent.data?.event) {
+                    // If we already had a currentEvent streaming, signal its completion before starting a new one
+                    if (currentEvent) {
+                      try {
+                        sendSSE(
+                          streamingFormat.formatSSE(
+                            streamingFormat.eventComplete(currentEvent)
+                          )
+                        );
+                      } catch (e) {
+                        console.warn('⚠️ [Chat API] Failed to emit prior event_complete:', e);
+                      }
+                    }
                     currentEvent = extendedEvent.data.event;
                     if (currentEvent) {
                       eventLog.addEvent(currentEvent);
@@ -805,11 +826,7 @@ export async function POST(request: NextRequest) {
                       
                       // Send event start
                       if (!eventStarted) {
-                        sendSSE(
-                          streamingFormat.formatSSE(
-                            streamingFormat.eventStart(currentEvent)
-                          )
-                        );
+                        sendSSE(streamingFormat.formatSSE(streamingFormat.eventStart(currentEvent)));
                         eventStarted = true;
                       }
                       
@@ -833,6 +850,7 @@ export async function POST(request: NextRequest) {
                             tool_name: segment.name,
                             args: segment.args
                           });
+                          sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(segment, currentEvent.segments.indexOf(segment), currentEvent.id)));
                         }
                       }
                     }
@@ -849,6 +867,7 @@ export async function POST(request: NextRequest) {
                         content: segment.text,
                         hideProgress: true
                       });
+                      sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(segment, 0, currentEvent?.id)));
                     } else if (segment.type === 'tool_call') {
                       hasToolCalls = true;
                       
@@ -881,6 +900,7 @@ export async function POST(request: NextRequest) {
                           tool_name: segment.name,
                           args: segment.args
                         });
+                        sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(segment, 0, currentEvent?.id)));
                       }
                     } else if (segment.type === 'reasoning') {
                       // Signal reasoning segment start (for UI overlay gating)
@@ -1052,21 +1072,6 @@ export async function POST(request: NextRequest) {
                 case 'web_search_call_in_progress':
                 case 'web_search_call_searching':
                 case 'web_search_call_completed':
-                case 'code_interpreter_call_in_progress':
-                case 'code_interpreter_call_interpreting':
-                case 'code_interpreter_call_completed':
-                case 'code_interpreter_call_code_delta':
-                case 'code_interpreter_call_code_done':
-                  // Handle built-in tool events
-                  send({
-                    type: extendedEvent.type,
-                    item_id: extendedEvent.data?.item_id,
-                    output_index: extendedEvent.data?.output_index,
-                    sequence_number: extendedEvent.data?.sequence_number,
-                    delta: extendedEvent.data?.delta,
-                    code: extendedEvent.data?.code
-                  });
-                  break;
                   
                 case 'progress_hide':
                   // Handle progress hide events
@@ -1085,28 +1090,20 @@ export async function POST(request: NextRequest) {
                   console.log('🔚 [Chat API] Processing done event from provider');
 
                   // 1) Persist any pending events first
-                  if (isNewConversation) {
-                    console.log('🔚 [Chat API] Saving events for new conversation...');
-                    const saveStartTime = Date.now();
-                    try {
-                      currentOrderKey = await saveEvents(supabase, eventLog.getEvents(), conversationId);
-                      console.log('🔚 [Chat API] New conversation events saved in', Date.now() - saveStartTime, 'ms');
-                      
-                      // Generate title in background
-                      generateConversationTitleInBackground(
-                        conversationId,
-                        eventLog.getEvents(),
-                        supabase
-                      ).catch(console.error);
-                    } catch (error) {
-                      console.error('🔴 [Chat API] Error saving new conversation events:', error);
-                    }
-                  } else if (currentEvent) {
+                  if (currentEvent) {
                     console.log('🔚 [Chat API] Saving events for existing conversation...');
                     const saveStartTime = Date.now();
                     try {
-                      await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
+                      currentOrderKey = await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
                       console.log('🔚 [Chat API] Existing conversation events saved in', Date.now() - saveStartTime, 'ms');
+                      // For brand new conversations, kick off title generation after the first assistant event is saved
+                      if (isNewConversation) {
+                        generateConversationTitleInBackground(
+                          conversationId,
+                          eventLog.getEvents(),
+                          supabase
+                        ).catch(console.error);
+                      }
                     } catch (error) {
                       console.error('🔴 [Chat API] Error saving existing conversation events:', error);
                     }

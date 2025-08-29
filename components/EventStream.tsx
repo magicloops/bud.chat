@@ -10,7 +10,6 @@ import { getDefaultModel } from '@/lib/modelMapping';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
-import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
 
 interface EventStreamProps {
   // For local state (new conversations)
@@ -98,12 +97,6 @@ const EventStreamComponent = function EventStream({
     
     store.setConversation(conversationId, updatedConversation);
 
-    // Start streaming session (ephemeral UI-only) after placeholder exists
-    streamingSessionManager.start({
-      streamId: crypto.randomUUID(),
-      conversationId,
-      assistantEventId: assistantPlaceholder.id,
-    });
     
     // Use unified frontend event handler for existing conversations
     
@@ -122,36 +115,30 @@ const EventStreamComponent = function EventStream({
       
       // Create unified event handler for existing conversations - use SAME approach as new conversations
       const eventHandler = new FrontendEventHandler(
-        null, // Avoid store-backed updates during streaming
-        null,
+        conversationId, // Enable store-backed updates for multi-turn
+        useEventChatStore,
         { 
           debug: true,
           onMessageFinal: (finalEvent) => {
-            // Append or replace placeholder with the canonical event
+            // Replace in place by id; remove any placeholder with a different id to avoid duplicates
             const storeNow = useEventChatStore.getState();
             const convNow = storeNow.conversations[conversationId];
             if (!convNow) return;
-            const eventsNow = [...convNow.events];
-            const idxNow = eventsNow.findIndex(e => e.id === assistantPlaceholder.id);
-            if (idxNow >= 0) {
-              eventsNow[idxNow] = finalEvent;
-            } else {
-              eventsNow.push(finalEvent);
-            }
+            const filtered = convNow.events.filter(e => e.id !== finalEvent.id && e.id !== convNow.streamingEventId);
+            const eventsNow = [...filtered, finalEvent];
             storeNow.setConversation(conversationId, {
               ...convNow,
               events: eventsNow,
               isStreaming: false,
               streamingEventId: undefined
             });
-            // Tear down overlays
-            streamingSessionManager.complete();
           }
         }
       );
       // Provide a no-op local updater but attach the placeholder for streaming overlays
-      const noopUpdater = (_updater: (events: Event[]) => Event[]) => { /* no store churn during streaming */ };
-      eventHandler.setLocalStateUpdater(noopUpdater, assistantPlaceholder, { useLocalStreaming: true });
+      // Seed builder with initial assistant placeholder
+      const passThroughUpdater = (_updater: (events: Event[]) => Event[]) => { /* builder maintains draft; store commits on final */ };
+      eventHandler.setLocalStateUpdater(passThroughUpdater, assistantPlaceholder, { useLocalStreaming: true });
       
       // Streaming flag only; leaf components handle token rendering
       

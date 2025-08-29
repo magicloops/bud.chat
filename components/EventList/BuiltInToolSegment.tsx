@@ -15,7 +15,6 @@ import {
 import { cn } from '@/lib/utils';
 import { Segment } from '@/lib/types/events';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import StreamingCodeInterpreter from './StreamingCodeInterpreter';
 
 interface BuiltInToolSegmentProps {
   segment: (Segment & { type: 'web_search_call'; status: 'in_progress' | 'searching' | 'completed' | 'failed' }) |
@@ -97,8 +96,9 @@ export function BuiltInToolSegment({
     }
   };
   
-  const hasCode = isCodeInterpreter && 'code' in segment && segment.code;
-  const hasExpandableContent = hasCode;
+  // Temporarily disable code interpreter UI
+  const hasCode = false;
+  const hasExpandableContent = false;
   
   return (
     <Card className={cn(
@@ -157,30 +157,10 @@ export function BuiltInToolSegment({
         {/* Expandable Code Content (includes streaming overlay) */}
         {hasExpandableContent && isExpanded && (
           <div className="mt-3 pt-3 border-t border-border">
-            {hasCode && (
-              <div className="space-y-2">
-                <div className="text-xs text-muted-foreground font-medium">
-                  Generated Code:
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3 overflow-x-auto">
-                  <MarkdownRenderer 
-                    content={`\`\`\`python\n${'code' in segment ? segment.code || '' : ''}\n\`\`\``}
-                  />
-                </div>
-              </div>
-            )}
-            {isCodeInterpreter && isStreaming && (
-              <StreamingCodeInterpreter itemId={segment.id} />
-            )}
+            {/* Code interpreter disabled */}
           </div>
         )}
-        
-        {/* Show code inline if streaming and not expanded */}
-        {isCodeInterpreter && isStreaming && !isExpanded && (
-          <div className="mt-2">
-            <StreamingCodeInterpreter itemId={segment.id} />
-          </div>
-        )}
+        {/* Code interpreter disabled */}
       </div>
     </Card>
   );

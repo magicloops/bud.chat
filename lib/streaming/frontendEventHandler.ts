@@ -1,5 +1,4 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
-import { streamingBus } from '@/lib/streaming/streamingBus';
 import { ReasoningData, Segment } from '@/lib/types/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
@@ -95,6 +94,8 @@ export class FrontendEventHandler {
   private assistantPlaceholder: Event | null = null;
   private hasCreatedPostToolPlaceholder: boolean = false;
   private useLocalStreaming: boolean = false;
+  // EventBuilder instance to assemble canonical Event during streaming
+  private builder: any | null = null;
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -113,6 +114,106 @@ export class FrontendEventHandler {
     this.assistantPlaceholder = placeholder;
     this.hasCreatedPostToolPlaceholder = false; // Reset flag for new stream
     this.useLocalStreaming = !!options?.useLocalStreaming;
+    // Initialize EventBuilder
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { EventBuilder } = require('./eventBuilder');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { setDraft, clearDraft } = require('./eventBuilderRegistry');
+      this.builder = new EventBuilder({
+        placeholderEventId: placeholder.id,
+        baseEvent: placeholder,
+        onUpdate: (draft: Event) => setDraft(placeholder.id, draft),
+        onFinalize: (finalEvent: Event) => {
+          clearDraft(placeholder.id);
+          if (this.options.onMessageFinal) {
+            try { this.options.onMessageFinal(finalEvent); } catch {}
+          }
+        }
+      });
+    } catch (e) {
+      if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
+      this.builder = null;
+    }
+  }
+
+  /**
+   * Create a new EventBuilder for a given assistant placeholder
+   */
+  private createBuilderForPlaceholder(placeholder: Event): void {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { EventBuilder } = require('./eventBuilder');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { setDraft, clearDraft } = require('./eventBuilderRegistry');
+      this.builder = new EventBuilder({
+        placeholderEventId: placeholder.id,
+        baseEvent: placeholder,
+        onUpdate: (draft: Event) => setDraft(placeholder.id, draft),
+        onFinalize: (finalEvent: Event) => {
+          clearDraft(placeholder.id);
+          if (this.options.onMessageFinal) {
+            try { this.options.onMessageFinal(finalEvent); } catch {}
+          }
+        }
+      });
+    } catch (e) {
+      if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
+      this.builder = null;
+    }
+  }
+
+  /**
+   * Handle a new assistant event starting mid-stream (multi-turn)
+   */
+  private handleEventStart(newEvent: Event): void {
+    const serverId = newEvent.id;
+    const placeholderId = this.assistantPlaceholder?.id;
+
+    // no debug logs
+    // First: stop old builder immediately to avoid late flush
+    if (this.builder) {
+      try { this.builder.flush?.(); } catch {}
+      try { this.builder.dispose?.(); } catch {}
+    }
+    // Rename existing placeholder in store (and keep array size constant)
+    if (this.conversationId && this.storeInstance && placeholderId && placeholderId !== serverId) {
+      const store = this.storeInstance.getState();
+      const conv = store.conversations[this.conversationId];
+      if (conv) {
+        const events = conv.events.map(e => e.id === placeholderId ? { ...e, id: serverId } : e);
+        store.setConversation(this.conversationId, {
+          ...conv,
+          events,
+          isStreaming: true,
+          streamingEventId: serverId,
+        });
+
+        // no debug logs
+      }
+      // Also rename draft immediately to avoid polling gaps
+      try {
+        const { renameDraft } = require('./eventBuilderRegistry');
+        renameDraft(placeholderId, serverId);
+      } catch {}
+    }
+    // Recreate builder bound to the server id, preserving current draft text/segments
+    try {
+      // Prefer draft from registry after rename (may be fresher than disposed builder)
+      let prevDraft: Event | undefined = undefined;
+      try {
+        const { getDraft } = require('./eventBuilderRegistry');
+        prevDraft = getDraft(serverId);
+      } catch {}
+      const base: Event = prevDraft ? { ...prevDraft, id: serverId } : { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') };
+      this.assistantPlaceholder = base;
+      this.createBuilderForPlaceholder(base);
+
+      // no debug logs
+    } catch {
+      // Fallback: just switch placeholder id
+      if (this.assistantPlaceholder) this.assistantPlaceholder = { ...this.assistantPlaceholder, id: serverId } as Event;
+    }
   }
 
   /**
@@ -161,6 +262,66 @@ export class FrontendEventHandler {
    */
   async handleStreamEvent(data: StreamEvent): Promise<void> {
     switch (data.type) {
+      case 'event_start': {
+        const ev = (data as any).event || (data as any).data?.event;
+        if (ev) this.handleEventStart(ev as Event);
+        break;
+      }
+      case 'segment': {
+        const seg = (data as any).segment || (data as any).data?.segment;
+        if (!seg || !this.builder) break;
+        if (seg.type === 'tool_call') {
+          if (seg.id && seg.name && (!seg.args || Object.keys(seg.args).length === 0)) {
+            this.builder.startToolCall(seg.id, seg.name);
+          }
+          if (seg.id && seg.args && Object.keys(seg.args).length > 0) {
+            this.builder.finalizeToolArgs(seg.id, seg.args);
+          }
+        } else if (seg.type === 'tool_result') {
+          this.builder.completeTool(seg.id, seg.output, seg.error);
+        } else if (seg.type === 'reasoning') {
+          if (Array.isArray(seg.parts)) {
+            for (const p of seg.parts) {
+              this.builder.upsertReasoningPart({
+                summary_index: p.summary_index,
+                type: 'summary_text',
+                text: p.text,
+                sequence_number: p.sequence_number || seg.sequence_number || 0,
+                is_complete: !!p.is_complete,
+                created_at: p.created_at || Date.now(),
+              });
+            }
+          }
+        }
+        break;
+      }
+      case 'event_complete': {
+        // Commit the current draft to store immediately (multi-turn streaming support)
+        if (this.builder) {
+          let draft: Event | undefined = undefined;
+          try { draft = this.builder.getDraft?.(); } catch {}
+          try { this.builder.flush?.(); } catch {}
+          try { this.builder.dispose?.(); } catch {}
+          if (draft && this.conversationId && this.storeInstance) {
+            const store = this.storeInstance.getState();
+            const conv = store.conversations[this.conversationId];
+            if (conv) {
+              const filtered = conv.events.filter(e => e.id != draft!.id);
+              const events = [...filtered, draft];
+              store.setConversation(this.conversationId, {
+                ...conv,
+                events,
+                isStreaming: true,
+                // streamingEventId will be updated on next event_start
+              });
+            }
+          }
+          // Clear local placeholder; next event_start will set new builder/placeholder
+          this.assistantPlaceholder = null;
+          this.builder = null;
+        }
+        break;
+      }
       case 'token':
         await this.handleTokenEvent(data);
         // Hide progress when text content starts
@@ -232,16 +393,19 @@ export class FrontendEventHandler {
       case 'complete':
         await this.handleCompleteEvent(data);
         break;
-      case 'message_final':
+      case 'message_final': {
         // Final, canonical assistant event from server
-        if (data.event && this.options.onMessageFinal) {
-          try {
-            this.options.onMessageFinal(data.event as Event);
-          } catch (e) {
-            if (this.options.debug) console.error('onMessageFinal error:', e);
+        if (data.event) {
+          if (this.builder) {
+            this.builder.finalizeCurrentEvent(data.event as Event);
+          } else if (this.options.onMessageFinal) {
+            try { this.options.onMessageFinal(data.event as Event); } catch (e) {
+              if (this.options.debug) console.error('onMessageFinal error:', e);
+            }
           }
         }
         break;
+      }
       case 'error':
         await this.handleErrorEvent(data);
         break;
@@ -284,7 +448,9 @@ export class FrontendEventHandler {
    */
   private async handleTokenEvent(data: StreamEvent): Promise<void> {
     if (!this.assistantPlaceholder || !data.content) return;
-    streamingBus.append(this.assistantPlaceholder.id, data.content);
+
+    // no debug logs
+    if (this.builder) this.builder.appendTextDelta(data.content);
   }
 
   /**
@@ -295,10 +461,8 @@ export class FrontendEventHandler {
     if (this.options.debug) {
       console.log('[STREAM][handler] tool_start', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id, name: data.tool_name });
     }
-    streamingBus.startTool(this.assistantPlaceholder.id, data.tool_id, data.tool_name, {
-      display_name: data.display_name,
-      server_label: data.server_label
-    });
+    if (this.builder) this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
+    // UI reads tools from EventBuilder draft
   }
 
   /**
@@ -309,14 +473,27 @@ export class FrontendEventHandler {
     if (this.options.debug) {
       console.log('[STREAM][handler] tool_finalized', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id });
     }
-    streamingBus.finalizeTool(this.assistantPlaceholder.id, data.tool_id, data.arguments || (data.args ? JSON.stringify(data.args) : undefined));
+    if (this.builder) {
+      let parsedArgs: object | undefined;
+      try {
+        parsedArgs = data.args || (data.arguments ? JSON.parse(String(data.arguments)) : undefined);
+      } catch {}
+      this.builder.finalizeToolArgs(data.tool_id as ToolCallId, parsedArgs);
+    }
+    // UI reads tools from EventBuilder draft
   }
 
   /**
    * Handle tool result events
    */
   private async handleToolResultEvent(_data: StreamEvent): Promise<void> {
-    // Overlay-only; final event contains results
+    // Attach to draft if present (some paths emit tool_result here)
+    const data = _data;
+    if (!this.assistantPlaceholder || !data.tool_id) return;
+    if (this.builder) {
+      const output = typeof data.output === 'object' && data.output !== null ? (data.output as object) : undefined;
+      this.builder.completeTool(data.tool_id as ToolCallId, output, data.error || undefined);
+    }
   }
 
   /**
@@ -327,7 +504,11 @@ export class FrontendEventHandler {
     if (this.options.debug) {
       console.log('[STREAM][handler] tool_complete', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id, error: data.error });
     }
-    streamingBus.completeTool(this.assistantPlaceholder.id, data.tool_id, { error: data.error });
+    if (this.builder) {
+      const output = typeof data.output === 'object' && data.output !== null ? (data.output as object) : undefined;
+      this.builder.completeTool(data.tool_id as ToolCallId, output, data.error || undefined);
+    }
+    // UI reads tools from EventBuilder draft
   }
 
   /**
@@ -432,15 +613,20 @@ export class FrontendEventHandler {
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
 
+    // Draft builder: upsert reasoning part
+    if (this.builder && part?.text) {
+      this.builder.upsertReasoningPart({
+        summary_index: summary_index!,
+        type: 'summary_text',
+        text: part.text,
+        sequence_number: sequence_number || 0,
+        is_complete: false,
+        created_at: Date.now(),
+      });
+    }
     // Overlay: start a new reasoning part for the active assistant placeholder
     if (this.assistantPlaceholder) {
-      streamingBus.startReasoningPart(this.assistantPlaceholder.id, summary_index, {
-        sequence_number: sequence_number,
-        created_at: Date.now()
-      });
-      if (part?.text) {
-        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index, part.text, { sequence_number });
-      }
+      // UI reads reasoning parts from EventBuilder draft
     }
   }
 
@@ -480,15 +666,21 @@ export class FrontendEventHandler {
     reasoningData.streaming_part_index = summary_index;
     
     
-    // Stream to overlay bus per-part keyed by (eventId, summary_index)
-    if (this.assistantPlaceholder) {
-      const overlayDelta = typeof delta === 'string' 
-        ? delta 
-        : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
+    // Draft builder: upsert reasoning part text
+    if (this.builder) {
+      const overlayDelta = typeof delta === 'string' ? delta : (delta && typeof delta === 'object' && 'text' in delta ? (delta as { text: string }).text : '');
       if (overlayDelta) {
-        streamingBus.appendReasoningPart(this.assistantPlaceholder.id, summary_index!, overlayDelta, { sequence_number });
+        this.builder.upsertReasoningPart({
+          summary_index: summary_index!,
+          type: 'summary_text',
+          text: overlayDelta,
+          sequence_number: sequence_number || 0,
+          is_complete: false,
+          created_at: Date.now(),
+        });
       }
     }
+    // UI reads reasoning parts from EventBuilder draft
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
@@ -509,9 +701,16 @@ export class FrontendEventHandler {
       is_complete: true
     };
 
+    // Draft builder: mark this part complete
+    if (this.builder) {
+      const existing = reasoningData.parts[summary_index];
+      if (existing) {
+        this.builder.upsertReasoningPart({ ...existing, is_complete: true });
+      }
+    }
     // Overlay: mark complete for the streaming UI
     if (this.assistantPlaceholder) {
-      streamingBus.completeReasoningPart(this.assistantPlaceholder.id, summary_index);
+      // UI reads reasoning parts from EventBuilder draft
     }
 
     // Update UI state (for local assembly if needed)
@@ -551,10 +750,7 @@ export class FrontendEventHandler {
     
     // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
-    // Finalize overlay text for this event
-    if (this.assistantPlaceholder && reasoningData.combined_text) {
-      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
-    }
+    // UI reads reasoning from EventBuilder draft
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -620,10 +816,7 @@ export class FrontendEventHandler {
     
     // Update UI state - reasoning is now complete
     this.updateReasoningInState(item_id, reasoningData, true);
-    // Finalize overlay text for this event
-    if (this.assistantPlaceholder && reasoningData.combined_text) {
-      streamingBus.appendReasoning(this.assistantPlaceholder.id, '\\n' + reasoningData.combined_text);
-    }
+    // UI reads reasoning from EventBuilder draft
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -729,21 +922,17 @@ export class FrontendEventHandler {
 
   private updateLocalStateToken(data: StreamEvent): void {
     if (!this.assistantPlaceholder || !data.content) return;
-    // Route tokens to external streaming bus to avoid parent re-renders
-    streamingBus.append(this.assistantPlaceholder.id, data.content);
+    // UI reads text from EventBuilder draft
   }
 
   private updateLocalStateToolStart(data: StreamEvent): void {
     if (!this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
-    streamingBus.startTool(this.assistantPlaceholder.id, data.tool_id, data.tool_name, {
-      display_name: data.display_name,
-      server_label: data.server_label
-    });
+    // UI reads tools from EventBuilder draft
   }
 
   private updateLocalStateToolFinalized(data: StreamEvent): void {
     if (!this.assistantPlaceholder || !data.tool_id) return;
-    streamingBus.finalizeTool(this.assistantPlaceholder.id, data.tool_id, data.arguments || (data.args ? JSON.stringify(data.args) : undefined));
+    // UI reads tools from EventBuilder draft
   }
 
   private updateLocalStateToolResult(data: StreamEvent): void {
@@ -1010,7 +1199,7 @@ export class FrontendEventHandler {
       this.updateStoreStateBuiltInToolComplete(data, 'code_interpreter_call');
     }
     // Clear code overlay buffer
-    if (item_id) streamingBus.clearCode(item_id);
+    // Code interpreter disabled; no-op
   }
 
   /**
@@ -1028,7 +1217,7 @@ export class FrontendEventHandler {
     }
     // Stream code overlay
     if (data.item_id && data.delta && typeof data.delta === 'string') {
-      streamingBus.appendCode(data.item_id, data.delta);
+      // Code interpreter disabled; no-op
     }
   }
 
@@ -1047,7 +1236,7 @@ export class FrontendEventHandler {
     }
     // Finalize code overlay
     if (data.item_id && data.code) {
-      streamingBus.setCode(data.item_id, data.code);
+      // Code interpreter disabled; no-op
     }
   }
 
@@ -1110,7 +1299,7 @@ export class FrontendEventHandler {
    */
   private updateLocalStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
     if (!this.assistantPlaceholder || !data.item_id) return;
-    streamingBus.startTool(this.assistantPlaceholder.id, data.item_id, toolDisplayName);
+    // UI reads built-in tool status from draft (future)
   }
 
   /**
@@ -1125,7 +1314,7 @@ export class FrontendEventHandler {
    */
   private updateLocalStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
     if (!this.assistantPlaceholder || !data.item_id) return;
-    streamingBus.completeTool(this.assistantPlaceholder.id, data.item_id);
+    // UI reads built-in tool status from draft (future)
   }
 
   /**
@@ -1133,7 +1322,7 @@ export class FrontendEventHandler {
    */
   private updateLocalStateCodeDelta(data: StreamEvent): void {
     if (!this.assistantPlaceholder || !data.item_id || typeof data.delta !== 'string') return;
-    streamingBus.appendCode(data.item_id, data.delta);
+    // Code interpreter disabled; no-op
   }
 
   /**
@@ -1141,7 +1330,7 @@ export class FrontendEventHandler {
    */
   private updateLocalStateCodeDone(data: StreamEvent): void {
     if (!data.item_id) return;
-    streamingBus.setCode(data.item_id, data.code || '');
+    // Code interpreter disabled; no-op
   }
 
   /**

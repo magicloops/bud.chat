@@ -1,372 +1,193 @@
-// EventStreamBuilder for building events during streaming
+import { Event } from '@/state/eventChatStore';
+import { Segment, ReasoningPart } from '@/lib/types/events';
+import { generateEventId, ToolCallId } from '@/lib/types/branded';
 
-import { Event, Segment, Role, ReasoningData, ReasoningPart } from '@/lib/types/events';
-import { ToolCallId, EventId } from '@/lib/types/branded';
-// createMixedEvent currently unused
-
-export class EventStreamBuilder {
-  private eventId: string;
-  private role: Role;
-  private segments: Segment[] = [];
-  private currentTextSegment: { type: 'text'; text: string } | null = null;
-  private pendingToolCalls: Map<string, { id: string; name: string; args: string }> = new Map();
-  private ts: number;
-  private reasoningData: ReasoningData | null = null;
-  private reasoningSegments: Map<string, Segment> = new Map();
-
-  constructor(role: Role = 'assistant', eventId?: string) {
-    this.role = role;
-    this.eventId = eventId || crypto.randomUUID();
-    this.ts = Date.now();
-  }
-
-  /**
-   * Add text content to the current event
-   */
-  addTextChunk(text: string): void {
-    if (!text) return;
-
-    // Find or create text segment
-    if (!this.currentTextSegment) {
-      this.currentTextSegment = { type: 'text', text: '' };
-      this.segments.push(this.currentTextSegment);
-    }
-
-    this.currentTextSegment.text += text;
-  }
-
-  /**
-   * Add or update a reasoning segment by item_id
-   */
-  upsertReasoningSegment(params: {
-    id: string;
-    output_index?: number;
-    sequence_number?: number;
-    parts?: ReasoningPart[];
-    combined_text?: string;
-    effort_level?: 'low' | 'medium' | 'high';
-    reasoning_tokens?: number;
-    streaming_part_index?: number | undefined;
-  }): void {
-    type ReasoningSeg = Extract<Segment, { type: 'reasoning' }>;
-    const existing = this.reasoningSegments.get(params.id) as ReasoningSeg | undefined;
-    // Merge parts if provided
-    const mergedParts: ReasoningPart[] = existing?.parts ? existing.parts.map(p => ({ ...p })) : [];
-    const incomingParts: ReasoningPart[] = params.parts ?? [];
-    for (const p of incomingParts) {
-      const idx = mergedParts.findIndex(ep => ep.summary_index === p.summary_index);
-      if (idx >= 0) mergedParts[idx] = { ...mergedParts[idx], ...p };
-      else mergedParts.push(p);
-    }
-
-    const next: ReasoningSeg = {
-      type: 'reasoning',
-      id: params.id,
-      output_index: params.output_index ?? existing?.output_index ?? 0,
-      sequence_number: params.sequence_number ?? existing?.sequence_number ?? 0,
-      parts: mergedParts,
-      combined_text: params.combined_text ?? existing?.combined_text,
-      effort_level: params.effort_level ?? existing?.effort_level,
-      reasoning_tokens: params.reasoning_tokens ?? existing?.reasoning_tokens,
-      streaming: params.streaming_part_index !== undefined,
-      streaming_part_index: params.streaming_part_index
-    };
-
-    this.reasoningSegments.set(params.id, next);
-
-    // Replace or append in segments array
-    const idx = this.segments.findIndex(s => s.type === 'reasoning' && (s as ReasoningSeg).id === params.id);
-    if (idx >= 0) {
-      this.segments[idx] = next;
-    } else {
-      this.segments.push(next);
-    }
-  }
-
-  /**
-   * Add a tool call to the current event
-   */
-  addToolCall(
-    id: string, 
-    name: string, 
-    args: object, 
-    metadata?: { 
-      server_label?: string; 
-      display_name?: string; 
-      server_type?: string; 
-    }
-  ): void {
-    console.log('🔧 [EVENTBUILDER] Adding tool call segment:', { 
-      id, 
-      name, 
-      args_keys: Object.keys(args),
-      metadata
-    });
-    
-    // Remove from pending if it was there
-    this.pendingToolCalls.delete(id);
-    
-    // Add completed tool call segment
-    this.segments.push({
-      type: 'tool_call',
-      id: id as ToolCallId,
-      name,
-      args,
-      ...(metadata?.server_label && { server_label: metadata.server_label }),
-      ...(metadata?.display_name && { display_name: metadata.display_name }),
-      ...(metadata?.server_type && { server_type: metadata.server_type }),
-    });
-    
-    console.log('🔧 [EVENTBUILDER] ✅ Tool call segment added. Total segments:', this.segments.length);
-  }
-
-  /**
-   * Start a streaming tool call (for gradual argument building)
-   */
-  startToolCall(id: string, name: string): void {
-    this.pendingToolCalls.set(id, { id, name, args: '' });
-  }
-
-  /**
-   * Add arguments to a streaming tool call
-   */
-  addToolCallArguments(id: string, argsChunk: string): void {
-    const pendingCall = this.pendingToolCalls.get(id);
-    if (pendingCall) {
-      pendingCall.args += argsChunk;
-    }
-  }
-
-  /**
-   * Complete a streaming tool call
-   */
-  completeToolCall(id: string): void {
-    const pendingCall = this.pendingToolCalls.get(id);
-    if (pendingCall) {
-      try {
-        const args = JSON.parse(pendingCall.args);
-        this.addToolCall(id, pendingCall.name, args);
-      } catch (e) {
-        console.error('Failed to parse tool call arguments:', e);
-        this.addToolCall(id, pendingCall.name, {});
-      }
-      this.pendingToolCalls.delete(id);
-    }
-  }
-
-  /**
-   * Get tool call ID at a specific index (for streaming updates)
-   * The index corresponds to Anthropic's content block index, not tool call index
-   */
-  getToolCallIdAtIndex(index: number): string | null {
-    // Count content blocks up to the given index to find the corresponding tool call
-    let contentBlockIndex = 0;
-    
-    // Check segments first (completed content blocks)
-    for (const segment of this.segments) {
-      if (contentBlockIndex === index) {
-        if (segment.type === 'tool_call') {
-          return segment.id;
-        }
-        return null;
-      }
-      contentBlockIndex++;
-    }
-    
-    // Check pending tool calls (current streaming content blocks)
-    const pendingIds = Array.from(this.pendingToolCalls.keys());
-    const pendingToolCallIndex = index - contentBlockIndex;
-    
-    if (pendingToolCallIndex >= 0 && pendingToolCallIndex < pendingIds.length) {
-      return pendingIds[pendingToolCallIndex];
-    }
-    
-    return null;
-  }
-
-  /**
-   * Add a tool result to the current event
-   */
-  addToolResult(id: string, output: object): void {
-    this.segments.push({
-      type: 'tool_result',
-      id: id as ToolCallId,
-      output
-    });
-  }
-
-  /**
-   * Set reasoning data for the current event
-   */
-  setReasoningData(reasoning: ReasoningData): void {
-    this.reasoningData = reasoning;
-  }
-
-  /**
-   * Get current reasoning data
-   */
-  getReasoningData(): ReasoningData | null {
-    return this.reasoningData;
-  }
-
-  /**
-   * Get current segments (for real-time updates)
-   */
-  getCurrentSegments(): Segment[] {
-    return [...this.segments];
-  }
-
-  /**
-   * Get current event state (for real-time updates)
-   */
-  getCurrentEvent(): Event {
-    return {
-      id: this.eventId as EventId,
-      role: this.role,
-      segments: this.getCurrentSegments(),
-      ts: this.ts,
-      ...(this.reasoningData && { reasoning: this.reasoningData })
-    };
-  }
-
-  /**
-   * Check if the event has any content
-   */
-  hasContent(): boolean {
-    return this.segments.length > 0 || this.pendingToolCalls.size > 0;
-  }
-
-  /**
-   * Finalize the event and return it
-   */
-  finalize(): Event {
-    console.log('🔧 [EVENTBUILDER] Finalizing event. Current segments:', this.segments.length);
-    console.log('🔧 [EVENTBUILDER] Segment types:', this.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name } : {}) })));
-    
-    // Complete any pending tool calls
-    for (const [id, _pendingCall] of this.pendingToolCalls.entries()) {
-      console.log('🔧 [EVENTBUILDER] Completing pending tool call:', id);
-      this.completeToolCall(id);
-    }
-
-    // Clean up empty text segments
-    this.segments = this.segments.filter(segment => {
-      if (segment.type === 'text') {
-        return segment.text.trim().length > 0;
-      }
-      return true;
-    });
-
-    // Ensure any reasoning segments tracked are included (already ensured in upsert)
-
-    console.log('🔧 [EVENTBUILDER] After cleanup - Final segments:', this.segments.length);
-
-    return {
-      id: this.eventId as EventId,
-      role: this.role,
-      segments: this.segments,
-      ts: this.ts,
-      ...(this.reasoningData && { reasoning: this.reasoningData })
-    };
-  }
-
-  /**
-   * Reset the builder for a new event
-   */
-  reset(role: Role = 'assistant', eventId?: string): void {
-    this.role = role;
-    this.eventId = eventId || crypto.randomUUID();
-    this.segments = [];
-    this.currentTextSegment = null;
-    this.pendingToolCalls.clear();
-    this.reasoningData = null;
-    this.ts = Date.now();
-  }
-
-  /**
-   * Clone the builder (for branching scenarios)
-   */
-  clone(): EventStreamBuilder {
-    const clone = new EventStreamBuilder(this.role, this.eventId);
-    clone.segments = JSON.parse(JSON.stringify(this.segments));
-    clone.currentTextSegment = this.currentTextSegment ? { ...this.currentTextSegment } : null;
-    clone.pendingToolCalls = new Map(this.pendingToolCalls);
-    clone.reasoningData = this.reasoningData ? JSON.parse(JSON.stringify(this.reasoningData)) : null;
-    clone.ts = this.ts;
-    return clone;
-  }
+export interface EventBuilderOptions {
+  placeholderEventId: string; // assistant placeholder id
+  baseEvent?: Event; // optional seed (role, metadata)
+  onUpdate?: (draft: Event) => void;
+  onFinalize?: (finalEvent: Event) => void;
 }
 
 /**
- * Utility class for managing multiple event builders during streaming
+ * Builds a canonical Event incrementally from streaming updates.
+ * Keeps segments ordered; emits updates and finalization callbacks.
  */
-export class StreamingEventManager {
-  private builders: Map<string, EventStreamBuilder> = new Map();
-  private activeBuilders: string[] = [];
+export class EventBuilder {
+  private draft: Event;
+  private hasAnyNonReasoning = false;
+  private textBuffer = '';
+  private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
 
-  /**
-   * Create a new event builder
-   */
-  createBuilder(role: Role = 'assistant', eventId?: string): EventStreamBuilder {
-    const builder = new EventStreamBuilder(role, eventId);
-    this.builders.set(builder.getCurrentEvent().id, builder);
-    this.activeBuilders.push(builder.getCurrentEvent().id);
-    return builder;
+  constructor(private opts: EventBuilderOptions) {
+    const base: Event = opts.baseEvent || {
+      id: opts.placeholderEventId,
+      role: 'assistant',
+      segments: [],
+      ts: Date.now(),
+    } as Event;
+    // Clone incoming segments defensively (avoid mutating frozen/shared objects)
+    const clonedSegments = (base.segments || []).map(s => ({ ...(s as any) }));
+    this.draft = { ...base, id: opts.placeholderEventId, segments: clonedSegments };
+    // no debug logs in production
   }
 
-  /**
-   * Get a builder by ID
-   */
-  getBuilder(eventId: string): EventStreamBuilder | undefined {
-    return this.builders.get(eventId);
-  }
+  getDraft(): Event { return { ...this.draft, segments: this.draft.segments.map(s => ({ ...(s as any) })) }; }
 
-  /**
-   * Get the current active builder
-   */
-  getCurrentBuilder(): EventStreamBuilder | undefined {
-    const activeId = this.activeBuilders[this.activeBuilders.length - 1];
-    return activeId ? this.builders.get(activeId) : undefined;
-  }
+  private emitUpdate() { this.opts.onUpdate?.(this.getDraft()); }
 
-  /**
-   * Finalize a builder and remove it from active list
-   */
-  finalizeBuilder(eventId: string): Event | undefined {
-    const builder = this.builders.get(eventId);
-    if (!builder) return undefined;
-
-    const event = builder.finalize();
-    this.builders.delete(eventId);
-    this.activeBuilders = this.activeBuilders.filter(id => id !== eventId);
-    return event;
-  }
-
-  /**
-   * Get all current events
-   */
-  getCurrentEvents(): Event[] {
-    return Array.from(this.builders.values()).map(builder => builder.getCurrentEvent());
-  }
-
-  /**
-   * Finalize all builders
-   */
-  finalizeAll(): Event[] {
-    const events: Event[] = [];
-    for (const [_eventId, builder] of this.builders.entries()) {
-      events.push(builder.finalize());
+  appendTextDelta(text: string) {
+    if (this.disposed) return;
+    if (!text) return;
+    // no debug logs
+    this.textBuffer += text;
+    if (!this.textFlushTimer) {
+      this.textFlushTimer = setTimeout(() => {
+        this.flushTextBuffer();
+      }, 25);
     }
-    this.builders.clear();
-    this.activeBuilders = [];
-    return events;
   }
 
-  /**
-   * Clear all builders
-   */
-  clear(): void {
-    this.builders.clear();
-    this.activeBuilders = [];
+  private flushTextBuffer() {
+    if (this.disposed) {
+      // Ensure timer is cleared if called after disposal
+      this.textFlushTimer && clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+      this.textBuffer = '';
+      return;
+    }
+    if (!this.textBuffer) {
+      this.textFlushTimer && clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+      return;
+    }
+    const delta = this.textBuffer;
+    this.textBuffer = '';
+    this.textFlushTimer && clearTimeout(this.textFlushTimer);
+    this.textFlushTimer = null;
+    // no debug logs
+    const idx = this.draft.segments.findIndex(s => s.type === 'text');
+    if (idx === -1) {
+      this.draft.segments = [...this.draft.segments, { type: 'text', text: delta } as Segment];
+    } else {
+      const current = this.draft.segments[idx] as Extract<Segment, { type: 'text' }>;
+      const updated: Extract<Segment, { type: 'text' }> = { ...current, text: (current.text || '') + delta };
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+  }
+
+  startToolCall(id: ToolCallId, name: string) {
+    const exists = this.draft.segments.some(s => s.type === 'tool_call' && s.id === id);
+    if (!exists) {
+      this.draft.segments.push({ type: 'tool_call', id, name, args: {} });
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+  }
+
+  finalizeToolArgs(id: ToolCallId, args: object | undefined) {
+    const segIndex = this.draft.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === id);
+    if (segIndex >= 0 && args && typeof args === 'object') {
+      const seg = this.draft.segments[segIndex] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, args };
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, segIndex),
+        updated,
+        ...this.draft.segments.slice(segIndex + 1)
+      ];
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+  }
+
+  completeTool(id: ToolCallId, output?: object, error?: string) {
+    // Append a tool_result segment; renderer will associate it with the tool_call
+    this.draft.segments.push({ type: 'tool_result', id, output: output || {}, error });
+    this.emitUpdate();
+  }
+
+  upsertReasoningPart(part: ReasoningPart) {
+    // Find or create reasoning segment (single segment per event)
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx === -1) {
+      const newSeg: Extract<Segment, { type: 'reasoning' }> = {
+        type: 'reasoning',
+        id: `reasoning-${this.draft.id}`,
+        output_index: 0,
+        sequence_number: part.sequence_number || 0,
+        parts: [part],
+        streaming: !this.hasAnyNonReasoning,
+        streaming_part_index: part.summary_index,
+      } as any;
+      this.draft.segments = [newSeg, ...this.draft.segments];
+    } else {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const parts = Array.isArray(seg.parts) ? [...seg.parts] : [];
+      const existingIndex = parts.findIndex(p => p.summary_index === part.summary_index);
+      if (existingIndex >= 0) {
+        parts[existingIndex] = part;
+      } else {
+        parts.push(part);
+      }
+      parts.sort((a, b) => a.summary_index - b.summary_index);
+      const updated: Extract<Segment, { type: 'reasoning' }> = {
+        ...seg,
+        parts,
+        streaming: !this.hasAnyNonReasoning,
+        streaming_part_index: part.summary_index,
+      } as any;
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+    }
+    this.emitUpdate();
+  }
+
+  private markReasoningInactive() {
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const updated: Extract<Segment, { type: 'reasoning' }> = { ...seg, streaming: false } as any;
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+    }
+  }
+
+  finalizeCurrentEvent(finalEvent?: Event) {
+    // Ensure any pending text is flushed before finalizing
+    this.flushTextBuffer();
+    // no debug logs
+    const result = finalEvent ? finalEvent : this.getDraft();
+    this.opts.onFinalize?.(result);
+  }
+
+  // Public helpers for lifecycle control
+  flush() {
+    this.flushTextBuffer();
+  }
+
+  dispose() {
+    if (this.textFlushTimer) {
+      clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+    }
+    this.textBuffer = '';
+    this.disposed = true;
+    // no debug logs
   }
 }

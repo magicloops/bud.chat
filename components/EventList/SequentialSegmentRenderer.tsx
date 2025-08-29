@@ -9,8 +9,7 @@ import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
 import { ReasoningSegment } from './ReasoningSegment';
 import StreamingReasoningSegment from './StreamingReasoningSegment';
-import StreamingToolsOverlay from './StreamingToolsOverlay';
-import { streamingBus } from '@/lib/streaming/streamingBus';
+// Removed overlay dependency
 import { ToolCallSegment } from './ToolCallSegment';
 import { BuiltInToolSegment } from './BuiltInToolSegment';
 
@@ -48,7 +47,7 @@ export function SequentialSegmentRenderer({
   });
 
   let firstTextRendered = false;
-  let toolsOverlayInserted = false;
+  // No overlays; segments render inline from Event (or draft)
 
   const renderSegment = (segment: Segment, index: number) => {
     const key = segment.type === 'reasoning' || segment.type === 'tool_call' || 
@@ -91,17 +90,9 @@ export function SequentialSegmentRenderer({
             <React.Fragment key={`frag-${key}`}>
               <StreamingTextSegment
                 eventId={event.id}
-                baseText={segment.text || ''}
+                baseText={''}
                 isStreaming={true}
               />
-              {/* Insert tools overlay immediately after first text if tools already started */}
-              {(() => {
-                if (!toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
-                  toolsOverlayInserted = true;
-                  return <div className="mt-2"><StreamingToolsOverlay eventId={event.id} /></div>;
-                }
-                return null;
-              })()}
             </React.Fragment>
           );
         }
@@ -144,23 +135,7 @@ export function SequentialSegmentRenderer({
 
   return (
     <div className={className}>
-      {/* If tools have started before any text/reasoning is rendered, show overlay first */}
-      {(() => {
-        if (isStreaming && !toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
-          toolsOverlayInserted = true;
-          return <div className="mb-2"><StreamingToolsOverlay eventId={event.id} /></div>;
-        }
-        return null;
-      })()}
       {sortedSegments.map(renderSegment)}
-      {/* Fallback: if not yet inserted but tools exist, append at end */}
-      {(() => {
-        if (isStreaming && !toolsOverlayInserted && streamingBus.getTools(event.id).length > 0) {
-          toolsOverlayInserted = true;
-          return <div className="mt-2"><StreamingToolsOverlay eventId={event.id} /></div>;
-        }
-        return null;
-      })()}
       {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}

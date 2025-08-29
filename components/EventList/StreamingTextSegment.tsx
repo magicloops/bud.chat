@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import { streamingBus } from '@/lib/streaming/streamingBus';
+import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 
 interface StreamingTextSegmentProps {
   eventId: string;
@@ -11,29 +11,37 @@ interface StreamingTextSegmentProps {
 }
 
 export function StreamingTextSegment({ eventId, baseText, isStreaming }: StreamingTextSegmentProps) {
-  const [text, setText] = useState(() => baseText + streamingBus.get(eventId));
+  const [text, setText] = useState<string>(() => {
+    const draft = getDraft(eventId);
+    const draftText = draft?.segments?.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
+    return (baseText || '') + (draftText?.text || '');
+  });
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     // On mount or eventId change, initialize text
-    setText(baseText + streamingBus.get(eventId));
+    const initDraft = getDraft(eventId);
+    const initTextSeg = initDraft?.segments?.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
+    setText((baseText || '') + (initTextSeg?.text || ''));
 
     if (!isStreaming) {
       return;
     }
 
     const update = () => {
-      const next = baseText + streamingBus.get(eventId);
+      const draft = getDraft(eventId);
+      const seg = draft?.segments?.find(s => s.type === 'text') as { type: 'text'; text: string } | undefined;
+      const next = (baseText || '') + (seg?.text || '');
       setText(prev => {
         if (prev === next) return prev;
         window.dispatchEvent(new CustomEvent('streaming-content-updated'));
         return next;
       });
     };
-    // Use streamingBus subscription only to avoid redundant interval updates
-    const unsub = streamingBus.subscribe(eventId, update);
+    intervalRef.current = setInterval(update, 50);
     return () => {
-      unsub();
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
     };
   }, [eventId, baseText, isStreaming]);
 

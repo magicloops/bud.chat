@@ -8,9 +8,8 @@ import { ToolCallId } from '@/lib/types/branded';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
-import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
+import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 import StreamingTextSegment from './StreamingTextSegment';
-import { streamingBus } from '@/lib/streaming/streamingBus';
 import {
   Copy,
   Edit,
@@ -59,38 +58,27 @@ export const EventItemSequential = memo(function EventItemSequential({
   const isTool = event.role === 'tool';
   
   // Determine if this event is the active streaming placeholder
-  const session = streamingSessionManager.getState();
-  const isStreamingActive = isAssistant && session.active && session.assistantEventId === event.id;
+  const isStreamingActive = isAssistant && !!conversation?.isStreaming && conversation?.streamingEventId === event.id;
   
   // Streaming header status: reasoning vs tools vs typing
   const [headerStatus, setHeaderStatus] = useState<'thinking' | 'using-tools' | 'typing'>('thinking');
   useEffect(() => {
     if (!(isStreamingActive || isStreaming)) return;
-    const compute = () => {
-      const tools = streamingBus.getTools(event.id);
-      if (tools && tools.some(t => t.status === 'in_progress' || t.status === 'finalized')) {
-        setHeaderStatus('using-tools');
-        return;
-      }
-      const parts = streamingBus.getReasoningParts(event.id);
-      if (parts && parts.length > 0 && parts.some(p => !p.is_complete)) {
-        setHeaderStatus('thinking');
-        return;
-      }
-      const text = streamingBus.get(event.id);
-      if (text && text.length > 0) {
-        setHeaderStatus('typing');
-        return;
-      }
-      // Default to thinking at stream start
+    const interval = setInterval(() => {
+      const draft = getDraft(event.id);
+      const segs = draft?.segments || event.segments;
+      const toolCalls = segs.filter(s => s.type === 'tool_call') as any[];
+      const toolResults = segs.filter(s => s.type === 'tool_result') as any[];
+      const unresolved = toolCalls.some(tc => !toolResults.some(tr => tr.id === tc.id));
+      if (unresolved) { setHeaderStatus('using-tools'); return; }
+      const reasoning = segs.find(s => s.type === 'reasoning') as any;
+      if (reasoning && reasoning.streaming) { setHeaderStatus('thinking'); return; }
+      const textSeg = segs.find(s => s.type === 'text') as any;
+      if (textSeg && textSeg.text && textSeg.text.length > 0) { setHeaderStatus('typing'); return; }
       setHeaderStatus('thinking');
-    };
-    const unsubA = streamingBus.subscribeTools(event.id, compute);
-    const unsubB = streamingBus.subscribeReasoningParts(event.id, compute);
-    const unsubC = streamingBus.subscribe(event.id, compute);
-    compute();
-    return () => { unsubA(); unsubB(); unsubC(); };
-  }, [isStreamingActive, isStreaming, event.id]);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isStreamingActive, isStreaming, event.id, event.segments]);
   
   // Extract text content for fallback and editing
   const textContent = event.segments
@@ -260,6 +248,9 @@ export const EventItemSequential = memo(function EventItemSequential({
     shouldShowAsContinuation && 'continuation-view'
   );
 
+  // Prefer draft event from EventBuilder during streaming
+  const displayEvent = isStreamingActive ? (getDraft(event.id) || event) : event;
+
   return (
     <div className={containerClasses}>
       <div className="flex items-start gap-3">
@@ -302,7 +293,7 @@ export const EventItemSequential = memo(function EventItemSequential({
             {/* Content: render segments inline; renderer handles streaming mode */}
             {(
               <SequentialSegmentRenderer
-                event={event}
+                event={displayEvent}
                 allEvents={allEvents}
                 isStreaming={isStreamingActive || isStreaming}
               />
