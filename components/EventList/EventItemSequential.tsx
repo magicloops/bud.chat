@@ -69,7 +69,16 @@ export const EventItemSequential = memo(function EventItemSequential({
       const segs = draft?.segments || event.segments;
       const toolCalls = segs.filter(s => s.type === 'tool_call') as any[];
       const toolResults = segs.filter(s => s.type === 'tool_result') as any[];
-      const unresolved = toolCalls.some(tc => !toolResults.some(tr => tr.id === tc.id));
+      // consider results that may arrive in separate 'tool' events (multi-turn execution)
+      const unresolved = toolCalls.some(tc => {
+        const resolvedInEvent = toolResults.some(tr => tr.id === tc.id);
+        if (resolvedInEvent) return false;
+        if (allEvents && allEvents.length > 0) {
+          const resolvedInOthers = allEvents.some(e => e.segments.some(s => s.type === 'tool_result' && (s as any).id === tc.id));
+          if (resolvedInOthers) return false;
+        }
+        return true;
+      });
       if (unresolved) { setHeaderStatus('using-tools'); return; }
       const reasoning = segs.find(s => s.type === 'reasoning') as any;
       if (reasoning && reasoning.streaming) { setHeaderStatus('thinking'); return; }
@@ -78,7 +87,7 @@ export const EventItemSequential = memo(function EventItemSequential({
       setHeaderStatus('thinking');
     }, 100);
     return () => clearInterval(interval);
-  }, [isStreamingActive, isStreaming, event.id, event.segments]);
+  }, [isStreamingActive, isStreaming, event.id, event.segments, allEvents]);
   
   // Extract text content for fallback and editing
   const textContent = event.segments
@@ -103,8 +112,11 @@ export const EventItemSequential = memo(function EventItemSequential({
     setLocalTextContent(textContent);
   }, [textContent]);
   
-  // Check if event has any content to render
-  const hasSegments = event.segments && event.segments.length > 0;
+  // Prefer draft event from EventBuilder during streaming
+  const displayEvent = isStreamingActive ? (getDraft(event.id) || event) : event;
+
+  // Check if event has any content to render (use displayEvent so streaming text suppresses cursor)
+  const hasSegments = displayEvent.segments && displayEvent.segments.length > 0;
   const hasReasoningSegments = event.segments.some(s => s.type === 'reasoning');
   const hasToolCalls = event.segments.some(s => s.type === 'tool_call');
   // Outer steps toggle removed; rely on inner Reasoning/Tool controls
@@ -248,8 +260,7 @@ export const EventItemSequential = memo(function EventItemSequential({
     shouldShowAsContinuation && 'continuation-view'
   );
 
-  // Prefer draft event from EventBuilder during streaming
-  const displayEvent = isStreamingActive ? (getDraft(event.id) || event) : event;
+  // displayEvent already computed above
 
   return (
     <div className={containerClasses}>

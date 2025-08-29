@@ -795,7 +795,6 @@ export async function POST(request: NextRequest) {
             // Stream the response
             let currentEvent: Event | null = null;
             let hasToolCalls = false;
-            let eventStarted = false;
             const startedTools = new Set<string>(); // Track which tools we've already started
             let breakProviderStreamForTools = false; // When true, exit provider stream to execute tools
             
@@ -823,12 +822,8 @@ export async function POST(request: NextRequest) {
                       eventLog.addEvent(currentEvent);
                       allNewEvents.push(currentEvent);
                       hasToolCalls = currentEvent.segments.some(s => s.type === 'tool_call');
-                      
-                      // Send event start
-                      if (!eventStarted) {
-                        sendSSE(streamingFormat.formatSSE(streamingFormat.eventStart(currentEvent)));
-                        eventStarted = true;
-                      }
+                      // Always emit event_start for each new assistant event (each turn)
+                      sendSSE(streamingFormat.formatSSE(streamingFormat.eventStart(currentEvent)));
                       
                       // Process segments from the event
                       for (const segment of currentEvent.segments) {
@@ -1115,6 +1110,21 @@ export async function POST(request: NextRequest) {
                     // We have tool calls to execute locally (MCP or otherwise).
                     // Do NOT send done or close the stream yet. Break provider stream
                     // so the outer loop can execute tools and re-invoke the model.
+                    if (currentEvent) {
+                      try {
+                        // Signal to the frontend that the current assistant event is complete
+                        sendSSE(
+                          streamingFormat.formatSSE(
+                            streamingFormat.eventComplete(currentEvent)
+                          )
+                        );
+                        console.log('🔄 [Chat API] Emitted event_complete before tool execution:', { eventId: currentEvent.id });
+                      } catch (e) {
+                        console.warn('⚠️ [Chat API] Failed to emit event_complete before tools:', e);
+                      }
+                      // Clear currentEvent for the next turn
+                      currentEvent = null;
+                    }
                     console.log('🔄 [Chat API] Unresolved tool calls detected:', unresolved.length, '— continuing to tool execution phase');
                     breakProviderStreamForTools = true;
                     break;

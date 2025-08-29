@@ -185,6 +185,12 @@ export class AnthropicProvider extends BaseProvider {
             segments: [],
             ts: Date.now()
           };
+          // Emit the event as soon as the message starts so the server can
+          // send an event_start to the frontend for proper turn separation.
+          yield {
+            type: 'event',
+            data: { event: currentEvent }
+          };
         }
         
         if (chunk.type === 'content_block_start') {
@@ -200,8 +206,21 @@ export class AnthropicProvider extends BaseProvider {
               name: chunk.content_block.name,
               input: ''
             });
-            
-            // Don't emit segment events - let the route handler convert to proper events
+            // Emit a tool_call start segment immediately (no args yet)
+            if (currentEvent) {
+              yield {
+                type: 'segment',
+                data: {
+                  segment: {
+                    type: 'tool_call',
+                    id: chunk.content_block.id as ToolCallId,
+                    name: chunk.content_block.name,
+                    args: {}
+                  },
+                  segmentIndex: 0
+                }
+              };
+            }
           }
         }
         
@@ -253,6 +272,20 @@ export class AnthropicProvider extends BaseProvider {
                   name: lastToolCall.name,
                   args
                 });
+                // Also yield a tool_call segment with finalized args so the
+                // route can emit tool_finalized immediately for UI
+                yield {
+                  type: 'segment',
+                  data: {
+                    segment: {
+                      type: 'tool_call',
+                      id: lastToolCall.id as ToolCallId,
+                      name: lastToolCall.name,
+                      args
+                    },
+                    segmentIndex: 0
+                  }
+                };
               } catch (e) {
                 console.error('Failed to parse tool call input:', e, 'Raw input:', lastToolCall.input);
               }
@@ -260,15 +293,8 @@ export class AnthropicProvider extends BaseProvider {
           }
         }
         
-        if (chunk.type === 'message_delta' && chunk.usage) {
-          // Final message with usage data
-          if (currentEvent) {
-            yield {
-              type: 'event',
-              data: { event: currentEvent }
-            };
-          }
-        }
+        // Do not emit another 'event' here; we already emitted on message_start.
+        // Usage accounting can be handled separately if needed.
       }
       
       // Emit done event

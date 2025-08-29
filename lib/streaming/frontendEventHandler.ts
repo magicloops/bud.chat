@@ -106,6 +106,26 @@ export class FrontendEventHandler {
     isVisible: false
   };
 
+  private dbg(...args: any[]) {
+    if (this.options.debug) {
+      // eslint-disable-next-line no-console
+      console.log('[STREAM][FE]', ...args);
+    }
+  }
+
+  private normalizeOutput(raw: unknown): object | undefined {
+    if (raw == null) return undefined;
+    if (typeof raw === 'object') return raw as object;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed !== null && (typeof parsed === 'object' || Array.isArray(parsed))) return parsed as object;
+      } catch {}
+      return { content: raw } as unknown as object;
+    }
+    return { content: String(raw) } as unknown as object;
+  }
+
   /**
    * Set local state updater for optimistic flows
    */
@@ -170,6 +190,8 @@ export class FrontendEventHandler {
     const serverId = newEvent.id;
     const placeholderId = this.assistantPlaceholder?.id;
 
+    this.dbg('event_start', { serverId, placeholderId, hasBuilder: !!this.builder });
+
     // no debug logs
     // First: stop old builder immediately to avoid late flush
     if (this.builder) {
@@ -177,25 +199,58 @@ export class FrontendEventHandler {
       try { this.builder.dispose?.(); } catch {}
     }
     // Rename existing placeholder in store (and keep array size constant)
-    if (this.conversationId && this.storeInstance && placeholderId && placeholderId !== serverId) {
+    if (this.conversationId && this.storeInstance) {
       const store = this.storeInstance.getState();
       const conv = store.conversations[this.conversationId];
       if (conv) {
-        const events = conv.events.map(e => e.id === placeholderId ? { ...e, id: serverId } : e);
-        store.setConversation(this.conversationId, {
-          ...conv,
-          events,
-          isStreaming: true,
-          streamingEventId: serverId,
-        });
-
-        // no debug logs
+        const streamingId = conv.streamingEventId;
+        let ensuredPlaceholder: Event | null = null;
+        if (placeholderId && placeholderId !== serverId && streamingId === placeholderId) {
+          // Safe rename only if placeholder matches current streaming id
+          const events = conv.events.map(e => e.id === placeholderId ? { ...e, id: serverId } : e);
+          store.setConversation(this.conversationId, {
+            ...conv,
+            events,
+            isStreaming: true,
+            streamingEventId: serverId,
+          });
+          this.dbg('rename_placeholder', { from: placeholderId, to: serverId, eventsCount: events.length });
+          // Also rename draft immediately to avoid polling gaps
+          try {
+            const { renameDraft } = require('./eventBuilderRegistry');
+            renameDraft(placeholderId, serverId);
+          } catch {}
+          // Find the renamed event to seed builder
+          ensuredPlaceholder = events.find(e => e.id === serverId) || null;
+        } else {
+          // No valid placeholder to rename — ensure the new assistant event exists in store
+          const alreadyExists = conv.events.some(e => e.id === serverId);
+          if (!alreadyExists) {
+            const seeded: Event = { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') } as Event;
+            const events = [...conv.events, seeded];
+            store.setConversation(this.conversationId, {
+              ...conv,
+              events,
+              isStreaming: true,
+              streamingEventId: serverId,
+            });
+            this.dbg('insert_new_streaming_event', { eventId: serverId, eventsCount: events.length });
+            ensuredPlaceholder = seeded;
+          } else {
+            // Update streaming flags if event is already present
+            store.setConversation(this.conversationId, {
+              ...conv,
+              isStreaming: true,
+              streamingEventId: serverId,
+            });
+            ensuredPlaceholder = conv.events.find(e => e.id === serverId) || null;
+          }
+        }
+        // Use ensured placeholder for builder seeding below if present
+        if (ensuredPlaceholder) {
+          this.assistantPlaceholder = ensuredPlaceholder;
+        }
       }
-      // Also rename draft immediately to avoid polling gaps
-      try {
-        const { renameDraft } = require('./eventBuilderRegistry');
-        renameDraft(placeholderId, serverId);
-      } catch {}
     }
     // Recreate builder bound to the server id, preserving current draft text/segments
     try {
@@ -205,11 +260,15 @@ export class FrontendEventHandler {
         const { getDraft } = require('./eventBuilderRegistry');
         prevDraft = getDraft(serverId);
       } catch {}
-      const base: Event = prevDraft ? { ...prevDraft, id: serverId } : { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') };
+      const baseFromStore = this.assistantPlaceholder && this.assistantPlaceholder.id === serverId ? this.assistantPlaceholder : null;
+      const base: Event = prevDraft
+        ? { ...prevDraft, id: serverId }
+        : baseFromStore
+          ? baseFromStore
+          : { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') };
       this.assistantPlaceholder = base;
       this.createBuilderForPlaceholder(base);
-
-      // no debug logs
+      this.dbg('builder_created', { eventId: base.id, seedSegments: base.segments?.length || 0 });
     } catch {
       // Fallback: just switch placeholder id
       if (this.assistantPlaceholder) this.assistantPlaceholder = { ...this.assistantPlaceholder, id: serverId } as Event;
@@ -243,6 +302,7 @@ export class FrontendEventHandler {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
+              this.dbg('sse_in', { type: (data && data.type) || 'unknown', keys: Object.keys(data || {}) });
               await this.handleStreamEvent(data);
             } catch (e) {
               if (this.options.debug) {
@@ -270,7 +330,9 @@ export class FrontendEventHandler {
       case 'segment': {
         const seg = (data as any).segment || (data as any).data?.segment;
         if (!seg || !this.builder) break;
+        if (seg.type === 'text') this.dbg('segment_text', { len: (seg.text || '').length });
         if (seg.type === 'tool_call') {
+          this.dbg('segment_tool_call', { id: seg.id, name: seg.name, hasArgs: !!(seg.args && Object.keys(seg.args).length) });
           if (seg.id && seg.name && (!seg.args || Object.keys(seg.args).length === 0)) {
             this.builder.startToolCall(seg.id, seg.name);
           }
@@ -278,6 +340,7 @@ export class FrontendEventHandler {
             this.builder.finalizeToolArgs(seg.id, seg.args);
           }
         } else if (seg.type === 'tool_result') {
+          this.dbg('segment_tool_result', { id: seg.id, hasOutput: !!seg.output });
           this.builder.completeTool(seg.id, seg.output, seg.error);
         } else if (seg.type === 'reasoning') {
           if (Array.isArray(seg.parts)) {
@@ -297,6 +360,7 @@ export class FrontendEventHandler {
       }
       case 'event_complete': {
         // Commit the current draft to store immediately (multi-turn streaming support)
+        this.dbg('event_complete_begin', { hasBuilder: !!this.builder });
         if (this.builder) {
           let draft: Event | undefined = undefined;
           try { draft = this.builder.getDraft?.(); } catch {}
@@ -314,6 +378,7 @@ export class FrontendEventHandler {
                 isStreaming: true,
                 // streamingEventId will be updated on next event_start
               });
+              this.dbg('event_complete_committed', { eventId: draft.id, eventsCount: events.length });
             }
           }
           // Clear local placeholder; next event_start will set new builder/placeholder
@@ -323,6 +388,7 @@ export class FrontendEventHandler {
         break;
       }
       case 'token':
+        this.dbg('token', { len: (data.content || '').length, hasBuilder: !!this.builder });
         await this.handleTokenEvent(data);
         // Hide progress when text content starts
         if (data.hideProgress) {
@@ -330,6 +396,7 @@ export class FrontendEventHandler {
         }
         break;
       case 'tool_start':
+        this.dbg('tool_start', { id: data.tool_id, name: data.tool_name });
         await this.handleToolStartEvent(data);
         // Hide progress when tool starts
         if (data.hideProgress) {
@@ -337,12 +404,15 @@ export class FrontendEventHandler {
         }
         break;
       case 'tool_finalized':
+        this.dbg('tool_finalized', { id: data.tool_id });
         await this.handleToolFinalizedEvent(data);
         break;
       case 'tool_result':
+        this.dbg('tool_result', { id: data.tool_id, hasOutput: !!data.output, error: !!data.error });
         await this.handleToolResultEvent(data);
         break;
       case 'tool_complete':
+        this.dbg('tool_complete', { id: data.tool_id });
         await this.handleToolCompleteEvent(data);
         break;
       case 'reasoning_summary_part_added':
@@ -391,10 +461,12 @@ export class FrontendEventHandler {
         await this.handleMCPApprovalRequestEvent(data);
         break;
       case 'complete':
+        this.dbg('complete');
         await this.handleCompleteEvent(data);
         break;
       case 'message_final': {
         // Final, canonical assistant event from server
+        this.dbg('message_final', { id: (data.event as any)?.id, hasBuilder: !!this.builder });
         if (data.event) {
           if (this.builder) {
             this.builder.finalizeCurrentEvent(data.event as Event);
@@ -487,12 +559,43 @@ export class FrontendEventHandler {
    * Handle tool result events
    */
   private async handleToolResultEvent(_data: StreamEvent): Promise<void> {
-    // Attach to draft if present (some paths emit tool_result here)
+    // Upsert a transient tool-result event in store so ToolCallSegment can resolve it via allEvents
     const data = _data;
-    if (!this.assistantPlaceholder || !data.tool_id) return;
-    if (this.builder) {
-      const output = typeof data.output === 'object' && data.output !== null ? (data.output as object) : undefined;
-      this.builder.completeTool(data.tool_id as ToolCallId, output, data.error || undefined);
+    if (!data.tool_id) return;
+
+    const output = this.normalizeOutput(data.output as unknown);
+    const err = data.error == null ? undefined : data.error; // normalize null → undefined
+
+    if (this.conversationId && this.storeInstance) {
+      const store = this.storeInstance.getState();
+      const conv = store.conversations[this.conversationId];
+      if (conv) {
+        const syntheticId = `tool-result:${String(data.tool_id)}`;
+        const toolEvent = {
+          id: syntheticId,
+          role: 'tool' as const,
+          segments: [
+            { type: 'tool_result' as const, id: data.tool_id as ToolCallId, output: output || {}, error: err }
+          ],
+          ts: Date.now()
+        } as Event;
+
+        const existingIndex = conv.events.findIndex(e => e.id === syntheticId);
+        const nextEvents = existingIndex >= 0
+          ? [
+              ...conv.events.slice(0, existingIndex),
+              toolEvent,
+              ...conv.events.slice(existingIndex + 1)
+            ]
+          : [...conv.events, toolEvent];
+
+        store.setConversation(this.conversationId, {
+          ...conv,
+          events: nextEvents,
+          isStreaming: true,
+        });
+        this.dbg('tool_result_upserted_store', { syntheticId, eventsCount: nextEvents.length });
+      }
     }
   }
 
@@ -500,15 +603,46 @@ export class FrontendEventHandler {
    * Handle tool complete events
    */
   private async handleToolCompleteEvent(data: StreamEvent): Promise<void> {
-    if (!this.assistantPlaceholder || !data.tool_id) return;
-    if (this.options.debug) {
-      console.log('[STREAM][handler] tool_complete', { eventId: this.assistantPlaceholder.id, tool_id: data.tool_id, error: data.error });
+    if (!data.tool_id) return;
+    const output = this.normalizeOutput(data.output as unknown);
+    const err = data.error == null ? undefined : data.error; // normalize null → undefined
+    // Mirror tool_result handling: upsert a transient tool event
+    if (this.conversationId && this.storeInstance) {
+      const store = this.storeInstance.getState();
+      const conv = store.conversations[this.conversationId];
+      if (conv) {
+        const syntheticId = `tool-result:${String(data.tool_id)}`;
+        // Preserve existing non-empty output if this completion carries none
+        const existingIndex = conv.events.findIndex(e => e.id === syntheticId);
+        const existing = existingIndex >= 0 ? conv.events[existingIndex] : null;
+        const existingSeg = existing?.segments.find(s => s.type === 'tool_result' && (s as any).id === data.tool_id) as any;
+        const finalOutput = output !== undefined ? output : (existingSeg?.output !== undefined ? existingSeg.output : {});
+        const finalError = err !== undefined ? err : existingSeg?.error;
+        const toolEvent = {
+          id: syntheticId,
+          role: 'tool' as const,
+          segments: [
+            { type: 'tool_result' as const, id: data.tool_id as ToolCallId, output: finalOutput, error: finalError }
+          ],
+          ts: Date.now()
+        } as Event;
+
+        const nextEvents = existingIndex >= 0
+          ? [
+              ...conv.events.slice(0, existingIndex),
+              toolEvent,
+              ...conv.events.slice(existingIndex + 1)
+            ]
+          : [...conv.events, toolEvent];
+
+        store.setConversation(this.conversationId, {
+          ...conv,
+          events: nextEvents,
+          isStreaming: true,
+        });
+        this.dbg('tool_complete_upserted_store', { syntheticId, eventsCount: nextEvents.length });
+      }
     }
-    if (this.builder) {
-      const output = typeof data.output === 'object' && data.output !== null ? (data.output as object) : undefined;
-      this.builder.completeTool(data.tool_id as ToolCallId, output, data.error || undefined);
-    }
-    // UI reads tools from EventBuilder draft
   }
 
   /**
