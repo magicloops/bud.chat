@@ -118,8 +118,16 @@ const EventStreamComponent = function EventStream({
         conversationId, // Enable store-backed updates for multi-turn
         useEventChatStore,
         { 
-          debug: true,
+          debug: false,
           onMessageFinal: (finalEvent) => {
+            if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
+              // eslint-disable-next-line no-console
+              console.debug('[STREAM][onMessageFinal][existing]', {
+                role: finalEvent.role,
+                id: finalEvent.id,
+                segTypes: finalEvent.segments.map(s => (s as any).type),
+              });
+            }
             // Replace in place by id; remove any placeholder with a different id to avoid duplicates
             const storeNow = useEventChatStore.getState();
             const convNow = storeNow.conversations[conversationId];

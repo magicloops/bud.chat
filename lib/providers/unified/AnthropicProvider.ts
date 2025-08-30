@@ -197,10 +197,6 @@ export class AnthropicProvider extends BaseProvider {
           if (chunk.content_block.type === 'text') {
             currentText = '';
           } else if (chunk.content_block.type === 'tool_use') {
-            console.log('🔧 [AnthropicProvider] Tool use started:', {
-              id: chunk.content_block.id,
-              name: chunk.content_block.name
-            });
             currentToolCalls.push({
               id: chunk.content_block.id,
               name: chunk.content_block.name,
@@ -260,11 +256,6 @@ export class AnthropicProvider extends BaseProvider {
             if (lastToolCall && lastToolCall.input) {
               try {
                 const args = JSON.parse(lastToolCall.input);
-                console.log('🔧 [AnthropicProvider] Tool call completed:', {
-                  id: lastToolCall.id,
-                  name: lastToolCall.name,
-                  args
-                });
                 // Only add to event segments, don't emit again
                 currentEvent.segments.push({
                   type: 'tool_call',

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { TextSegment } from './TextSegment';
 import StreamingTextSegment from './StreamingTextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
@@ -26,6 +26,29 @@ export function SequentialSegmentRenderer({
   isStreaming = false,
   className 
 }: SequentialSegmentRendererProps) {
+  // Poll progress from EventBuilder draft so indicator updates during streaming
+  const [progressState, setProgressState] = useState(() => event.progressState);
+  useEffect(() => {
+    if (!isStreaming) { setProgressState(event.progressState); return; }
+    let timer: ReturnType<typeof setInterval> | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getDraft } = require('@/lib/streaming/eventBuilderRegistry');
+      const tick = () => {
+        const d = getDraft(event.id) || event;
+        const ps = d.progressState;
+        setProgressState(prev => {
+          const changed = JSON.stringify(prev) !== JSON.stringify(ps);
+          return changed ? (ps ? { ...ps } : undefined) : prev;
+        });
+      };
+      timer = setInterval(tick, 80);
+      tick();
+    } catch {
+      // ignore
+    }
+    return () => { if (timer) clearInterval(timer); };
+  }, [event.id, isStreaming]);
   // Sort segments by sequence_number, falling back to array order for segments without sequence_number
   const sortedSegments = [...event.segments].sort((a, b) => {
     // Get sequence numbers, using Infinity for segments without them to maintain array order
@@ -126,7 +149,6 @@ export function SequentialSegmentRenderer({
   };
 
   // Check if progress indicator should be shown
-  const progressState = event.progressState;
   const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
   const hasContent = sortedSegments.length > 0;
   

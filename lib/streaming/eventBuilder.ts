@@ -135,7 +135,16 @@ export class EventBuilder {
       const parts = Array.isArray(seg.parts) ? [...seg.parts] : [];
       const existingIndex = parts.findIndex(p => p.summary_index === part.summary_index);
       if (existingIndex >= 0) {
-        parts[existingIndex] = part;
+        const prev = parts[existingIndex];
+        const merged: ReasoningPart = {
+          ...prev,
+          text: (prev.text || '') + (part.text || ''),
+          is_complete: part.is_complete ?? prev.is_complete,
+          sequence_number: part.sequence_number ?? prev.sequence_number,
+          // Preserve original created_at
+          created_at: prev.created_at,
+        };
+        parts[existingIndex] = merged;
       } else {
         parts.push(part);
       }

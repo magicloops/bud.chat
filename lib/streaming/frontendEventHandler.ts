@@ -106,8 +106,23 @@ export class FrontendEventHandler {
     isVisible: false
   };
 
+  private isDbg(): boolean {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w: any = typeof window !== 'undefined' ? window : undefined;
+      const flag = !!(w && (w.__STREAM_DEBUG || w.__RESPONSES_DEBUG));
+      const ls = typeof window !== 'undefined' ? (window.localStorage?.getItem('STREAM_DEBUG') === '1' || window.localStorage?.getItem('RESPONSES_DEBUG') === '1') : false;
+      // Allow build-time env flags (Next.js inlines NEXT_PUBLIC_* vars)
+      const env = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') : false;
+      return !!this.options.debug || flag || ls || env;
+    } catch {
+      // Fallback to constructor option only
+      return !!this.options.debug;
+    }
+  }
+
   private dbg(...args: any[]) {
-    if (this.options.debug) {
+    if (this.isDbg()) {
       // eslint-disable-next-line no-console
       console.log('[STREAM][FE]', ...args);
     }
@@ -151,6 +166,7 @@ export class FrontendEventHandler {
           }
         }
       });
+      this.dbg('builder_init', { placeholderId: placeholder.id, segCount: placeholder.segments?.length || 0 });
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -190,7 +206,7 @@ export class FrontendEventHandler {
     const serverId = newEvent.id;
     const placeholderId = this.assistantPlaceholder?.id;
 
-    this.dbg('event_start', { serverId, placeholderId, hasBuilder: !!this.builder });
+    this.dbg('event_start', { serverId, placeholderId, hasBuilder: !!this.builder, role: newEvent.role, convId: this.conversationId });
 
     // no debug logs
     // First: stop old builder immediately to avoid late flush
@@ -302,7 +318,15 @@ export class FrontendEventHandler {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              this.dbg('sse_in', { type: (data && data.type) || 'unknown', keys: Object.keys(data || {}) });
+              const t = (data && data.type) || 'unknown';
+              if (
+                t !== 'token' &&
+                t !== 'segment' &&
+                t !== 'reasoning_summary_text_delta' &&
+                t !== 'reasoning_summary_delta'
+              ) {
+                this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
+              }
               await this.handleStreamEvent(data);
             } catch (e) {
               if (this.options.debug) {
@@ -330,7 +354,7 @@ export class FrontendEventHandler {
       case 'segment': {
         const seg = (data as any).segment || (data as any).data?.segment;
         if (!seg || !this.builder) break;
-        if (seg.type === 'text') this.dbg('segment_text', { len: (seg.text || '').length });
+        // omit verbose segment_text logging to reduce noise
         if (seg.type === 'tool_call') {
           this.dbg('segment_tool_call', { id: seg.id, name: seg.name, hasArgs: !!(seg.args && Object.keys(seg.args).length) });
           if (seg.id && seg.name && (!seg.args || Object.keys(seg.args).length === 0)) {
@@ -388,7 +412,7 @@ export class FrontendEventHandler {
         break;
       }
       case 'token':
-        this.dbg('token', { len: (data.content || '').length, hasBuilder: !!this.builder });
+        // omit per-token debug logging to reduce noise
         await this.handleTokenEvent(data);
         // Hide progress when text content starts
         if (data.hideProgress) {
@@ -653,7 +677,11 @@ export class FrontendEventHandler {
    * Handle MCP tool start events
    */
   private async handleMCPToolStartEvent(_data: StreamEvent): Promise<void> {
-    // Overlay handled via generic tool handlers above or separate flows
+    const data = _data;
+    if (!data.tool_id || !data.tool_name) return;
+    if (this.builder) {
+      this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
+    }
   }
 
   /**
@@ -668,14 +696,28 @@ export class FrontendEventHandler {
    * Handle MCP tool finalized events
    */
   private async handleMCPToolFinalizedEvent(_data: StreamEvent): Promise<void> {
-    // Overlay handled via generic tool handlers above
+    const data = _data;
+    if (!data.tool_id) return;
+    if (this.builder) {
+      let parsedArgs: object | undefined = undefined;
+      try {
+        parsedArgs = (data as any).args || ((data as any).arguments ? JSON.parse(String((data as any).arguments)) : undefined);
+      } catch {}
+      this.builder.finalizeToolArgs(data.tool_id as ToolCallId, parsedArgs);
+    }
   }
 
   /**
    * Handle MCP tool complete events
    */
   private async handleMCPToolCompleteEvent(_data: StreamEvent): Promise<void> {
-    // Overlay handled via generic tool handlers above
+    const data = _data;
+    if (!data.tool_id) return;
+    const output = this.normalizeOutput((data as any).output as unknown);
+    const err = (data as any).error == null ? undefined : String((data as any).error);
+    if (this.builder) {
+      this.builder.completeTool(data.tool_id as ToolCallId, output, err);
+    }
   }
 
   /**
@@ -812,6 +854,7 @@ export class FrontendEventHandler {
           is_complete: false,
           created_at: Date.now(),
         });
+        // noisy debug removed
       }
     }
     // UI reads reasoning parts from EventBuilder draft
@@ -948,6 +991,20 @@ export class FrontendEventHandler {
       }
     }
     
+    // Update builder with final parts so streaming overlay reflects completion
+    if (this.builder) {
+      const finalParts = Object.values(reasoningData.parts).sort((a, b) => a.summary_index - b.summary_index);
+      for (const p of finalParts) {
+        this.builder.upsertReasoningPart({
+          summary_index: p.summary_index,
+          type: 'summary_text',
+          text: p.text,
+          sequence_number: p.sequence_number || 0,
+          is_complete: true,
+          created_at: p.created_at || Date.now(),
+        });
+      }
+    }
     // Update UI state - reasoning is now complete
     this.updateReasoningInState(item_id, reasoningData, true);
     // UI reads reasoning from EventBuilder draft
@@ -979,6 +1036,17 @@ export class FrontendEventHandler {
     
     this.currentReasoningData.set(item_id, reasoningData);
     
+    // Seed a reasoning segment in the builder immediately so the overlay renders
+    if (this.builder) {
+      this.builder.upsertReasoningPart({
+        summary_index: 0,
+        type: 'summary_text',
+        text: '',
+        sequence_number: sequence_number || 0,
+        is_complete: false,
+        created_at: Date.now(),
+      });
+    }
     // Update UI state to show empty reasoning segment that will be populated
     this.updateReasoningInState(item_id, reasoningData);
   }
@@ -1401,18 +1469,29 @@ export class FrontendEventHandler {
   }
 
   private updateLocalStateProgress(): void {
-    if (!this.localStateUpdater || !this.assistantPlaceholder) return;
+    if (!this.assistantPlaceholder) return;
+    // Update builder draft so leaf components reading getDraft(eventId) can render progress
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getDraft, setDraft } = require('./eventBuilderRegistry');
+      const current = getDraft(this.assistantPlaceholder.id) || this.assistantPlaceholder;
+      const updated = { ...current, progressState: { ...this.progressState } };
+      setDraft(this.assistantPlaceholder.id, updated);
+    } catch {}
 
-    this.localStateUpdater(events => {
-      return events.map(event => 
-        event.id === this.assistantPlaceholder!.id
-          ? {
-              ...event,
-              progressState: { ...this.progressState }
-            }
-          : event
-      );
-    });
+    // Also update local state array if provided
+    if (this.localStateUpdater) {
+      this.localStateUpdater(events => {
+        return events.map(event => 
+          event.id === this.assistantPlaceholder!.id
+            ? {
+                ...event,
+                progressState: { ...this.progressState }
+              }
+            : event
+        );
+      });
+    }
   }
 
   private updateStoreStateProgress(): void { /* no-op */ }

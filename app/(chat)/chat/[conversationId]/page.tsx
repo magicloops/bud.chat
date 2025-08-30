@@ -329,8 +329,16 @@ export default function ChatPage({ params }: ChatPageProps) {
         tempConversationId,
         useEventChatStore,
         { 
-          debug: true,
+          debug: false,
           onMessageFinal: (finalEvent) => {
+            if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
+              // eslint-disable-next-line no-console
+              console.debug('[STREAM][onMessageFinal][new]', {
+                role: finalEvent.role,
+                id: finalEvent.id,
+                segTypes: finalEvent.segments.map(s => (s as any).type),
+              });
+            }
             // Insert canonical final event by id and remove placeholder to avoid duplicates
             const store = useEventChatStore.getState();
             const tempConv = store.conversations[tempConversationId];

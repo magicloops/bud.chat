@@ -41,7 +41,8 @@ export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingRea
     };
   }, [eventId]);
 
-  const hasContent = Array.isArray(parts) && parts.length > 0 && parts.some(p => (p.text || '').trim().length > 0);
+  const hasAnyPart = Array.isArray(parts) && parts.length > 0;
+  const hasContent = hasAnyPart && parts.some(p => (p.text || '').trim().length > 0);
   // Determine the currently streaming (active) part: the highest summary_index that's not complete
   const activePart = useMemo(() => {
     if (!parts || parts.length === 0) return null;
@@ -54,15 +55,20 @@ export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingRea
 
   // no debug logs
   // Only show when we actually have an active, in-progress part
-  if (!hasContent || !activePart) return null;
+  if ((!hasContent && !(isStreaming && hasAnyPart)) || !hasAnyPart) return null;
 
   return (
     <div className="reasoning-segment mb-3" data-testid={`streaming-reasoning-${eventId}`} data-type="reasoning">
       <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
         <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-          {activePart && (
+          {activePart ? (
             <div key={activePart.summary_index} className="mb-2">
               <MarkdownRenderer content={activePart.text || ''} />
+            </div>
+          ) : (
+            // Show placeholder container during streaming even before text arrives
+            <div className="mb-2">
+              <MarkdownRenderer content={''} />
             </div>
           )}
         </div>

@@ -396,6 +396,11 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             return;
             
           case 'message_start':
+            if (!hasStarted) {
+              // Emit unified event at the first assistant signal so the route can send event_start
+              yield { type: 'event', data: { event: currentEvent } } as unknown as StreamEvent;
+              hasStarted = true;
+            }
             // Capture the message ID for the text content that follows
             currentMessageId = streamEvent.item_id as string;
             
@@ -409,6 +414,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'text_start':
+            if (!hasStarted) {
+              yield { type: 'event', data: { event: currentEvent } } as unknown as StreamEvent;
+              hasStarted = true;
+            }
             // Create a text segment with the proper ID (fallback for legacy format)
             const textSegmentWithId: Segment = {
               type: 'text',
@@ -432,6 +441,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'token':
+            if (!hasStarted) {
+              yield { type: 'event', data: { event: currentEvent } } as unknown as StreamEvent;
+              hasStarted = true;
+            }
             if (streamEvent.content && typeof streamEvent.content === 'string') {
               // Find existing text segment or create one with the message ID
               let textSegment = currentEvent.segments.find(s => s.type === 'text') as { type: 'text'; text: string; id?: string } | undefined;
@@ -457,6 +470,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'reasoning_start':
+            if (!hasStarted) {
+              yield { type: 'event', data: { event: currentEvent } } as unknown as StreamEvent;
+              hasStarted = true;
+            }
             // Create a reasoning segment
             const reasoningSegment = {
               type: 'reasoning' as const,
@@ -630,6 +647,10 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'mcp_tool_start':
+            if (!hasStarted) {
+              yield { type: 'event', data: { event: currentEvent } } as unknown as StreamEvent;
+              hasStarted = true;
+            }
             // For MCP tools, use the tool ID from the stream directly
             const mcpToolId = (streamEvent.tool_id || generateToolCallId()) as ToolCallId;
             const mcpToolSegment: Segment = {

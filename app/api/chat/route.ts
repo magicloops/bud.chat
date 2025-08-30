@@ -1118,7 +1118,6 @@ export async function POST(request: NextRequest) {
                             streamingFormat.eventComplete(currentEvent)
                           )
                         );
-                        console.log('🔄 [Chat API] Emitted event_complete before tool execution:', { eventId: currentEvent.id });
                       } catch (e) {
                         console.warn('⚠️ [Chat API] Failed to emit event_complete before tools:', e);
                       }
