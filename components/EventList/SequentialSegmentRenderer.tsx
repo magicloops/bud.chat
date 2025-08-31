@@ -7,6 +7,7 @@ import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
+import { getRenderableSegments } from '@/lib/streaming/rendering';
 import { ReasoningSegment } from './ReasoningSegment';
 import StreamingReasoningSegment from './StreamingReasoningSegment';
 // Removed overlay dependency
@@ -26,6 +27,12 @@ export function SequentialSegmentRenderer({
   isStreaming = false,
   className 
 }: SequentialSegmentRendererProps) {
+  const dbg = (msg: string, obj: any) => {
+    if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
+      // eslint-disable-next-line no-console
+      console.debug('[STREAM][Renderer]', msg, obj);
+    }
+  };
   // Poll progress from EventBuilder draft so indicator updates during streaming
   const [progressState, setProgressState] = useState(() => event.progressState);
   useEffect(() => {
@@ -49,25 +56,10 @@ export function SequentialSegmentRenderer({
     }
     return () => { if (timer) clearInterval(timer); };
   }, [event.id, isStreaming]);
-  // Sort segments by sequence_number, falling back to array order for segments without sequence_number
-  const sortedSegments = [...event.segments].sort((a, b) => {
-    // Get sequence numbers, using Infinity for segments without them to maintain array order
-    const aSeq = 'sequence_number' in a && a.sequence_number !== undefined ? a.sequence_number : Infinity;
-    const bSeq = 'sequence_number' in b && b.sequence_number !== undefined ? b.sequence_number : Infinity;
-    
-    // If both have sequence numbers, sort by them
-    if (aSeq !== Infinity && bSeq !== Infinity) {
-      return aSeq - bSeq;
-    }
-    
-    // If neither has sequence numbers, maintain original array order
-    if (aSeq === Infinity && bSeq === Infinity) {
-      return event.segments.indexOf(a) - event.segments.indexOf(b);
-    }
-    
-    // If only one has a sequence number, prioritize it
-    return aSeq - bSeq;
-  });
+  // Build a normalized, renderable list of segments; preserve original order
+  dbg('renderer_in', { eventId: event.id, role: (event as any).role, isStreaming, segTypes: event.segments.map(s => (s as any).type) });
+  const renderSegments = getRenderableSegments(event, allEvents);
+  dbg('render_segments', { eventId: event.id, segTypes: renderSegments.map(s => (s as any).type) });
 
   let firstTextRendered = false;
   // No overlays; segments render inline from Event (or draft)
@@ -128,7 +120,7 @@ export function SequentialSegmentRenderer({
       }
         
       case 'tool_result':
-        // Do not render separately; ToolCallSegment displays result when available
+        // Should not occur because getRenderableSegments removes standalone tool_result
         return null;
         
       case 'web_search_call':
@@ -142,22 +134,33 @@ export function SequentialSegmentRenderer({
         );
         
       default:
-        // Handle any unknown segment types gracefully
-        console.warn('Unknown segment type:', (segment as unknown as { type: string }).type);
-        return null;
+        // Fallback: render unknown segments as JSON for now
+        try {
+          return (
+            <div key={key} className="text-segment">
+              <MarkdownRenderer content={`
+\n\n\n\n\n\n\n\n` +
+                '```json\n' +
+                JSON.stringify(segment as any, null, 2) +
+                '\n```'} />
+            </div>
+          );
+        } catch {
+          return null;
+        }
     }
   };
 
   // Check if progress indicator should be shown
   const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
-  const hasContent = sortedSegments.length > 0;
+  const hasContent = renderSegments.length > 0;
   
   // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
   const shouldShowTypingIndicator = false;
 
   return (
     <div className={className}>
-      {sortedSegments.map(renderSegment)}
+      {renderSegments.map(renderSegment)}
       {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}

@@ -412,7 +412,14 @@ export class FrontendEventHandler {
         break;
       }
       case 'token':
-        // omit per-token debug logging to reduce noise
+        // Log only the first token per event
+        try {
+          const id = this.assistantPlaceholder?.id;
+          if (id && !this.firstTokenLoggedFor.has(id)) {
+            this.dbg('first_token', { where: 'first_token', eventId: id });
+            this.firstTokenLoggedFor.add(id);
+          }
+        } catch {}
         await this.handleTokenEvent(data);
         // Hide progress when text content starts
         if (data.hideProgress) {
@@ -800,6 +807,15 @@ export class FrontendEventHandler {
         created_at: Date.now(),
       });
     }
+    // Debug summary of parts state
+    try {
+      const draft = this.builder?.getDraft?.();
+      const reasoning = draft?.segments.find((s: any) => s.type === 'reasoning');
+      const partsDbg = Array.isArray((reasoning as any)?.parts)
+        ? (reasoning as any).parts.map((p: any) => ({ summary_index: p.summary_index, is_complete: !!p.is_complete, len: (p.text || '').length }))
+        : [];
+      this.dbg('reasoning_update', { where: 'reasoning_update', eventId: draft?.id, parts: partsDbg });
+    } catch {}
     // Overlay: start a new reasoning part for the active assistant placeholder
     if (this.assistantPlaceholder) {
       // UI reads reasoning parts from EventBuilder draft
@@ -1117,184 +1133,7 @@ export class FrontendEventHandler {
     }
   }
 
-
-  /**
-   * LOCAL STATE UPDATES (kept minimal; overlays only)
-   */
-
-  private updateLocalStateToken(data: StreamEvent): void {
-    if (!this.assistantPlaceholder || !data.content) return;
-    // UI reads text from EventBuilder draft
-  }
-
-  private updateLocalStateToolStart(data: StreamEvent): void {
-    if (!this.assistantPlaceholder || !data.tool_id || !data.tool_name) return;
-    // UI reads tools from EventBuilder draft
-  }
-
-  private updateLocalStateToolFinalized(data: StreamEvent): void {
-    if (!this.assistantPlaceholder || !data.tool_id) return;
-    // UI reads tools from EventBuilder draft
-  }
-
-  private updateLocalStateToolResult(data: StreamEvent): void {
-    // Do not add standalone tool events during streaming; overlay only
-  }
-
-  private updateLocalStateToolComplete(_data: StreamEvent): void {
-    // No new placeholders and no store churn; overlay remains until completed
-  }
-
-  private updateLocalStateComplete(_data: StreamEvent): void {
-    // Mark streaming as complete in local state
-    // This is typically handled by the parent component
-    // Reset the flag for next stream
-    this.hasCreatedPostToolPlaceholder = false;
-  }
-
-  private updateLocalStateError(_data: StreamEvent): void {
-    // Handle error in local state - typically remove optimistic events
-    if (!this.localStateUpdater) return;
-    
-    this.localStateUpdater(events => {
-      // Remove the last 2 events (user + assistant placeholder) on error
-      return events.slice(0, -2);
-    });
-  }
-
-  // Removed MCP local update helpers; overlays handle visibility
-
-  /**
-   * STORE STATE UPDATES — removed for streaming phase (message_final only)
-   */
-
-  // Removed store token/tool update helpers
-
-  private updateStoreStateToolFinalized(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id || !data.args) return;
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
-    const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
-        ? {
-            ...event,
-            segments: event.segments.map(segment => {
-              if (segment.type === 'tool_call' && segment.id === data.tool_id) {
-                return { ...segment, args: data.args! } as Extract<Segment, { type: 'tool_call' }>;
-              }
-              return segment;
-            }),
-            ts: Date.now()
-          }
-        : event
-    );
-    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
-  }
-
-  private updateStoreStateToolResult(data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance || !data.tool_id) return;
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation || !conversation.streamingEventId) return;
-    const updatedEvents = conversation.events.map(event =>
-      event.id === conversation.streamingEventId
-        ? {
-            ...event,
-            segments: [
-              ...event.segments,
-              {
-                type: 'tool_result' as const,
-                id: data.tool_id as ToolCallId,
-                output: typeof data.output === 'object' && data.output !== null ? data.output : {},
-                error: data.error
-              }
-            ],
-            ts: Date.now()
-          }
-        : event
-    );
-    store.setConversation(this.conversationId, { ...conversation, events: updatedEvents });
-  }
-
-  private updateStoreStateToolComplete(_data: StreamEvent): void {
-    // For Responses API, new assistant placeholders after tools are not needed here.
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[STREAM][handler] Store tool complete (no new assistant placeholder)');
-    }
-  }
-
-  private updateStoreStateComplete(_data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-    
-    // Mark streaming as complete
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      isStreaming: false,
-      streamingEventId: undefined
-    });
-  }
-
-  private updateStoreStateError(_data: StreamEvent): void {
-    if (!this.conversationId || !this.storeInstance) return;
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) return;
-
-    // Remove optimistic updates on error
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: conversation.events.slice(0, -2), // Remove user + assistant events
-      isStreaming: false,
-      streamingEventId: undefined
-    });
-  }
-
-  /**
-   * MCP STORE STATE UPDATES
-   */
-
-  private updateStoreStateMCPToolStart(_data: StreamEvent): void {
-    // No-op: we do not mutate store mid-stream for tool starts; overlays handle visibility
-  }
-
-  private updateStoreStateMCPToolFinalized(data: StreamEvent): void {
-    this.updateStoreStateToolFinalized(data);
-  }
-
-  private updateStoreStateMCPToolComplete(data: StreamEvent): void {
-    this.updateStoreStateToolComplete(data);
-  }
-
-  /**
-   * Finalize streaming by updating the store with completed events
-   * This should be called by the component when streaming is complete
-   */
-  finalizeStreamingInStore(completedEvents: Event[]): void {
-    if (!this.conversationId || !this.storeInstance) {
-      return;
-    }
-
-    const store = this.storeInstance.getState();
-    const conversation = store.conversations[this.conversationId];
-    if (!conversation) {
-      return;
-    }
-
-    // Update store with final, complete events
-    store.setConversation(this.conversationId, {
-      ...conversation,
-      events: completedEvents,
-      isStreaming: false,
-      streamingEventId: undefined,
-      shouldCreateNewEvent: false
-    });
-  }
+  // Local/store mid-stream mutations removed — builder + message_final own persistence
 
   /**
    * BUILT-IN TOOL EVENT HANDLERS
@@ -1307,12 +1146,7 @@ export class FrontendEventHandler {
     const { item_id, output_index, sequence_number } = data;
     
     if (!item_id) return;
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
-    } else {
-      this.updateStoreStateBuiltInToolStart(data, 'web_search_call', 'Web Search');
-    }
+    this.updateProgressState('web_search', true);
   }
 
   /**
@@ -1323,14 +1157,7 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     
-    // Update progress state to show searching activity
     this.updateProgressState('web_search', true);
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolStatus(data, 'searching');
-    } else {
-      this.updateStoreStateBuiltInToolStatus(data, 'searching');
-    }
   }
 
   /**
@@ -1341,14 +1168,7 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     
-    // Hide progress when search completes
     this.updateProgressState(null, false);
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolComplete(data, 'web_search_call');
-    } else {
-      this.updateStoreStateBuiltInToolComplete(data, 'web_search_call');
-    }
   }
 
   /**
@@ -1358,12 +1178,7 @@ export class FrontendEventHandler {
     const { item_id, output_index, sequence_number } = data;
     
     if (!item_id) return;
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
-    } else {
-      this.updateStoreStateBuiltInToolStart(data, 'code_interpreter_call', 'Code Interpreter');
-    }
+    this.updateProgressState('code_interpreter', true);
   }
 
   /**
@@ -1374,14 +1189,7 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     
-    // Update progress state to show interpreting activity
     this.updateProgressState('code_interpreter', true);
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolStatus(data, 'interpreting');
-    } else {
-      this.updateStoreStateBuiltInToolStatus(data, 'interpreting');
-    }
   }
 
   /**
@@ -1392,14 +1200,7 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     
-    // Hide progress when interpretation completes
     this.updateProgressState(null, false);
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateBuiltInToolComplete(data, 'code_interpreter_call');
-    } else {
-      this.updateStoreStateBuiltInToolComplete(data, 'code_interpreter_call');
-    }
     // Clear code overlay buffer
     // Code interpreter disabled; no-op
   }
@@ -1410,17 +1211,7 @@ export class FrontendEventHandler {
   private async handleCodeInterpreterCodeDelta(data: StreamEvent): Promise<void> {
     const { item_id, delta } = data;
     
-    if (!item_id || !delta) return;
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateCodeDelta(data);
-    } else {
-      this.updateStoreStateCodeDelta(data);
-    }
-    // Stream code overlay
-    if (data.item_id && data.delta && typeof data.delta === 'string') {
-      // Code interpreter disabled; no-op
-    }
+    if (!item_id || !delta) return; // no-op for code delta streaming in UI
   }
 
   /**
@@ -1429,17 +1220,7 @@ export class FrontendEventHandler {
   private async handleCodeInterpreterCodeDone(data: StreamEvent): Promise<void> {
     const { item_id, code } = data;
     
-    if (!item_id) return;
-    
-    if (this.isLocalState()) {
-      this.updateLocalStateCodeDone(data);
-    } else {
-      this.updateStoreStateCodeDone(data);
-    }
-    // Finalize code overlay
-    if (data.item_id && data.code) {
-      // Code interpreter disabled; no-op
-    }
+    if (!item_id) return; // no-op for code done in UI
   }
 
   /**
@@ -1494,97 +1275,7 @@ export class FrontendEventHandler {
     }
   }
 
-  private updateStoreStateProgress(): void { /* no-op */ }
+  // Removed updateStoreStateProgress and getProgressState
 
-  /**
-   * Get current progress state
-   */
-  getProgressState(): ProgressState {
-    return { ...this.progressState };
-  }
-
-  /**
-   * BUILT-IN TOOL STATE UPDATES
-   */
-
-  /**
-   * Handle built-in tool start for local state
-   */
-  private updateLocalStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
-    if (!this.assistantPlaceholder || !data.item_id) return;
-    // UI reads built-in tool status from draft (future)
-  }
-
-  /**
-   * Handle built-in tool status update for local state
-   */
-  private updateLocalStateBuiltInToolStatus(data: StreamEvent, status: string): void {
-    // Status reflected in overlay badge via completeTool/finalizeTool transitions; no-op here
-  }
-
-  /**
-   * Handle built-in tool complete for local state
-   */
-  private updateLocalStateBuiltInToolComplete(data: StreamEvent, toolType: string): void {
-    if (!this.assistantPlaceholder || !data.item_id) return;
-    // UI reads built-in tool status from draft (future)
-  }
-
-  /**
-   * Handle code delta streaming for local state
-   */
-  private updateLocalStateCodeDelta(data: StreamEvent): void {
-    if (!this.assistantPlaceholder || !data.item_id || typeof data.delta !== 'string') return;
-    // Code interpreter disabled; no-op
-  }
-
-  /**
-   * Handle code done for local state
-   */
-  private updateLocalStateCodeDone(data: StreamEvent): void {
-    if (!data.item_id) return;
-    // Code interpreter disabled; no-op
-  }
-
-  /**
-   * Handle built-in tool start for store state
-   */
-  private updateStoreStateBuiltInToolStart(data: StreamEvent, toolType: string, toolDisplayName: string): void {
-    return;
-  }
-
-  /**
-   * Handle built-in tool status update for store state
-   */
-  private updateStoreStateBuiltInToolStatus(data: StreamEvent, status: 'in_progress' | 'searching' | 'completed' | 'failed' | 'interpreting'): void {
-    return;
-  }
-
-  /**
-   * Handle built-in tool complete for store state
-   */
-  private updateStoreStateBuiltInToolComplete(data: StreamEvent, _toolType: string): void {
-    return;
-  }
-
-  /**
-   * Handle code delta streaming for store state
-   */
-  private updateStoreStateCodeDelta(data: StreamEvent): void {
-    return;
-  }
-
-  /**
-   * Handle code done for store state
-   */
-  private updateStoreStateCodeDone(data: StreamEvent): void {
-    return;
-  }
-
-  /**
-   * Check if we're using local state
-   */
-  private isLocalState(): boolean {
-    return !!this.localStateUpdater && !!this.assistantPlaceholder && this.useLocalStreaming;
-  }
+  // Removed built-in tool local/store helpers and isLocalState
 }

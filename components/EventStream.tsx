@@ -120,20 +120,22 @@ const EventStreamComponent = function EventStream({
         { 
           debug: false,
           onMessageFinal: (finalEvent) => {
+            // Guard: ensure assistant role on finalize (streaming is always assistant)
+            const safeFinal = finalEvent.role === 'assistant' ? finalEvent : { ...finalEvent, role: 'assistant' as const };
             if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
               // eslint-disable-next-line no-console
               console.debug('[STREAM][onMessageFinal][existing]', {
-                role: finalEvent.role,
-                id: finalEvent.id,
-                segTypes: finalEvent.segments.map(s => (s as any).type),
+                role: safeFinal.role,
+                id: safeFinal.id,
+                segTypes: safeFinal.segments.map(s => (s as any).type),
               });
             }
             // Replace in place by id; remove any placeholder with a different id to avoid duplicates
             const storeNow = useEventChatStore.getState();
             const convNow = storeNow.conversations[conversationId];
             if (!convNow) return;
-            const filtered = convNow.events.filter(e => e.id !== finalEvent.id && e.id !== convNow.streamingEventId);
-            const eventsNow = [...filtered, finalEvent];
+            const filtered = convNow.events.filter(e => e.id !== safeFinal.id && e.id !== convNow.streamingEventId);
+            const eventsNow = [...filtered, safeFinal];
             storeNow.setConversation(conversationId, {
               ...convNow,
               events: eventsNow,

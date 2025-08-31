@@ -184,8 +184,9 @@ export const EventItemSequential = memo(function EventItemSequential({
   const canBranch = !isPending && !isSystem;
   
   // Determine if this should be a continuation (compact view)
-  const shouldShowAsContinuation = isAssistant && previousEvent && 
-    (previousEvent.role === 'assistant' || previousEvent.role === 'tool');
+  // Only treat as continuation when the previous visible event was an assistant
+  // Tool events are hidden; do not collapse assistant header after a tool event
+  const shouldShowAsContinuation = isAssistant && previousEvent && previousEvent.role === 'assistant';
 
   // Render system messages with editing capability
   if (isSystem) {

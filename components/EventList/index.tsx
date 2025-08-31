@@ -38,6 +38,13 @@ export function EventList({
   
   const displayEvents = events || conversation?.events || [];
   const actualIsStreaming = isStreaming || conversation?.isStreaming || false;
+
+  const dbg = (msg: string, obj: any) => {
+    if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
+      // eslint-disable-next-line no-console
+      console.debug('[STREAM][EventList]', msg, obj);
+    }
+  };
   
   
   // Store action refs - stable references to prevent re-renders
@@ -407,6 +414,7 @@ export function EventList({
     >
       <div className="p-4 pb-6">
         {displayEvents.map((event, index) => {
+          dbg('item_in', { idx: index, id: event.id, role: (event as any).role, isStreaming: actualIsStreaming && conversation?.streamingEventId === event.id });
           const previousEvent = index > 0 ? displayEvents[index - 1] : undefined;
           const isFirstEvent = index === 0;
           
