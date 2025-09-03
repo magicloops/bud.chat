@@ -19,6 +19,8 @@ export class EventBuilder {
   private textBuffer = '';
   private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  // Track the index of the current ephemeral step (reasoning/tool), if any
+  private currentStepIndex: number | null = null;
 
   constructor(private opts: EventBuilderOptions) {
     const base: Event = opts.baseEvent || {
@@ -85,9 +87,16 @@ export class EventBuilder {
   }
 
   startToolCall(id: ToolCallId, name: string) {
-    const exists = this.draft.segments.some(s => s.type === 'tool_call' && s.id === id);
-    if (!exists) {
-      this.draft.segments.push({ type: 'tool_call', id, name, args: {} });
+    const now = Date.now();
+    const idx = this.draft.segments.findIndex(s => s.type === 'tool_call' && s.id === id);
+    if (idx === -1) {
+      this.draft.segments.push({ type: 'tool_call', id, name, args: {}, started_at: now } as any);
+      this.currentStepIndex = this.draft.segments.length - 1;
+    } else {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, started_at: seg.started_at || now } as any;
+      this.draft.segments[idx] = updated;
+      this.currentStepIndex = idx;
     }
     this.hasAnyNonReasoning = true;
     this.markReasoningInactive();
@@ -111,8 +120,17 @@ export class EventBuilder {
   }
 
   completeTool(id: ToolCallId, output?: object, error?: string) {
-    // Append a tool_result segment; renderer will associate it with the tool_call
-    this.draft.segments.push({ type: 'tool_result', id, output: output || {}, error });
+    // Mark tool_call completed_at where possible
+    const idx = this.draft.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === id);
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, completed_at: Date.now() } as any;
+      this.draft.segments[idx] = updated;
+    }
+    // Append a tool_result segment for completeness; renderer associates it
+    this.draft.segments.push({ type: 'tool_result', id, output: output || {}, error, started_at: undefined, completed_at: Date.now() } as any);
+    // Clear current step index if this was the current step
+    if (this.currentStepIndex === idx) this.currentStepIndex = null;
     this.emitUpdate();
   }
 
@@ -120,6 +138,7 @@ export class EventBuilder {
     // Find or create reasoning segment (single segment per event)
     const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
     if (idx === -1) {
+      const now = Date.now();
       const newSeg: Extract<Segment, { type: 'reasoning' }> = {
         type: 'reasoning',
         id: `reasoning-${this.draft.id}`,
@@ -128,8 +147,10 @@ export class EventBuilder {
         parts: [part],
         streaming: !this.hasAnyNonReasoning,
         streaming_part_index: part.summary_index,
+        started_at: now,
       } as any;
-      this.draft.segments = [newSeg, ...this.draft.segments];
+      this.draft.segments = [...this.draft.segments, newSeg];
+      this.currentStepIndex = this.draft.segments.length - 1;
     } else {
       const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
       const parts = Array.isArray(seg.parts) ? [...seg.parts] : [];
@@ -154,12 +175,14 @@ export class EventBuilder {
         parts,
         streaming: !this.hasAnyNonReasoning,
         streaming_part_index: part.summary_index,
+        started_at: (seg as any).started_at || Date.now(),
       } as any;
       this.draft.segments = [
         ...this.draft.segments.slice(0, idx),
         updated,
         ...this.draft.segments.slice(idx + 1)
       ];
+      this.currentStepIndex = idx;
     }
     this.emitUpdate();
   }
@@ -174,6 +197,18 @@ export class EventBuilder {
         updated,
         ...this.draft.segments.slice(idx + 1)
       ];
+    }
+  }
+
+  // Public method to mark reasoning complete (used by handler-to-builder link via segment events)
+  completeReasoning() {
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const updated: Extract<Segment, { type: 'reasoning' }> = { ...seg, streaming: false, completed_at: (seg as any).completed_at || Date.now() } as any;
+      this.draft.segments[idx] = updated;
+      if (this.currentStepIndex === idx) this.currentStepIndex = null;
+      this.emitUpdate();
     }
   }
 

@@ -24,6 +24,8 @@ export type Segment =
       id: ToolCallId; 
       name: string; 
       args: object; 
+      started_at?: number;
+      completed_at?: number;
       server_label?: string;
       display_name?: string; // Human-readable tool name for UI
       server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
@@ -34,7 +36,7 @@ export type Segment =
       output?: object;
       error?: string;
     }
-  | { type: 'tool_result'; id: ToolCallId; output: object; error?: string }
+  | { type: 'tool_result'; id: ToolCallId; output: object; error?: string; started_at?: number; completed_at?: number }
   | { 
       type: 'reasoning'; 
       id: string; // item_id from OpenAI
@@ -47,6 +49,8 @@ export type Segment =
       // Streaming state (client-side only, not persisted)
       streaming?: boolean;
       streaming_part_index?: number; // Which part is currently streaming
+      started_at?: number;
+      completed_at?: number;
     }
   | {
       type: 'web_search_call';
@@ -54,6 +58,8 @@ export type Segment =
       output_index: number;
       sequence_number: number;
       status: 'in_progress' | 'searching' | 'completed' | 'failed';
+      started_at?: number;
+      completed_at?: number;
       // For streaming state tracking
       streaming?: boolean;
     }
@@ -65,6 +71,8 @@ export type Segment =
       status: 'in_progress' | 'interpreting' | 'completed' | 'failed';
       // Code content (can be streaming)
       code?: string;
+      started_at?: number;
+      completed_at?: number;
       // For streaming state tracking
       streaming?: boolean;
     };

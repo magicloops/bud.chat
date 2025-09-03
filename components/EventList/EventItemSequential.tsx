@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 import StreamingTextSegment from './StreamingTextSegment';
+import EphemeralOverlay from './EphemeralOverlay';
 import {
   Copy,
   Edit,
@@ -297,10 +298,10 @@ export const EventItemSequential = memo(function EventItemSequential({
           )}
           
           <div className="relative">
-            {/* Streaming cursor when no content yet */}
-            {isStreaming && !hasSegments && (
-              <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
+            {isStreamingActive && (
+              <EphemeralOverlay eventId={event.id} />
             )}
+            {/* Typing cursor removed; ephemeral overlay indicates activity */}
 
             {/* Content: render segments inline; renderer handles streaming mode */}
             {(

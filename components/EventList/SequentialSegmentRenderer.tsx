@@ -7,7 +7,7 @@ import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
-import { getRenderableSegments } from '@/lib/streaming/rendering';
+import { getRenderableSegments, deriveSteps } from '@/lib/streaming/rendering';
 import { ReasoningSegment } from './ReasoningSegment';
 import StreamingReasoningSegment from './StreamingReasoningSegment';
 // Removed overlay dependency
@@ -27,12 +27,6 @@ export function SequentialSegmentRenderer({
   isStreaming = false,
   className 
 }: SequentialSegmentRendererProps) {
-  const dbg = (msg: string, obj: any) => {
-    if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][Renderer]', msg, obj);
-    }
-  };
   // Poll progress from EventBuilder draft so indicator updates during streaming
   const [progressState, setProgressState] = useState(() => event.progressState);
   useEffect(() => {
@@ -57,9 +51,7 @@ export function SequentialSegmentRenderer({
     return () => { if (timer) clearInterval(timer); };
   }, [event.id, isStreaming]);
   // Build a normalized, renderable list of segments; preserve original order
-  dbg('renderer_in', { eventId: event.id, role: (event as any).role, isStreaming, segTypes: event.segments.map(s => (s as any).type) });
   const renderSegments = getRenderableSegments(event, allEvents);
-  dbg('render_segments', { eventId: event.id, segTypes: renderSegments.map(s => (s as any).type) });
 
   let firstTextRendered = false;
   // No overlays; segments render inline from Event (or draft)
@@ -154,13 +146,57 @@ export function SequentialSegmentRenderer({
   // Check if progress indicator should be shown
   const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
   const hasContent = renderSegments.length > 0;
+
+  // Derive ephemeral steps (non-text) and active step
+  const { steps, currentStepIndex, totalDurationMs } = deriveSteps(event);
+  // Fallback: if no explicit current step, prefer first reasoning step to ensure overlay mounts
+  const effectiveStepIndex = currentStepIndex !== null
+    ? currentStepIndex
+    : (() => {
+        const idx = steps.findIndex(s => s.type === 'reasoning');
+        return idx >= 0 ? idx : null;
+      })();
+  const hasMultipleSteps = steps.length > 1;
+  const [showSteps, setShowSteps] = React.useState(false);
+  const toggleShowSteps = () => setShowSteps(s => !s);
   
   // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
   const shouldShowTypingIndicator = false;
 
   return (
     <div className={className}>
-      {renderSegments.map(renderSegment)}
+      {/* Streaming: render only text segments; current phase shown via EphemeralOverlay */}
+      {isStreaming ? (
+        <>
+          {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+        </>
+      ) : (
+        // Post-stream: collapse multiple steps into a single summary button; otherwise render inline
+        <>
+          {hasMultipleSteps ? (
+            <div className="mb-2">
+              <button onClick={toggleShowSteps} className="text-xs text-muted-foreground hover:text-foreground underline">
+                {totalDurationMs > 0 
+                  ? `Ran for ${Math.max(0, Math.round(totalDurationMs / 100) / 10)}s` 
+                  : 'Steps'} {showSteps ? '▾' : '▸'}
+              </button>
+              {showSteps && (
+                <div className="mt-2 space-y-1">
+                  {renderSegments.map((segment, index) => {
+                    if (segment.type === 'text') return null; // steps only
+                    return renderSegment(segment, index);
+                  })}
+                </div>
+              )}
+              {/* Render all text segments in order */}
+              {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+            </div>
+          ) : (
+            // Single (or zero) step: render everything inline in order
+            <>{renderSegments.map(renderSegment)}</>
+          )}
+        </>
+      )}
       {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}

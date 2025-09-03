@@ -568,6 +568,47 @@ export async function POST(request: NextRequest) {
         try {
           // Track closed state to avoid enqueueing after close
           let isClosed = false;
+          // Track tool timing across local execution phases
+          const toolStartTimes = new Map<string, { eventId: string; started_at: number }>();
+          const recordToolStart = (toolId: string, eventId: string, startedAt?: number) => {
+            const now = Date.now();
+            const started_at = startedAt || now;
+            if (!toolStartTimes.has(toolId)) {
+              toolStartTimes.set(toolId, { eventId, started_at });
+            }
+            return started_at;
+          };
+          const markToolCompletedInDB = async (toolId: string, completedAt?: number) => {
+            try {
+              const entry = toolStartTimes.get(toolId);
+              // Fallback: find event containing this tool_call from the in-memory log
+              let eventId = entry?.eventId;
+              if (!eventId) {
+                const containing = eventLog.getEvents().find(e => e.role === 'assistant' && e.segments.some(s => s.type === 'tool_call' && (s as any).id === toolId));
+                eventId = containing?.id || undefined;
+              }
+              if (!eventId) return;
+
+              const { data: row } = await supabase
+                .from('events')
+                .select('segments')
+                .eq('id', eventId)
+                .single();
+              if (!row?.segments) return;
+              const segs = (row.segments as any[]).map(s => ({ ...s }));
+              const idx = segs.findIndex(s => s.type === 'tool_call' && s.id === toolId);
+              if (idx === -1) return;
+              const nowTs = completedAt || Date.now();
+              const started_at = segs[idx].started_at || entry?.started_at || Date.now();
+              segs[idx] = { ...segs[idx], started_at, completed_at: nowTs };
+              await supabase
+                .from('events')
+                .update({ segments: segs })
+                .eq('id', eventId);
+            } catch (e) {
+              console.warn('⚠️ [Chat API] Failed to persist tool timing:', { toolId, error: (e as Error)?.message });
+            }
+          };
           const send = (obj: unknown) => {
             if (isClosed) return;
             try {
@@ -634,6 +675,8 @@ export async function POST(request: NextRequest) {
                   tool_id: result.id,
                   content: result.error ? '❌ Tool failed' : '✅ Tool completed'
                 });
+                // Persist timing by marking the originating assistant segment completed
+                try { await markToolCompletedInDB(String(result.id)); } catch {}
               }
               console.log('💾 [Chat API] Tool results prepared; count:', toolResultEvents.length);
               
@@ -828,7 +871,12 @@ export async function POST(request: NextRequest) {
                       // Process segments from the event
                       for (const segment of currentEvent.segments) {
                         if (segment.type === 'tool_call') {
-                          
+                          // Ensure started_at is present and record mapping for later completion
+                          try {
+                            const startedAt = (segment as any).started_at || Date.now();
+                            (segment as any).started_at = startedAt;
+                            recordToolStart(String(segment.id), currentEvent.id, startedAt);
+                          } catch {}
                           // Emit tool_start
                           send({
                             type: 'tool_start',
@@ -872,6 +920,9 @@ export async function POST(request: NextRequest) {
                       
                       if (!hasCompleteArgs) {
                         // Tool just started - emit tool_start
+                        // Record started_at for timing (persisted later)
+                        const startedAt = recordToolStart(String(segment.id), currentEvent?.id || '');
+                        segment.started_at = segment.started_at || startedAt;
                         send({
                           type: 'tool_start',
                           tool_id: segment.id,
@@ -881,6 +932,9 @@ export async function POST(request: NextRequest) {
                         });
                       } else {
                         // Tool is complete - emit both start and finalized
+                        // Ensure started_at is recorded
+                        const startedAt = recordToolStart(String(segment.id), currentEvent?.id || '');
+                        segment.started_at = segment.started_at || startedAt;
                         send({
                           type: 'tool_start',
                           tool_id: segment.id,
@@ -935,6 +989,7 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_summary_part_added':
                   // Handle reasoning part added events
                   if (extendedEvent.data) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_added]', JSON.stringify(extendedEvent.data, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_part_added',
                       item_id: extendedEvent.data.item_id,
@@ -942,12 +997,31 @@ export async function POST(request: NextRequest) {
                       part: extendedEvent.data.part,
                       sequence_number: extendedEvent.data.sequence_number
                     });
+                    // Bridge: also emit a reasoning segment update to unify frontend handling
+                    try {
+                      const reasoningSeg = {
+                        type: 'reasoning' as const,
+                        id: extendedEvent.data.item_id,
+                        output_index: extendedEvent.data.output_index ?? 0,
+                        sequence_number: extendedEvent.data.sequence_number ?? 0,
+                        parts: [{
+                          summary_index: extendedEvent.data.summary_index,
+                          type: 'summary_text' as const,
+                          text: (extendedEvent.data.part && extendedEvent.data.part.text) || '',
+                          sequence_number: extendedEvent.data.sequence_number ?? 0,
+                          is_complete: false,
+                          created_at: Date.now()
+                        }]
+                      };
+                      sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(reasoningSeg as any, 0, currentEvent?.id)));
+                    } catch {}
                   }
                   break;
                   
                 case 'reasoning_summary_text_delta':
                   // Handle reasoning text delta events
                   if (extendedEvent.data) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_text_delta]', JSON.stringify(extendedEvent.data, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_text_delta',
                       item_id: extendedEvent.data.item_id,
@@ -955,12 +1029,35 @@ export async function POST(request: NextRequest) {
                       delta: extendedEvent.data.delta,
                       sequence_number: extendedEvent.data.sequence_number
                     });
+                    // Bridge: also emit a reasoning segment delta update for unified frontend handling
+                    try {
+                      const reasoningSeg = {
+                        type: 'reasoning' as const,
+                        id: extendedEvent.data.item_id,
+                        output_index: extendedEvent.data.output_index ?? 0,
+                        sequence_number: extendedEvent.data.sequence_number ?? 0,
+                        parts: [{
+                          summary_index: extendedEvent.data.summary_index,
+                          type: 'summary_text' as const,
+                          text: typeof extendedEvent.data.delta === 'string' ? extendedEvent.data.delta : (extendedEvent.data.delta?.text || ''),
+                          sequence_number: extendedEvent.data.sequence_number ?? 0,
+                          is_complete: false,
+                          created_at: Date.now()
+                        }]
+                      };
+                      sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(reasoningSeg as any, 0, currentEvent?.id)));
+                    } catch {}
                   }
                   break;
                   
                 case 'reasoning_summary_part_done':
                   // Handle reasoning part done events
                   if (extendedEvent.data) {
+                    try {
+                      if (process.env.STREAM_DEBUG === 'true') {
+                        console.debug('[Chat API][reasoning_part_done]', JSON.stringify(extendedEvent.data, null, 2));
+                      }
+                    } catch {}
                     send({
                       type: 'reasoning_summary_part_done',
                       item_id: extendedEvent.data.item_id,
@@ -973,6 +1070,11 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_complete':
                   // Handle reasoning complete events
                   if (extendedEvent.data) {
+                    try {
+                      if (process.env.STREAM_DEBUG === 'true') {
+                        console.debug('[Chat API][reasoning_complete]', JSON.stringify(extendedEvent.data, null, 2));
+                      }
+                    } catch {}
                     send({
                       type: 'reasoning_complete',
                       item_id: extendedEvent.data.item_id,
@@ -1049,6 +1151,8 @@ export async function POST(request: NextRequest) {
                       sequence_number: extendedEvent.data.sequence_number,
                       output_index: extendedEvent.data.output_index
                     });
+                    // Persist timing by marking the originating assistant segment completed
+                    markToolCompletedInDB(String(extendedEvent.data.tool_id)).catch(() => {});
                   }
                   break;
                   

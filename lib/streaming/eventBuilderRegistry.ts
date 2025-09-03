@@ -4,12 +4,6 @@ const drafts = new Map<string, Event>(); // key: assistantEventId
 
 export function setDraft(eventId: string, draft: Event) {
   drafts.set(eventId, draft);
-  try {
-    if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][Draft] setDraft', { eventId, segTypes: draft.segments.map(s => (s as any).type) });
-    }
-  } catch {}
 }
 
 export function getDraft(eventId: string): Event | undefined {

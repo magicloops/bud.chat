@@ -175,7 +175,7 @@ export class AnthropicProvider extends BaseProvider {
       
       let currentEvent: Event | null = null;
       let currentText = '';
-      const currentToolCalls: Array<{ id: string; name: string; input: string }> = [];
+      const currentToolCalls: Array<{ id: string; name: string; input: string; startedAt?: number }> = [];
       
       for await (const chunk of stream) {
         if (chunk.type === 'message_start') {
@@ -200,7 +200,8 @@ export class AnthropicProvider extends BaseProvider {
             currentToolCalls.push({
               id: chunk.content_block.id,
               name: chunk.content_block.name,
-              input: ''
+              input: '',
+              startedAt: Date.now()
             });
             // Emit a tool_call start segment immediately (no args yet)
             if (currentEvent) {
@@ -211,7 +212,8 @@ export class AnthropicProvider extends BaseProvider {
                     type: 'tool_call',
                     id: chunk.content_block.id as ToolCallId,
                     name: chunk.content_block.name,
-                    args: {}
+                    args: {},
+                    started_at: currentToolCalls[currentToolCalls.length - 1]?.startedAt
                   },
                   segmentIndex: 0
                 }
@@ -261,7 +263,9 @@ export class AnthropicProvider extends BaseProvider {
                   type: 'tool_call',
                   id: lastToolCall.id as ToolCallId,
                   name: lastToolCall.name,
-                  args
+                  args,
+                  started_at: lastToolCall.startedAt,
+                  completed_at: Date.now()
                 });
                 // Also yield a tool_call segment with finalized args so the
                 // route can emit tool_finalized immediately for UI
@@ -272,7 +276,9 @@ export class AnthropicProvider extends BaseProvider {
                       type: 'tool_call',
                       id: lastToolCall.id as ToolCallId,
                       name: lastToolCall.name,
-                      args
+                      args,
+                      started_at: lastToolCall.startedAt,
+                      completed_at: Date.now()
                     },
                     segmentIndex: 0
                   }

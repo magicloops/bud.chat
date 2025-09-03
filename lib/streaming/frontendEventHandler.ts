@@ -128,6 +128,18 @@ export class FrontendEventHandler {
     }
   }
 
+  private dbgJson(label: string, obj: unknown) {
+    if (!this.isDbg()) return;
+    try {
+      const rendered = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+      // eslint-disable-next-line no-console
+      console.debug('[STREAM][FE]', label, rendered);
+    } catch {
+      // eslint-disable-next-line no-console
+      console.debug('[STREAM][FE]', label, obj);
+    }
+  }
+
   private normalizeOutput(raw: unknown): object | undefined {
     if (raw == null) return undefined;
     if (typeof raw === 'object') return raw as object;
@@ -167,6 +179,11 @@ export class FrontendEventHandler {
         }
       });
       this.dbg('builder_init', { placeholderId: placeholder.id, segCount: placeholder.segments?.length || 0 });
+      // Initialize ephemeral overlay idle state
+      try {
+        const { setOverlay } = require("./ephemeralOverlayRegistry");
+        setOverlay(placeholder.id, { eventId: placeholder.id, kind: "idle" });
+      } catch {}
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -193,6 +210,11 @@ export class FrontendEventHandler {
           }
         }
       });
+      // Initialize ephemeral overlay idle state for this server event id
+      try {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(placeholder.id, { eventId: placeholder.id, kind: 'idle' });
+      } catch {}
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -320,11 +342,23 @@ export class FrontendEventHandler {
               const data = JSON.parse(line.slice(6));
               const t = (data && data.type) || 'unknown';
               if (
-                t !== 'token' &&
-                t !== 'segment' &&
-                t !== 'reasoning_summary_text_delta' &&
-                t !== 'reasoning_summary_delta'
+                t === 'reasoning_start' ||
+                t === 'reasoning_summary_part_added' ||
+                t === 'reasoning_summary_text_delta' ||
+                t === 'reasoning_summary_delta' ||
+                t === 'reasoning_summary_part_done' ||
+                t === 'reasoning_complete'
               ) {
+                this.dbgJson('sse_in_full', data);
+              } else if (t === 'segment') {
+                // Log reasoning segments that arrive via unified segment updates
+                try {
+                  const seg = (data as any).segment || (data as any).data?.segment;
+                  if (seg && seg.type === 'reasoning') {
+                    this.dbgJson('sse_in_reasoning_segment', data);
+                  }
+                } catch {}
+              } else if (t !== 'token') {
                 this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
               }
               await this.handleStreamEvent(data);
@@ -378,6 +412,15 @@ export class FrontendEventHandler {
                 created_at: p.created_at || Date.now(),
               });
             }
+            // Debug current draft reasoning length
+            try {
+              const draft = this.builder.getDraft?.();
+              const reasoning = draft?.segments.find((s: any) => s.type === 'reasoning');
+              const partsDbg = Array.isArray((reasoning as any)?.parts)
+                ? (reasoning as any).parts.map((p: any) => ({ summary_index: p.summary_index, is_complete: !!p.is_complete, len: (p.text || '').length }))
+                : [];
+              this.dbg('reasoning_update_from_segment', { eventId: draft?.id, parts: partsDbg });
+            } catch {}
           }
         }
         break;
@@ -426,6 +469,19 @@ export class FrontendEventHandler {
           this.updateProgressState(null, false);
         }
         break;
+      case 'reasoning_summary_part_added':
+        this.dbgJson('reasoning_part_added', data);
+        await this.handleReasoningSummaryPartAdded(data);
+        break;
+      case 'reasoning_summary_text_delta':
+      case 'reasoning_summary_delta':
+        this.dbgJson('reasoning_text_delta', data);
+        await this.handleReasoningSummaryTextDelta(data);
+        break;
+      case 'reasoning_summary_part_done':
+        this.dbgJson('reasoning_part_done', data);
+        await this.handleReasoningSummaryPartDone(data);
+        break;
       case 'tool_start':
         this.dbg('tool_start', { id: data.tool_id, name: data.tool_name });
         await this.handleToolStartEvent(data);
@@ -468,6 +524,8 @@ export class FrontendEventHandler {
         break;
       case 'reasoning_complete':
         await this.handleReasoningComplete(data);
+        // Also mark complete in builder to set completed_at (ephemeral steps)
+        try { this.builder?.completeReasoning?.(); } catch {}
         break;
       case 'reasoning_start':
         await this.handleReasoningStart(data);
@@ -497,7 +555,37 @@ export class FrontendEventHandler {
         break;
       case 'message_final': {
         // Final, canonical assistant event from server
-        this.dbg('message_final', { id: (data.event as any)?.id, hasBuilder: !!this.builder });
+        try {
+          const ev: any = (data as any).event;
+          const segTypes = Array.isArray(ev?.segments) ? ev.segments.map((s: any) => s.type) : [];
+          this.dbg('message_final', { where: 'message_final', id: ev?.id, role: ev?.role, segTypes, hasBuilder: !!this.builder });
+        } catch {
+          this.dbg('message_final', { id: (data.event as any)?.id, hasBuilder: !!this.builder });
+        }
+        // Copy ephemeral step timings from draft into final event (so durations are preserved)
+        try {
+          const finalEv: any = (data as any).event;
+          const draft = this.builder?.getDraft?.();
+          if (finalEv && draft && Array.isArray(finalEv.segments) && Array.isArray(draft.segments)) {
+            finalEv.segments = finalEv.segments.map((seg: any) => {
+              if (seg.type === 'reasoning') {
+                const d = draft.segments.find((s: any) => s.type === 'reasoning' && s.id === seg.id);
+                return d ? { ...seg, started_at: d.started_at ?? seg.started_at, completed_at: d.completed_at ?? seg.completed_at } : seg;
+              }
+              if (seg.type === 'tool_call') {
+                const d = draft.segments.find((s: any) => s.type === 'tool_call' && s.id === seg.id);
+                return d ? { ...seg, started_at: d.started_at ?? seg.started_at, completed_at: d.completed_at ?? seg.completed_at } : seg;
+              }
+              if (seg.type === 'web_search_call' || seg.type === 'code_interpreter_call') {
+                const d = draft.segments.find((s: any) => s.type === seg.type && s.id === seg.id);
+                return d ? { ...seg, started_at: d.started_at ?? seg.started_at, completed_at: d.completed_at ?? seg.completed_at } : seg;
+              }
+              return seg;
+            });
+          }
+        } catch {}
+        // Ensure any in-progress reasoning is marked complete in the draft
+        try { this.builder?.completeReasoning?.(); } catch {}
         if (data.event) {
           if (this.builder) {
             this.builder.finalizeCurrentEvent(data.event as Event);
@@ -506,6 +594,14 @@ export class FrontendEventHandler {
               if (this.options.debug) console.error('onMessageFinal error:', e);
             }
           }
+          // Clear overlay for this event id
+          try {
+            const finalId = (data.event as any).id;
+            if (finalId) {
+              const { setOverlay } = require('./ephemeralOverlayRegistry');
+              setOverlay(finalId, null);
+            }
+          } catch {}
         }
         break;
       }
@@ -554,6 +650,15 @@ export class FrontendEventHandler {
 
     // no debug logs
     if (this.builder) this.builder.appendTextDelta(data.content);
+    // Update overlay to 'writing' while text tokens stream
+    try {
+      const { setOverlay } = require('./ephemeralOverlayRegistry');
+      setOverlay(this.assistantPlaceholder.id, {
+        eventId: this.assistantPlaceholder.id,
+        kind: 'writing',
+        writing: { updatedAt: Date.now() }
+      });
+    } catch {}
   }
 
   /**
@@ -566,6 +671,15 @@ export class FrontendEventHandler {
     }
     if (this.builder) this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
     // UI reads tools from EventBuilder draft
+    // Overlay: show tool activity
+    try {
+      const { setOverlay } = require('./ephemeralOverlayRegistry');
+      setOverlay(this.assistantPlaceholder.id, {
+        eventId: this.assistantPlaceholder.id,
+        kind: 'tool',
+        tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
+      });
+    } catch {}
   }
 
   /**
@@ -689,6 +803,17 @@ export class FrontendEventHandler {
     if (this.builder) {
       this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
     }
+    // Overlay: show tool activity (MCP)
+    try {
+      if (this.assistantPlaceholder) {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'tool',
+          tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
+        });
+      }
+    } catch {}
   }
 
   /**
@@ -767,8 +892,8 @@ export class FrontendEventHandler {
     
     // Log event for debugging and validation
     ReasoningEventLogger.logEvent(data);
-    
-    
+    this.dbgJson('reasoning_part_added', data);
+
     if (!item_id || !part || summary_index === undefined) return;
     
     // Initialize or get existing reasoning data (for final assembly only)
@@ -796,12 +921,12 @@ export class FrontendEventHandler {
     // Update streaming state
     reasoningData.streaming_part_index = summary_index;
 
-    // Draft builder: upsert reasoning part
-    if (this.builder && part?.text) {
+    // Draft builder: ensure reasoning segment exists immediately, even when text is empty
+    if (this.builder) {
       this.builder.upsertReasoningPart({
         summary_index: summary_index!,
         type: 'summary_text',
-        text: part.text,
+        text: part.text || '',
         sequence_number: sequence_number || 0,
         is_complete: false,
         created_at: Date.now(),
@@ -874,6 +999,22 @@ export class FrontendEventHandler {
       }
     }
     // UI reads reasoning parts from EventBuilder draft
+    // Update ephemeral overlay reasoning text (single part streaming)
+    try {
+      const { setOverlay, getOverlay } = require('./ephemeralOverlayRegistry');
+      if (this.assistantPlaceholder) {
+        const cur = getOverlay(this.assistantPlaceholder.id);
+        const incomingPart = summary_index!;
+        const currentPart = cur?.reasoning?.currentPartIndex;
+        const prevText = currentPart === incomingPart ? (cur?.reasoning?.text || '') : '';
+        const deltaText2 = typeof data.delta === 'string' ? data.delta : (data.delta && (data.delta as any).text) || '';
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'reasoning',
+          reasoning: { text: prevText + deltaText2, item_id: data.item_id!, currentPartIndex: incomingPart, updatedAt: Date.now() }
+        });
+      }
+    } catch {}
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
@@ -903,7 +1044,14 @@ export class FrontendEventHandler {
     }
     // Overlay: mark complete for the streaming UI
     if (this.assistantPlaceholder) {
-      // UI reads reasoning parts from EventBuilder draft
+      try {
+        const { setOverlay, getOverlay } = require('./ephemeralOverlayRegistry');
+        const cur = getOverlay(this.assistantPlaceholder.id);
+        // keep reasoning overlay until next phase
+        if (cur && cur.kind === 'reasoning') {
+          setOverlay(this.assistantPlaceholder.id, { ...cur, reasoning: { ...(cur.reasoning || { text: '' }), item_id: data.item_id!, updatedAt: Date.now() } });
+        }
+      } catch {}
     }
 
     // Update UI state (for local assembly if needed)
@@ -943,7 +1091,18 @@ export class FrontendEventHandler {
     
     // Update UI state - reasoning is now complete with combined_text
     this.updateReasoningInState(item_id, reasoningData, true);
-    // UI reads reasoning from EventBuilder draft
+    // Also push final text into the builder so overlay shows text before complete
+    if (this.builder && text) {
+      // Insert/update the reasoning part 0 with final text
+      this.builder.upsertReasoningPart({
+        summary_index: 0,
+        type: 'summary_text',
+        text: text,
+        sequence_number: reasoningData.sequence_number || 0,
+        is_complete: true,
+        created_at: Date.now(),
+      });
+    }
     
     // Clean up after completion
     this.currentReasoningData.delete(item_id);
@@ -1065,6 +1224,17 @@ export class FrontendEventHandler {
     }
     // Update UI state to show empty reasoning segment that will be populated
     this.updateReasoningInState(item_id, reasoningData);
+    // Overlay: show reasoning phase (empty text initially)
+    try {
+      if (this.assistantPlaceholder) {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'reasoning',
+          reasoning: { text: '', item_id, currentPartIndex: 0, updatedAt: Date.now() }
+        });
+      }
+    } catch {}
   }
 
   // Helper method for logging reasoning events that don't need special handling
@@ -1147,6 +1317,16 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     this.updateProgressState('web_search', true);
+    // Overlay: show built-in tool activity
+    try {
+      if (this.assistantPlaceholder) {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'built_in'
+        });
+      }
+    } catch {}
   }
 
   /**
@@ -1179,6 +1359,16 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     this.updateProgressState('code_interpreter', true);
+    // Overlay: show built-in tool activity
+    try {
+      if (this.assistantPlaceholder) {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'built_in'
+        });
+      }
+    } catch {}
   }
 
   /**

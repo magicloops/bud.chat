@@ -481,7 +481,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               output_index: typeof streamEvent.output_index === 'number' ? streamEvent.output_index : 0,
               sequence_number: typeof streamEvent.sequence_number === 'number' ? streamEvent.sequence_number : 0,
               parts: [],
-              streaming: true // Mark as streaming
+              streaming: true, // Mark as streaming
+              started_at: Date.now()
             };
             currentEvent.segments.push(reasoningSegment);
             
@@ -617,6 +618,9 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
             
           case 'reasoning_complete':
+            if (process.env.RESPONSES_DEBUG === 'true' || process.env.STREAM_DEBUG === 'true') {
+              try { console.debug('[Responses][reasoning_complete]', JSON.stringify(streamEvent, null, 2)); } catch {}
+            }
             // Mark the entire reasoning segment as complete
             const reasoningIdxComplete = currentEvent.segments.findIndex(
               s => s.type === 'reasoning' && s.id === streamEvent.item_id
@@ -625,6 +629,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const reasoningSegComplete = currentEvent.segments[reasoningIdxComplete] as any;
               reasoningSegComplete.streaming = false;
+              reasoningSegComplete.completed_at = Date.now();
               
               // If we have combined text, update the segment
               if (typeof streamEvent.combined_text === 'string') {
@@ -663,7 +668,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               server_label: typeof streamEvent.server_label === 'string' ? streamEvent.server_label : undefined,
               display_name: typeof streamEvent.display_name === 'string' ? streamEvent.display_name : 
                            (typeof streamEvent.tool_name === 'string' ? streamEvent.tool_name : undefined),
-              server_type: typeof streamEvent.server_type === 'string' ? streamEvent.server_type : 'remote_mcp'
+              server_type: typeof streamEvent.server_type === 'string' ? streamEvent.server_type : 'remote_mcp',
+              started_at: Date.now()
             };
             // No need to map since we're using the original ID
             currentEvent.segments.push(mcpToolSegment);
@@ -717,6 +723,8 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               if (streamEvent.error) {
                 toolCallSegment.error = streamEvent.error;
               }
+              // Mark completed_at for timing persistence
+              toolCallSegment.completed_at = Date.now();
             }
             
             // Yield the MCP tool complete event
