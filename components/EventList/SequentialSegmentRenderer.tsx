@@ -54,6 +54,10 @@ export function SequentialSegmentRenderer({
   }, [event.id, isStreaming]);
   // Build a normalized, renderable list of segments; preserve original order
   const renderSegments = getRenderableSegments(event, allEvents);
+  const firstTextIndex = renderSegments.findIndex(s => s.type === 'text');
+  const isStep = (s: Segment) => s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call';
+  const preTextSegments = firstTextIndex >= 0 ? renderSegments.slice(0, firstTextIndex).filter(isStep) : [];
+  const hasPreTextSteps = preTextSegments.length > 0;
 
   let firstTextRendered = false;
   // No overlays; segments render inline from Event (or draft)
@@ -158,7 +162,6 @@ export function SequentialSegmentRenderer({
 
   // Derive steps (non-text) for post-stream display; active step not used here
   const { steps } = deriveSteps(event);
-  const hasMultipleSteps = steps.length > 1;
   
   // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
   const shouldShowTypingIndicator = false;
@@ -171,17 +174,25 @@ export function SequentialSegmentRenderer({
           {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
         </>
       ) : (
-        // Post-stream: show steps list only when toggled at the header; otherwise render text only for multi-step
+        // Post-stream: hide pre-text steps behind header toggle; always render text; post-text steps render inline
         <>
-          {hasMultipleSteps ? (
+          {hasPreTextSteps ? (
             <div className="mb-2">
               {showSteps && (
                 <div className="mb-2 space-y-1">
-                  {renderSegments.map((segment, index) => segment.type === 'text' ? null : renderSegment(segment, index))}
+                  {renderSegments.map((segment, index) => {
+                    if (index >= firstTextIndex) return null; // pre-text only
+                    return isStep(segment) ? renderSegment(segment, index) : null;
+                  })}
                 </div>
               )}
               {/* Always render text segments in order */}
               {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+              {/* Render post-text non-text segments inline */}
+              {renderSegments.map((segment, index) => {
+                if (index <= firstTextIndex) return null;
+                return isStep(segment) ? renderSegment(segment, index) : null;
+              })}
             </div>
           ) : (
             // Single (or zero) step: render everything inline in order

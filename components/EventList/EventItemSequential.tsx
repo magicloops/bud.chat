@@ -186,11 +186,44 @@ export const EventItemSequential = memo(function EventItemSequential({
   const canBranch = !isPending && !isSystem;
 
   // Steps & duration for header button (post-stream only)
-  const { steps, totalDurationMs } = useMemo(() => deriveSteps(event), [event]);
-  const hasSteps = steps.length > 0;
-  const hasMultipleSteps = steps.length > 1;
-  const durationLabel = totalDurationMs > 0
-    ? `Ran for ${Math.max(0, Math.round(totalDurationMs / 100) / 10)}s`
+  const { steps } = useMemo(() => deriveSteps(event), [event]);
+  // Determine if there are pre-text steps to hide behind the dropdown
+  const firstTextIdx = useMemo(() => event.segments.findIndex(s => s.type === 'text'), [event]);
+  const isStepSeg = (s: any) => s && (s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call');
+  const hasPreTextSteps = useMemo(() => {
+    if (firstTextIdx < 0) return false;
+    return event.segments.slice(0, firstTextIdx).some(isStepSeg);
+  }, [event, firstTextIdx]);
+  // Compute duration for pre-text steps only
+  const preTextStepIds = useMemo(() => {
+    if (firstTextIdx < 0) return new Set<string>();
+    const ids = new Set<string>();
+    for (const seg of event.segments.slice(0, firstTextIdx)) {
+      if (isStepSeg(seg)) {
+        // Reasoning/tool_call have IDs; built-ins also have ids
+        const id = (seg as any).id;
+        if (id) ids.add(String(id));
+      }
+    }
+    return ids;
+  }, [event, firstTextIdx]);
+  const preTextSteps = useMemo(() => steps.filter(s => preTextStepIds.has(String((s as any).id))), [steps, preTextStepIds]);
+  const { totalDurationMs: preTextDurationMs } = useMemo(() => {
+    let total = 0;
+    let minStart: number | undefined;
+    let maxEnd: number | undefined;
+    for (const s of preTextSteps as any[]) {
+      const started = s.started_at as number | undefined;
+      const done = s.completed_at as number | undefined;
+      if (started) minStart = minStart === undefined ? started : Math.min(minStart, started);
+      if (done) maxEnd = maxEnd === undefined ? done : Math.max(maxEnd, done);
+      if (started && done) total += Math.max(0, done - started);
+    }
+    const fallback = (minStart !== undefined && maxEnd !== undefined && total === 0) ? Math.max(0, maxEnd - minStart) : total;
+    return { totalDurationMs: fallback };
+  }, [preTextSteps]);
+  const durationLabel = preTextDurationMs > 0
+    ? `Ran for ${Math.max(0, Math.round(preTextDurationMs / 100) / 10)}s`
     : 'Steps';
   const [showSteps, setShowSteps] = useState(false);
   const toggleShowSteps = useCallback(() => setShowSteps(v => !v), []);
@@ -302,21 +335,24 @@ export const EventItemSequential = memo(function EventItemSequential({
                     : formatEventDuration(event, _index)}
               </span>
               {/* Steps button in header (post-stream only) */}
-              {!isStreamingActive && hasMultipleSteps && (
-                <button
-                  onClick={toggleShowSteps}
-                  className={cn(
-                    'ml-1 text-xs transition-colors',
-                    showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
-                  )}
-                >
-                  {durationLabel} {showSteps ? '▾' : '▸'}
-                </button>
+              {!isStreamingActive && hasPreTextSteps && (
+                <>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <button
+                    onClick={toggleShowSteps}
+                    className={cn(
+                      'text-xs transition-colors',
+                      showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {durationLabel} {showSteps ? '▾' : '▸'}
+                  </button>
+                </>
               )}
             </div>
           )}
           {/* Continuation view: show only the steps button above content if applicable */}
-          {shouldShowAsContinuation && !isStreamingActive && hasMultipleSteps && (
+          {shouldShowAsContinuation && !isStreamingActive && hasPreTextSteps && (
             <div className="mb-1">
               <button
                 onClick={toggleShowSteps}
