@@ -11,6 +11,7 @@ import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
 import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 import StreamingTextSegment from './StreamingTextSegment';
 import EphemeralOverlay from './EphemeralOverlay';
+import { deriveSteps } from '@/lib/streaming/rendering';
 import {
   Copy,
   Edit,
@@ -183,6 +184,16 @@ export const EventItemSequential = memo(function EventItemSequential({
   const canEdit = isUser && !isPending;
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
+
+  // Steps & duration for header button (post-stream only)
+  const { steps, totalDurationMs } = useMemo(() => deriveSteps(event), [event]);
+  const hasSteps = steps.length > 0;
+  const hasMultipleSteps = steps.length > 1;
+  const durationLabel = totalDurationMs > 0
+    ? `Ran for ${Math.max(0, Math.round(totalDurationMs / 100) / 10)}s`
+    : 'Steps';
+  const [showSteps, setShowSteps] = useState(false);
+  const toggleShowSteps = useCallback(() => setShowSteps(v => !v), []);
   
   // Determine if this should be a continuation (compact view)
   // Only treat as continuation when the previous visible event was an assistant
@@ -287,16 +298,38 @@ export const EventItemSequential = memo(function EventItemSequential({
               </span>
               <span className="text-xs text-muted-foreground">
                 · {isStreamingActive
-                    ? headerStatus === 'using-tools'
-                      ? 'using tools...'
-                      : headerStatus === 'typing'
-                        ? 'typing...'
-                        : 'thinking...'
+                    ? (headerStatus === 'using-tools' ? 'using tools...' : 'thinking...')
                     : formatEventDuration(event, _index)}
               </span>
+              {/* Steps button in header (post-stream only) */}
+              {!isStreamingActive && hasMultipleSteps && (
+                <button
+                  onClick={toggleShowSteps}
+                  className={cn(
+                    'ml-1 text-xs transition-colors',
+                    showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {durationLabel} {showSteps ? '▾' : '▸'}
+                </button>
+              )}
             </div>
           )}
-          
+          {/* Continuation view: show only the steps button above content if applicable */}
+          {shouldShowAsContinuation && !isStreamingActive && hasMultipleSteps && (
+            <div className="mb-1">
+              <button
+                onClick={toggleShowSteps}
+                className={cn(
+                  'text-xs transition-colors',
+                  showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {durationLabel} {showSteps ? '▾' : '▸'}
+              </button>
+            </div>
+          )}
+
           <div className="relative">
             {isStreamingActive && (
               <EphemeralOverlay eventId={event.id} />
@@ -309,6 +342,7 @@ export const EventItemSequential = memo(function EventItemSequential({
                 event={displayEvent}
                 allEvents={allEvents}
                 isStreaming={isStreamingActive || isStreaming}
+                showSteps={!isStreamingActive && showSteps}
               />
             )}
 

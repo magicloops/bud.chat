@@ -19,13 +19,15 @@ interface SequentialSegmentRendererProps {
   allEvents?: Event[]; // For finding tool results
   isStreaming?: boolean;
   className?: string;
+  showSteps?: boolean; // Controls expansion of non-text steps post-stream
 }
 
 export function SequentialSegmentRenderer({ 
   event, 
   allEvents, 
   isStreaming = false,
-  className 
+  className,
+  showSteps = false,
 }: SequentialSegmentRendererProps) {
   // Poll progress from EventBuilder draft so indicator updates during streaming
   const [progressState, setProgressState] = useState(() => event.progressState);
@@ -144,21 +146,19 @@ export function SequentialSegmentRenderer({
   };
 
   // Check if progress indicator should be shown
-  const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
+  // Suppress progress indicator if an ephemeral overlay is present for this event
+  let hasOverlay = false;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getOverlay } = require('@/lib/streaming/ephemeralOverlayRegistry');
+    hasOverlay = !!getOverlay(event.id);
+  } catch {}
+  const shouldShowProgress = !!(progressState?.isVisible && progressState.currentActivity && !hasOverlay);
   const hasContent = renderSegments.length > 0;
 
-  // Derive ephemeral steps (non-text) and active step
-  const { steps, currentStepIndex, totalDurationMs } = deriveSteps(event);
-  // Fallback: if no explicit current step, prefer first reasoning step to ensure overlay mounts
-  const effectiveStepIndex = currentStepIndex !== null
-    ? currentStepIndex
-    : (() => {
-        const idx = steps.findIndex(s => s.type === 'reasoning');
-        return idx >= 0 ? idx : null;
-      })();
+  // Derive steps (non-text) for post-stream display; active step not used here
+  const { steps } = deriveSteps(event);
   const hasMultipleSteps = steps.length > 1;
-  const [showSteps, setShowSteps] = React.useState(false);
-  const toggleShowSteps = () => setShowSteps(s => !s);
   
   // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
   const shouldShowTypingIndicator = false;
@@ -171,24 +171,16 @@ export function SequentialSegmentRenderer({
           {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
         </>
       ) : (
-        // Post-stream: collapse multiple steps into a single summary button; otherwise render inline
+        // Post-stream: show steps list only when toggled at the header; otherwise render text only for multi-step
         <>
           {hasMultipleSteps ? (
             <div className="mb-2">
-              <button onClick={toggleShowSteps} className="text-xs text-muted-foreground hover:text-foreground underline">
-                {totalDurationMs > 0 
-                  ? `Ran for ${Math.max(0, Math.round(totalDurationMs / 100) / 10)}s` 
-                  : 'Steps'} {showSteps ? '▾' : '▸'}
-              </button>
               {showSteps && (
-                <div className="mt-2 space-y-1">
-                  {renderSegments.map((segment, index) => {
-                    if (segment.type === 'text') return null; // steps only
-                    return renderSegment(segment, index);
-                  })}
+                <div className="mb-2 space-y-1">
+                  {renderSegments.map((segment, index) => segment.type === 'text' ? null : renderSegment(segment, index))}
                 </div>
               )}
-              {/* Render all text segments in order */}
+              {/* Always render text segments in order */}
               {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
             </div>
           ) : (

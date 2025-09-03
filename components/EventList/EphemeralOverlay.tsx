@@ -15,9 +15,17 @@ export function EphemeralOverlay({ eventId }: EphemeralOverlayProps) {
     return subscribeOverlay(eventId, setState);
   }, [eventId]);
 
-  if (!state || state.kind === 'idle') return null;
+  if (!state) return null;
 
   switch (state.kind) {
+    case 'idle': {
+      return (
+        <div className="mb-2 p-2 bg-muted/30 rounded border border-muted text-xs text-muted-foreground flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-pulse" />
+          <span>Thinking…</span>
+        </div>
+      );
+    }
     case 'reasoning': {
       const text = state.reasoning?.text || '';
       return (
@@ -43,9 +51,10 @@ export function EphemeralOverlay({ eventId }: EphemeralOverlayProps) {
       );
     }
     case 'built_in': {
+      const msg = state.builtIn?.message || 'Working…';
       return (
         <div className="mb-2 p-2 bg-muted/30 rounded border border-muted text-xs text-muted-foreground">
-          <span>Working…</span>
+          <span>{msg}</span>
         </div>
       );
     }
@@ -62,4 +71,3 @@ export function EphemeralOverlay({ eventId }: EphemeralOverlayProps) {
 }
 
 export default EphemeralOverlay;
-

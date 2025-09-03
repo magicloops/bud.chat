@@ -45,14 +45,8 @@ export function StreamingTextSegment({ eventId, baseText, isStreaming }: Streami
     };
   }, [eventId, baseText, isStreaming]);
 
-  // When streaming and no text yet, show typing cursor
-  if (isStreaming && (!text || !text.trim())) {
-    return (
-      <div className="text-segment" data-testid="typing-indicator" data-type="text">
-        <MarkdownRenderer content="|" />
-      </div>
-    );
-  }
+  // When streaming and no text yet, render nothing (ephemeral overlay handles activity)
+  if (isStreaming && (!text || !text.trim())) return null;
   if (!text || !text.trim()) return null;
 
   return <div className="text-segment" data-testid="segment-text" data-type="text"><MarkdownRenderer content={text} /></div>;

@@ -8,6 +8,7 @@ export interface EphemeralOverlayState {
   reasoning?: { text: string; item_id?: string; currentPartIndex?: number; updatedAt: number };
   tool?: { id: string; name?: string; status?: string; updatedAt: number };
   writing?: { updatedAt: number };
+  builtIn?: { message?: string; updatedAt: number };
 }
 
 type Listener = (state: EphemeralOverlayState | null) => void;

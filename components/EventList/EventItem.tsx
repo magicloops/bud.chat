@@ -665,7 +665,7 @@ export const EventItem = memo(function EventItem({
               {isUser ? 'You' : (isTool || isToolResult) ? 'Tool' : assistantName}
             </span>
             <span className="text-xs text-muted-foreground">
-              · {isStreaming ? (isReasoningStreaming || (isToolCall && !textContent) ? 'thinking...' : 'typing...') : formatEventDuration(event, _index)}
+              · {isStreaming ? 'thinking...' : formatEventDuration(event, _index)}
             </span>
           </div>
           <div className="relative">
