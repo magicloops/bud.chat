@@ -420,11 +420,22 @@ export function EventList({
           
           // Check if current event has text content
           const hasTextContent = event.segments.some(s => s.type === 'text' && s.text.trim());
+          // Find previous visible assistant (skip hidden tool events)
+          let previousVisibleAssistant: typeof event | null = null;
+          for (let i = index - 1; i >= 0; i--) {
+            const e = displayEvents[i];
+            if (e.role === 'tool') continue;
+            if (e.role === 'assistant') { previousVisibleAssistant = e; }
+            break;
+          }
           
           // Dynamic spacing based on event flow
           let spacingClass = '';
           if (isFirstEvent) {
             spacingClass = ''; // No top spacing for first event
+          } else if (event.role === 'assistant' && previousVisibleAssistant) {
+            // Continuation assistant message (header/avatar hidden): no top margin
+            spacingClass = 'mt-0';
           } else if (isPartOfAssistantFlow) {
             // For chained assistant messages: add mt-4 only if it has text content
             spacingClass = (event.role === 'assistant' && hasTextContent) ? 'mt-4' : '';

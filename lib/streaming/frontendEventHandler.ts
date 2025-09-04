@@ -96,6 +96,8 @@ export class FrontendEventHandler {
   private useLocalStreaming: boolean = false;
   // EventBuilder instance to assemble canonical Event during streaming
   private builder: any | null = null;
+  // Track whether textual answer has started for current assistant event
+  private textStartedForCurrentEvent = false;
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -184,6 +186,8 @@ export class FrontendEventHandler {
         const { setOverlay } = require("./ephemeralOverlayRegistry");
         setOverlay(placeholder.id, { eventId: placeholder.id, kind: "idle" });
       } catch {}
+      // Reset text-started flag for new stream
+      this.textStartedForCurrentEvent = false;
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -210,6 +214,8 @@ export class FrontendEventHandler {
           }
         }
       });
+      // Reset text-started flag when rebinding builder
+      this.textStartedForCurrentEvent = false;
       // Initialize ephemeral overlay idle state for this server event id
       try {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
@@ -667,14 +673,16 @@ export class FrontendEventHandler {
     }
     if (this.builder) this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
     // UI reads tools from EventBuilder draft
-    // Overlay: show tool activity
+    // Overlay: show tool activity only if text has not started
     try {
-      const { setOverlay } = require('./ephemeralOverlayRegistry');
-      setOverlay(this.assistantPlaceholder.id, {
-        eventId: this.assistantPlaceholder.id,
-        kind: 'tool',
-        tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
-      });
+      if (!this.textStartedForCurrentEvent) {
+        const { setOverlay } = require('./ephemeralOverlayRegistry');
+        setOverlay(this.assistantPlaceholder.id, {
+          eventId: this.assistantPlaceholder.id,
+          kind: 'tool',
+          tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
+        });
+      }
     } catch {}
   }
 
@@ -786,7 +794,7 @@ export class FrontendEventHandler {
     }
     // Overlay: return to idle until next phase or text
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
       }
@@ -808,7 +816,7 @@ export class FrontendEventHandler {
     }
     // Overlay: show tool activity (MCP)
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, {
           eventId: this.assistantPlaceholder.id,
@@ -855,7 +863,7 @@ export class FrontendEventHandler {
     }
     // Overlay: return to idle until next phase or text
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
       }
@@ -1011,6 +1019,7 @@ export class FrontendEventHandler {
     // UI reads reasoning parts from EventBuilder draft
     // Update ephemeral overlay reasoning text (single part streaming)
     try {
+      if (this.textStartedForCurrentEvent) return; // do not update overlay after text has started
       const { setOverlay, getOverlay } = require('./ephemeralOverlayRegistry');
       if (this.assistantPlaceholder) {
         const cur = getOverlay(this.assistantPlaceholder.id);
@@ -1199,7 +1208,7 @@ export class FrontendEventHandler {
 
     // Overlay: keep visible as idle until next phase or text
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
       }
@@ -1244,7 +1253,7 @@ export class FrontendEventHandler {
     this.updateReasoningInState(item_id, reasoningData);
     // Overlay: show reasoning phase (empty text initially)
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, {
           eventId: this.assistantPlaceholder.id,
@@ -1335,9 +1344,9 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     this.updateProgressState('web_search', true);
-    // Overlay: show built-in tool activity
+    // Overlay: show built-in tool activity (only before text starts)
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, {
           eventId: this.assistantPlaceholder.id,
@@ -1384,9 +1393,9 @@ export class FrontendEventHandler {
     
     if (!item_id) return;
     this.updateProgressState('code_interpreter', true);
-    // Overlay: show built-in tool activity
+    // Overlay: show built-in tool activity (only before text starts)
     try {
-      if (this.assistantPlaceholder) {
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
         const { setOverlay } = require('./ephemeralOverlayRegistry');
         setOverlay(this.assistantPlaceholder.id, {
           eventId: this.assistantPlaceholder.id,
@@ -1452,7 +1461,7 @@ export class FrontendEventHandler {
       this.updateProgressState(data.activity, true, data.server_label);
       // Reflect certain progress states in the ephemeral overlay to avoid duplicate UI
       try {
-        if (this.assistantPlaceholder) {
+        if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
           const { setOverlay } = require('./ephemeralOverlayRegistry');
           const activity = data.activity;
           let overlayState: any = null;

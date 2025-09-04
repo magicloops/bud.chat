@@ -116,6 +116,18 @@ export const EventItemSequential = memo(function EventItemSequential({
   
   // Prefer draft event from EventBuilder during streaming
   const displayEvent = isStreamingActive ? (getDraft(event.id) || event) : event;
+  const hasStreamingText = useMemo(() => {
+    if (!isStreamingActive) return false;
+    try {
+      const segs = (displayEvent?.segments || []) as any[];
+      const textSeg = segs.find(s => s.type === 'text' && s.text && String(s.text).trim().length > 0);
+      return !!textSeg;
+    } catch {
+      return false;
+    }
+  }, [isStreamingActive, displayEvent]);
+
+  // Intentionally minimal logs here to avoid noise
 
   // Check if event has any content to render (use displayEvent so streaming text suppresses cursor)
   const hasSegments = displayEvent.segments && displayEvent.segments.length > 0;
@@ -229,9 +241,20 @@ export const EventItemSequential = memo(function EventItemSequential({
   const toggleShowSteps = useCallback(() => setShowSteps(v => !v), []);
   
   // Determine if this should be a continuation (compact view)
-  // Only treat as continuation when the previous visible event was an assistant
-  // Tool events are hidden; do not collapse assistant header after a tool event
-  const shouldShowAsContinuation = isAssistant && previousEvent && previousEvent.role === 'assistant';
+  // Find the previous visible assistant event, skipping tool events that are not rendered
+  const previousVisibleAssistant = useMemo(() => {
+    if (!allEvents) return null;
+    const idx = allEvents.findIndex(e => e.id === event.id);
+    if (idx <= 0) return null;
+    for (let i = idx - 1; i >= 0; i--) {
+      const e = allEvents[i];
+      if (e.role === 'tool') continue; // skip hidden tool events
+      if (e.role === 'assistant') return e;
+      break; // stop on any non-tool, non-assistant event
+    }
+    return null;
+  }, [allEvents, event.id]);
+  const shouldShowAsContinuation = isAssistant && !!previousVisibleAssistant;
 
   // Render system messages with editing capability
   if (isSystem) {
@@ -367,7 +390,7 @@ export const EventItemSequential = memo(function EventItemSequential({
           )}
 
           <div className="relative">
-            {isStreamingActive && (
+            {isStreamingActive && !hasStreamingText && (
               <EphemeralOverlay eventId={event.id} />
             )}
             {/* Typing cursor removed; ephemeral overlay indicates activity */}

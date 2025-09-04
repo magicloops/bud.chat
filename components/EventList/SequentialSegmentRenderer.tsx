@@ -55,6 +55,20 @@ export function SequentialSegmentRenderer({
   // Build a normalized, renderable list of segments; preserve original order
   const renderSegments = getRenderableSegments(event, allEvents);
   const firstTextIndex = renderSegments.findIndex(s => s.type === 'text');
+  // Content-aware streaming: check draft (live) for text content during streaming
+  const hasAnyTextContent = (() => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getDraft } = require('@/lib/streaming/eventBuilderRegistry');
+      const d = getDraft(event.id) || event;
+      const segs = (d?.segments || []) as any[];
+      return segs.some(s => s.type === 'text' && typeof s.text === 'string' && String(s.text).trim().length > 0);
+    } catch {
+      return renderSegments.some(
+        s => s.type === 'text' && typeof (s as any).text === 'string' && String((s as any).text).trim().length > 0
+      );
+    }
+  })();
   const isStep = (s: Segment) => s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call';
   const preTextSegments = firstTextIndex >= 0 ? renderSegments.slice(0, firstTextIndex).filter(isStep) : [];
   const hasPreTextSteps = preTextSegments.length > 0;
@@ -70,10 +84,9 @@ export function SequentialSegmentRenderer({
 
     switch (segment.type) {
       case 'reasoning':
-        // During streaming, show live overlay; otherwise show collapsed reasoning
-        return isStreaming ? (
-          <StreamingReasoningSegment key={`stream-reasoning-${key}`} eventId={event.id} isStreaming={true} />
-        ) : (
+        // Hide inline reasoning entirely during streaming; overlay handles pre-text
+        if (isStreaming) return null;
+        return (
           <ReasoningSegment
             key={key}
             segment={segment}
@@ -99,11 +112,12 @@ export function SequentialSegmentRenderer({
         // When streaming, render a streaming text segment for the first text segment only
         if (isStreaming && !firstTextRendered) {
           firstTextRendered = true;
+          const baseText = '';
           return (
             <React.Fragment key={`frag-${key}`}>
               <StreamingTextSegment
                 eventId={event.id}
-                baseText={''}
+                baseText={baseText}
                 isStreaming={true}
               />
             </React.Fragment>
@@ -171,7 +185,24 @@ export function SequentialSegmentRenderer({
       {/* Streaming: render only text segments; current phase shown via EphemeralOverlay */}
       {isStreaming ? (
         <>
-          {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+          {(() => {
+            return renderSegments.map((segment, index) => {
+              if (segment.type === 'text') {
+                return renderSegment(segment, index);
+              }
+              // Before any non-empty text content, rely solely on overlay; do not render non-text
+              if (!hasAnyTextContent) return null;
+              // After text begins:
+              // - Suppress reasoning during streaming
+              if (segment.type === 'reasoning') return null;
+              // - Suppress remote MCP tool calls during streaming
+              if (segment.type === 'tool_call' && (segment as any).server_type === 'remote_mcp') return null;
+              // - Optionally suppress built-ins during streaming (Responses pre-text); they generally come pre-text for remote
+              if (segment.type === 'web_search_call' || segment.type === 'code_interpreter_call') return null;
+              // Otherwise (local MCP/tool segments), render inline post-text
+              return renderSegment(segment, index);
+            });
+          })()}
         </>
       ) : (
         // Post-stream: hide pre-text steps behind header toggle; always render text; post-text steps render inline
