@@ -49,7 +49,7 @@ export function StreamingTextSegment({ eventId, baseText, isStreaming }: Streami
   if (isStreaming && (!text || !text.trim())) return null;
   if (!text || !text.trim()) return null;
 
-  return <div className="text-segment" data-testid="segment-text" data-type="text"><MarkdownRenderer content={text} /></div>;
+  return <div className="text-segment my-1" data-testid="segment-text" data-type="text"><MarkdownRenderer content={text} /></div>;
 }
 
 export default StreamingTextSegment;

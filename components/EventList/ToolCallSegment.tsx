@@ -107,7 +107,13 @@ export function ToolCallSegment({
       data-type="tool_call"
     >
       <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2 cursor-pointer select-none rounded"
+          role="button"
+          tabIndex={0}
+          onClick={toggleExpanded}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpanded(); } }}
+        >
           <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
             Tool Call: {segment.metadata?.display_name || segment.display_name || segment.name}
@@ -139,19 +145,14 @@ export function ToolCallSegment({
               )}
             </div>
           )}
-          
-          {/* Expand/collapse toggle */}
-          <button
-            onClick={toggleExpanded}
-            className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
+          {/* Expand chevron indicator */}
+          <div className="ml-auto text-muted-foreground">
             {isExpanded ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
               <ChevronRight className="h-3 w-3" />
             )}
-            Details
-          </button>
+          </div>
         </div>
       
         {/* Collapsible tool details */}

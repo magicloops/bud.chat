@@ -64,7 +64,7 @@ export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingRea
   if (!hasAnyPart) return null;
 
   return (
-    <div className="reasoning-segment mb-3" data-testid={`streaming-reasoning-${eventId}`} data-type="reasoning">
+    <div className="reasoning-segment my-2" data-testid={`streaming-reasoning-${eventId}`} data-type="reasoning">
       <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
         <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
           {hasContent ? (

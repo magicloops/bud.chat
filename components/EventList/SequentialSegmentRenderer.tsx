@@ -135,7 +135,7 @@ export function SequentialSegmentRenderer({
         // Fallback: render unknown segments as JSON for now
         try {
           return (
-            <div key={key} className="text-segment">
+            <div key={key} className="text-segment my-1">
               <MarkdownRenderer content={`
 \n\n\n\n\n\n\n\n` +
                 '```json\n' +
@@ -204,7 +204,7 @@ export function SequentialSegmentRenderer({
       
       {/* Show typing indicator for empty assistant events */}
       {shouldShowTypingIndicator && (
-        <div className="text-segment" data-testid="typing-indicator">
+        <div className="text-segment my-1" data-testid="typing-indicator">
           <MarkdownRenderer content="|" />
         </div>
       )}

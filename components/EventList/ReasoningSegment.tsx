@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Loader2 } from 'lucide-react';
+import { Loader2, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface ReasoningSegmentProps {
   segment: {
@@ -39,7 +38,8 @@ export function ReasoningSegment({
   isLastSegment = false,
   className 
 }: ReasoningSegmentProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Per-part expansion state
+  const [expandedParts, setExpandedParts] = useState<Record<number, boolean>>({});
   const [wasManuallyToggled, setWasManuallyToggled] = useState(false);
   const [wasStreaming, setWasStreaming] = useState(autoExpanded || isStreaming || segment.streaming);
   
@@ -50,23 +50,15 @@ export function ReasoningSegment({
     }
   }, [segment.streaming, isStreaming]);
   
-  // Auto-collapse reasoning when streaming finishes
+  // Auto-collapse reasoning when streaming finishes (no-op for per-part UI)
   useEffect(() => {
     const isCurrentlyStreaming = segment.streaming || isStreaming;
     
-    // Only auto-collapse if:
-    // 1. Not currently streaming
-    // 2. Is expanded 
-    // 3. Was streaming at some point
-    // 4. Was NOT manually toggled by user
-    if (!isCurrentlyStreaming && isExpanded && wasStreaming && !wasManuallyToggled) {
-      const timer = setTimeout(() => {
-        setIsExpanded(false);
-      }, 500); // Small delay to allow users to see the completion
-      
-      return () => clearTimeout(timer);
+    // If needed, could auto-collapse parts after stream ends.
+    if (!isCurrentlyStreaming && wasStreaming && !wasManuallyToggled) {
+      // leave collapsed by default; no action needed
     }
-  }, [segment.streaming, isStreaming, isExpanded, wasStreaming, wasManuallyToggled]);
+  }, [segment.streaming, isStreaming, wasStreaming, wasManuallyToggled]);
   
   // Determine if this reasoning segment is currently streaming
   const isReasoningStreaming = segment.streaming || (isStreaming && isLastSegment);
@@ -88,57 +80,104 @@ export function ReasoningSegment({
   //   segment.parts.every(part => part.is_complete)
   // );
   
-  // Auto-show reasoning while streaming, otherwise user controls visibility
-  const shouldShowReasoning = isExpanded;
-  
   // Don't render if no content and not streaming (allow empty segments during streaming)
   if (!hasAnyContent && !isReasoningStreaming) {
     return null;
   }
 
+  const togglePart = (summaryIndex: number) => {
+    setExpandedParts(prev => ({ ...prev, [summaryIndex]: !prev[summaryIndex] }));
+    setWasManuallyToggled(true);
+  };
+
+  const extractTitle = (md: string): string => {
+    if (!md) return 'Reasoning';
+    // First bold section delimited by **...**
+    const m = md.match(/\*\*(.+?)\*\*/s);
+    if (m && m[1]) return m[1].trim();
+    // Fallback: first line
+    const firstLine = md.split('\n')[0]?.trim();
+    if (firstLine) return firstLine.length > 120 ? firstLine.slice(0, 117) + '…' : firstLine;
+    return 'Reasoning';
+  };
+
+  const toTitleMarkdown = (md: string): string => {
+    const title = extractTitle(md);
+    return `**${title}**`;
+  };
+
+  const toBodyMarkdown = (md: string): string => {
+    if (!md) return '';
+    // If there is a bold title, remove only the first bold segment
+    const m = md.match(/\*\*([\s\S]+?)\*\*/);
+    if (m && typeof m.index === 'number') {
+      const start = m.index as number;
+      const end = start + m[0].length;
+      let body = md.slice(0, start) + md.slice(end);
+      // Trim a single leading newline/whitespace left by removal
+      body = body.replace(/^\s*\n?/, '');
+      return body;
+    }
+    // Fallback: remove the first line if we used it as the title
+    const nl = md.indexOf('\n');
+    if (nl >= 0) {
+      return md.slice(nl + 1).replace(/^\s*\n?/, '');
+    }
+    return '';
+  };
+
   return (
     <div 
-      className={cn('reasoning-segment mb-3', className)}
+      className={cn('reasoning-segment my-2', className)}
       data-testid={`segment-reasoning-${segment.sequence_number || 'no-seq'}`}
       data-type="reasoning"
     >
-      {/* Toggle button (always visible) */}
-      <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setIsExpanded(!isExpanded);
-            setWasManuallyToggled(true);
-          }}
-          className="reasoning-toggle text-xs px-2 py-1 h-auto"
-        >
-          {isExpanded ? 'Hide' : 'Show'} Reasoning
-          <ChevronDown className={cn(
-            "h-3 w-3 ml-1 transition-transform",
-            isExpanded && "rotate-180"
-          )} />
-        </Button>
-      
-      {shouldShowReasoning && (
-        <div className="reasoning-content mt-2 p-3 bg-muted/30 rounded-lg border border-muted">
-          <div className="reasoning-text prose prose-xs max-w-none dark:prose-invert">
-            <div className="reasoning-parts space-y-4">
-              {partsToRender.map((part, index) => (
-                <div key={part.summary_index || index} className="reasoning-part py-1">
+      {/* Reasoning parts: collapsed title (from **bold**) that expands to full markdown on click */}
+      <div className="reasoning-content mt-1">
+        <div className="space-y-2">
+          {partsToRender.map((part, index) => {
+            const open = !!expandedParts[part.summary_index];
+            const titleMd = toTitleMarkdown(part.text);
+            const bodyMd = toBodyMarkdown(part.text);
+            return (
+              <div
+                key={part.summary_index || index}
+                className={cn(
+                  'reasoning-part transition-colors bg-muted/30 border border-muted rounded-lg p-3'
+                )}
+              >
+                <div
+                  className="flex items-center gap-2 cursor-pointer select-none rounded px-0 py-0.5 hover:bg-muted/40"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={open}
+                  onClick={() => togglePart(part.summary_index)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePart(part.summary_index); } }}
+                >
                   {isReasoningStreaming && !part.is_complete && (
-                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    </div>
+                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                   )}
-                  <div className="text-xs">
-                    <MarkdownRenderer content={part.text} />
+                  <div className="prose prose-xs max-w-none dark:prose-invert flex-1">
+                    <MarkdownRenderer content={titleMd} />
+                  </div>
+                  <div className="ml-2 text-muted-foreground">
+                    {open ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
+                {open && (
+                  <div className="prose prose-xs max-w-none dark:prose-invert mt-2">
+                    <MarkdownRenderer content={bodyMd} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
+      </div>
     </div>
   );
 }
