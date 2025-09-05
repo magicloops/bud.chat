@@ -22,6 +22,32 @@ export class EventBuilder {
   // Track the index of the current ephemeral step (reasoning/tool), if any
   private currentStepIndex: number | null = null;
 
+  // Streaming-phase helpers (builder-owned)
+  private _hasTextContent = false;
+  private _preText: Segment[] = [];
+  private _postText: Segment[] = [];
+
+  private updateStreamingMeta() {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { setStreamingMeta } = require('./eventBuilderRegistry');
+      setStreamingMeta(this.draft.id, {
+        hasTextContent: this._hasTextContent,
+        preText: [...this._preText],
+        postText: [...this._postText],
+      });
+    } catch {}
+  }
+
+  public hasTextContent(): boolean {
+    return this._hasTextContent;
+  }
+
+  public getStreamingView(): { preText: Segment[]; text: Extract<Segment, { type: 'text' }> | null; postText: Segment[] } {
+    const textSeg = (this.draft.segments.find(s => s.type === 'text') as Extract<Segment, { type: 'text' }> | undefined) || null;
+    return { preText: [...this._preText], text: textSeg, postText: [...this._postText] };
+  }
+
   constructor(private opts: EventBuilderOptions) {
     const base: Event = opts.baseEvent || {
       id: opts.placeholderEventId,
@@ -33,6 +59,21 @@ export class EventBuilder {
     const clonedSegments = (base.segments || []).map(s => ({ ...(s as any) }));
     this.draft = { ...base, id: opts.placeholderEventId, segments: clonedSegments };
     // no debug logs in production
+
+    // Initialize streaming buckets from existing segments (arrival order approximation)
+    let seenTextContent = false;
+    for (const seg of this.draft.segments as Segment[]) {
+      if (seg.type === 'text') {
+        const txt = (seg as any).text || '';
+        if (typeof txt === 'string' && txt.trim().length > 0) {
+          seenTextContent = true;
+          this._hasTextContent = true;
+        }
+        continue;
+      }
+      if (!seenTextContent) this._preText.push(seg); else this._postText.push(seg);
+    }
+    this.updateStreamingMeta();
   }
 
   getDraft(): Event { return { ...this.draft, segments: this.draft.segments.map(s => ({ ...(s as any) })) }; }
@@ -72,6 +113,7 @@ export class EventBuilder {
     const idx = this.draft.segments.findIndex(s => s.type === 'text');
     if (idx === -1) {
       this.draft.segments = [...this.draft.segments, { type: 'text', text: delta } as Segment];
+      if (delta.trim().length > 0) this._hasTextContent = true;
     } else {
       const current = this.draft.segments[idx] as Extract<Segment, { type: 'text' }>;
       const updated: Extract<Segment, { type: 'text' }> = { ...current, text: (current.text || '') + delta };
@@ -80,27 +122,38 @@ export class EventBuilder {
         updated,
         ...this.draft.segments.slice(idx + 1)
       ];
+      if (delta.trim().length > 0) this._hasTextContent = true;
     }
     this.hasAnyNonReasoning = true;
     this.markReasoningInactive();
     this.emitUpdate();
+    this.updateStreamingMeta();
   }
 
   startToolCall(id: ToolCallId, name: string) {
     const now = Date.now();
     const idx = this.draft.segments.findIndex(s => s.type === 'tool_call' && s.id === id);
     if (idx === -1) {
-      this.draft.segments.push({ type: 'tool_call', id, name, args: {}, started_at: now } as any);
+      const seg = { type: 'tool_call', id, name, args: {}, started_at: now } as any as Segment;
+      this.draft.segments.push(seg);
+      if (!this._hasTextContent) this._preText.push(seg); else this._postText.push(seg);
       this.currentStepIndex = this.draft.segments.length - 1;
     } else {
       const seg = this.draft.segments[idx] as Extract<Segment, { type: 'tool_call' }>;
       const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, started_at: seg.started_at || now } as any;
       this.draft.segments[idx] = updated;
+      // Update in buckets as well
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => {
+        const i = arr.findIndex(s => (s as any).id === id && s.type === 'tool_call'); if (i>=0) arr[i] = upd;
+      };
+      updBucket(this._preText); updBucket(this._postText);
       this.currentStepIndex = idx;
     }
     this.hasAnyNonReasoning = true;
     this.markReasoningInactive();
     this.emitUpdate();
+    this.updateStreamingMeta();
   }
 
   finalizeToolArgs(id: ToolCallId, args: object | undefined) {
@@ -113,10 +166,15 @@ export class EventBuilder {
         updated,
         ...this.draft.segments.slice(segIndex + 1)
       ];
+      // Update bucket
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => { const i = arr.findIndex(s => (s as any).id === id && s.type === 'tool_call'); if (i>=0) arr[i] = upd; };
+      updBucket(this._preText); updBucket(this._postText);
     }
     this.hasAnyNonReasoning = true;
     this.markReasoningInactive();
     this.emitUpdate();
+    this.updateStreamingMeta();
   }
 
   completeTool(id: ToolCallId, output?: object, error?: string) {
@@ -128,10 +186,13 @@ export class EventBuilder {
       this.draft.segments[idx] = updated;
     }
     // Append a tool_result segment for completeness; renderer associates it
-    this.draft.segments.push({ type: 'tool_result', id, output: output || {}, error, started_at: undefined, completed_at: Date.now() } as any);
+    const tr = { type: 'tool_result', id, output: output || {}, error, started_at: undefined, completed_at: Date.now() } as any as Segment;
+    this.draft.segments.push(tr);
+    if (!this._hasTextContent) this._preText.push(tr); else this._postText.push(tr);
     // Clear current step index if this was the current step
     if (this.currentStepIndex === idx) this.currentStepIndex = null;
     this.emitUpdate();
+    this.updateStreamingMeta();
   }
 
   upsertReasoningPart(part: ReasoningPart) {
@@ -150,6 +211,7 @@ export class EventBuilder {
         started_at: now,
       } as any;
       this.draft.segments = [...this.draft.segments, newSeg];
+      if (!this._hasTextContent) this._preText.push(newSeg); else this._postText.push(newSeg);
       this.currentStepIndex = this.draft.segments.length - 1;
     } else {
       const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
@@ -182,9 +244,14 @@ export class EventBuilder {
         updated,
         ...this.draft.segments.slice(idx + 1)
       ];
+      // Update bucket copy
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => { const i = arr.findIndex(s => s.type === 'reasoning'); if (i>=0) arr[i] = upd; };
+      updBucket(this._preText); updBucket(this._postText);
       this.currentStepIndex = idx;
     }
     this.emitUpdate();
+    this.updateStreamingMeta();
   }
 
   private markReasoningInactive() {

@@ -52,25 +52,23 @@ export function SequentialSegmentRenderer({
     }
     return () => { if (timer) clearInterval(timer); };
   }, [event.id, isStreaming]);
-  // Build a normalized, renderable list of segments; preserve original order
+  // Prefer EventBuilder streaming view for robust streaming phase handling
   const renderSegments = getRenderableSegments(event, allEvents);
-  const firstTextIndex = renderSegments.findIndex(s => s.type === 'text');
-  // Content-aware streaming: check draft (live) for text content during streaming
-  const hasAnyTextContent = (() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getDraft } = require('@/lib/streaming/eventBuilderRegistry');
-      const d = getDraft(event.id) || event;
-      const segs = (d?.segments || []) as any[];
-      return segs.some(s => s.type === 'text' && typeof s.text === 'string' && String(s.text).trim().length > 0);
-    } catch {
-      return renderSegments.some(
-        s => s.type === 'text' && typeof (s as any).text === 'string' && String((s as any).text).trim().length > 0
-      );
+  let hasAnyTextContent = false;
+  let postTextSegments: Segment[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getStreamingMeta } = require('@/lib/streaming/eventBuilderRegistry');
+    const meta = getStreamingMeta(event.id);
+    if (meta) {
+      hasAnyTextContent = !!meta.hasTextContent;
+      postTextSegments = meta.postText as Segment[];
     }
-  })();
+  } catch {}
   const isStep = (s: Segment) => s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call';
-  const preTextSegments = firstTextIndex >= 0 ? renderSegments.slice(0, firstTextIndex).filter(isStep) : [];
+  // For finalized rendering, compute first text index (type-based is fine post-stream)
+  const firstTextIndexFinal = renderSegments.findIndex(s => s.type === 'text');
+  const preTextSegments = firstTextIndexFinal >= 0 ? renderSegments.slice(0, firstTextIndexFinal).filter(isStep) : [];
   const hasPreTextSteps = preTextSegments.length > 0;
 
   let firstTextRendered = false;
@@ -185,24 +183,12 @@ export function SequentialSegmentRenderer({
       {/* Streaming: render only text segments; current phase shown via EphemeralOverlay */}
       {isStreaming ? (
         <>
-          {(() => {
-            return renderSegments.map((segment, index) => {
-              if (segment.type === 'text') {
-                return renderSegment(segment, index);
-              }
-              // Before any non-empty text content, rely solely on overlay; do not render non-text
-              if (!hasAnyTextContent) return null;
-              // After text begins:
-              // - Suppress reasoning during streaming
-              if (segment.type === 'reasoning') return null;
-              // - Suppress remote MCP tool calls during streaming
-              if (segment.type === 'tool_call' && (segment as any).server_type === 'remote_mcp') return null;
-              // - Optionally suppress built-ins during streaming (Responses pre-text); they generally come pre-text for remote
-              if (segment.type === 'web_search_call' || segment.type === 'code_interpreter_call') return null;
-              // Otherwise (local MCP/tool segments), render inline post-text
-              return renderSegment(segment, index);
-            });
-          })()}
+          {/* Stream text as usual */}
+          {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+          {/* After text begins, render post-text non-text from builder view (except reasoning) */}
+          {hasAnyTextContent && postTextSegments.map((segment, idx) => (
+            segment.type === 'reasoning' ? null : renderSegment(segment, idx)
+          ))}
         </>
       ) : (
         // Post-stream: hide pre-text steps behind header toggle; always render text; post-text steps render inline
@@ -212,7 +198,7 @@ export function SequentialSegmentRenderer({
               {showSteps && (
                 <div className="mb-2 space-y-1">
                   {renderSegments.map((segment, index) => {
-                    if (index >= firstTextIndex) return null; // pre-text only
+                    if (index >= firstTextIndexFinal) return null; // pre-text only
                     return isStep(segment) ? renderSegment(segment, index) : null;
                   })}
                 </div>
@@ -221,7 +207,7 @@ export function SequentialSegmentRenderer({
               {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
               {/* Render post-text non-text segments inline */}
               {renderSegments.map((segment, index) => {
-                if (index <= firstTextIndex) return null;
+                if (index <= firstTextIndexFinal) return null;
                 return isStep(segment) ? renderSegment(segment, index) : null;
               })}
             </div>
