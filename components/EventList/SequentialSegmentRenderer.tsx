@@ -9,7 +9,6 @@ import { Event } from '@/state/eventChatStore';
 import { Segment } from '@/lib/types/events';
 import { getRenderableSegments, deriveSteps } from '@/lib/streaming/rendering';
 import { ReasoningSegment } from './ReasoningSegment';
-import StreamingReasoningSegment from './StreamingReasoningSegment';
 // Removed overlay dependency
 import { ToolCallSegment } from './ToolCallSegment';
 import { BuiltInToolSegment } from './BuiltInToolSegment';

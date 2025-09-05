@@ -9,32 +9,17 @@ export interface EphemeralOverlayState {
   tool?: { id: string; name?: string; status?: string; updatedAt: number };
   writing?: { updatedAt: number };
   builtIn?: { message?: string; updatedAt: number };
-  // Sticky flag indicating a non-idle overlay was shown at least once for this event
-  seenNonIdle?: boolean;
 }
 
 type Listener = (state: EphemeralOverlayState | null) => void;
 
 const overlays = new Map<string, EphemeralOverlayState>();
-const overlayFlags = new Map<string, { seenNonIdle: boolean }>();
 const listeners = new Map<string, Set<Listener>>();
 
 export function setOverlay(eventId: string, state: EphemeralOverlayState | null) {
   if (state === null) {
-    // Clear current overlay but retain flags/history
     overlays.delete(eventId);
   } else {
-    // Update sticky flags
-    if (state.kind !== 'idle') {
-      const prev = overlayFlags.get(eventId) || { seenNonIdle: false };
-      prev.seenNonIdle = true;
-      overlayFlags.set(eventId, prev);
-      state.seenNonIdle = true;
-    } else {
-      // Preserve seenNonIdle if previously set
-      const prev = overlayFlags.get(eventId);
-      if (prev?.seenNonIdle) state.seenNonIdle = true;
-    }
     overlays.set(eventId, state);
   }
   const ls = listeners.get(eventId);
@@ -46,10 +31,7 @@ export function setOverlay(eventId: string, state: EphemeralOverlayState | null)
 }
 
 export function getOverlay(eventId: string): EphemeralOverlayState | null {
-  const cur = overlays.get(eventId) || null;
-  if (!cur) return null;
-  const flags = overlayFlags.get(eventId);
-  return flags?.seenNonIdle ? { ...cur, seenNonIdle: true } : cur;
+  return overlays.get(eventId) || null;
 }
 
 export function subscribeOverlay(eventId: string, cb: Listener): () => void {
@@ -71,7 +53,4 @@ export function subscribeOverlay(eventId: string, cb: Listener): () => void {
 }
 
 // Sticky query helper for renderers that need to know if a non-idle overlay ever occurred
-export function hasSeenNonIdle(eventId: string): boolean {
-  const f = overlayFlags.get(eventId);
-  return !!(f && f.seenNonIdle);
-}
+// no additional helpers
