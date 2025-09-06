@@ -310,6 +310,7 @@ async function executeMCPToolCalls(
   workspaceId: WorkspaceId,
   budId?: BudId
 ): Promise<Array<{ id: ToolCallId; output: object; error?: string }>> {
+  // debug logs removed
   if (!budId) {
     return toolCalls.map(call => ({
       id: call.id,
@@ -342,7 +343,8 @@ async function executeMCPToolCalls(
     // Connect to MCP server
     const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
     const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
-    
+    // debug logs removed
+
     const transport = new StreamableHTTPClientTransport(new URL(servers[0].endpoint));
     const mcpClient = new Client({
       name: 'bud-chat-client',
@@ -353,6 +355,7 @@ async function executeMCPToolCalls(
     
     const results: Array<{ id: ToolCallId; output: object; error?: string }> = [];
     for (const toolCall of toolCalls) {
+      // debug logs removed
       
       try {
         const result = await mcpClient.callTool({
@@ -378,6 +381,7 @@ async function executeMCPToolCalls(
           id: toolCall.id,
           output: { content: output }
         });
+        // debug logs removed
       } catch (toolError) {
         const errorMessage = toolError instanceof Error ? toolError.message : String(toolError);
         results.push({
@@ -385,6 +389,7 @@ async function executeMCPToolCalls(
           output: { error: errorMessage },
           error: errorMessage
         });
+        // debug logs removed
       }
     }
     
@@ -630,7 +635,7 @@ export async function POST(request: NextRequest) {
             send({ type: 'conversationCreated', conversationId });
           }
           
-          const maxIterations = 5;
+          const maxIterations = 30; // Increased to support longer multi-tool sequences
           let iteration = 0;
           const allNewEvents: Event[] = [];
           
@@ -913,6 +918,7 @@ export async function POST(request: NextRequest) {
                       sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(segment, 0, currentEvent?.id)));
                     } else if (segment.type === 'tool_call') {
                       hasToolCalls = true;
+                      // debug logs removed
                       
                       
                       // Check if this is a partial tool call (during streaming) or complete
@@ -1229,6 +1235,11 @@ export async function POST(request: NextRequest) {
                       currentEvent = null;
                     }
                     console.log('🔄 [Chat API] Unresolved tool calls detected:', unresolved.length, '— continuing to tool execution phase');
+                    // Ensure we have capacity for the follow-up tool execution iteration.
+                    // The outer loop increments iteration at the start of each pass; if we are at
+                    // maxIterations now, the next pass would be skipped. Decrement here so the
+                    // next pass still runs and executes pending tools.
+                    iteration = Math.max(0, iteration - 1);
                     breakProviderStreamForTools = true;
                     break;
                   }
@@ -1247,7 +1258,6 @@ export async function POST(request: NextRequest) {
 
                   controller.close();
                   isClosed = true;
-                  console.log('🔚 [Chat API] Closed connection, frontend should be unblocked');
 
                   // Exit the stream processing entirely
                   iteration = maxIterations; // Ensure outer loop stops
