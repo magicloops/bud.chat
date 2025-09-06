@@ -1,6 +1,7 @@
 import { Event } from '@/state/eventChatStore';
 import { Segment, ReasoningPart } from '@/lib/types/events';
 import { generateEventId, ToolCallId, toEventId } from '@/lib/types/branded';
+import { setStreamingMeta } from './eventBuilderRegistry';
 
 export interface EventBuilderOptions {
   placeholderEventId: string; // assistant placeholder id
@@ -29,8 +30,6 @@ export class EventBuilder {
 
   private updateStreamingMeta() {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { setStreamingMeta } = require('./eventBuilderRegistry');
       setStreamingMeta(this.draft.id, {
         hasTextContent: this._hasTextContent,
         preText: [...this._preText],

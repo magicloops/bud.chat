@@ -6,6 +6,8 @@ import StreamingTextSegment from './StreamingTextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
+import { getStreamingMeta, getDraft } from '@/lib/streaming/eventBuilderRegistry';
+import { getOverlay, subscribeOverlay } from '@/lib/streaming/ephemeralOverlayRegistry';
 import { Segment } from '@/lib/types/events';
 import { getRenderableSegments, deriveSteps } from '@/lib/streaming/rendering';
 import { ReasoningSegment } from './ReasoningSegment';
@@ -33,22 +35,16 @@ export function SequentialSegmentRenderer({
   useEffect(() => {
     if (!isStreaming) { setProgressState(event.progressState); return; }
     let timer: ReturnType<typeof setInterval> | null = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getDraft } = require('@/lib/streaming/eventBuilderRegistry');
-      const tick = () => {
-        const d = getDraft(event.id) || event;
-        const ps = d.progressState;
-        setProgressState(prev => {
-          const changed = JSON.stringify(prev) !== JSON.stringify(ps);
-          return changed ? (ps ? { ...ps } : undefined) : prev;
-        });
-      };
-      timer = setInterval(tick, 80);
-      tick();
-    } catch {
-      // ignore
-    }
+    const tick = () => {
+      const d = getDraft(event.id) || event;
+      const ps = d.progressState;
+      setProgressState(prev => {
+        const changed = JSON.stringify(prev) !== JSON.stringify(ps);
+        return changed ? (ps ? { ...ps } : undefined) : prev;
+      });
+    };
+    timer = setInterval(tick, 80);
+    tick();
     return () => { if (timer) clearInterval(timer); };
   }, [event.id, isStreaming]);
   // Prefer EventBuilder streaming view for robust streaming phase handling
@@ -56,8 +52,6 @@ export function SequentialSegmentRenderer({
   let hasAnyTextContent = false;
   let postTextSegments: Segment[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getStreamingMeta } = require('@/lib/streaming/eventBuilderRegistry');
     const meta = getStreamingMeta(event.id);
     if (meta) {
       hasAnyTextContent = !!meta.hasTextContent;
@@ -162,12 +156,12 @@ export function SequentialSegmentRenderer({
 
   // Check if progress indicator should be shown
   // Suppress progress indicator if an ephemeral overlay is present for this event
-  let hasOverlay = false;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getOverlay } = require('@/lib/streaming/ephemeralOverlayRegistry');
-    hasOverlay = !!getOverlay(event.id);
-  } catch {}
+  const [hasOverlay, setHasOverlay] = useState(false);
+  useEffect(() => {
+    setHasOverlay(!!getOverlay(event.id));
+    const unsub = subscribeOverlay(event.id, (state) => setHasOverlay(!!state));
+    return () => { unsub(); };
+  }, [event.id]);
   const shouldShowProgress = !!(progressState?.isVisible && progressState.currentActivity && !hasOverlay);
   const hasContent = renderSegments.length > 0;
 

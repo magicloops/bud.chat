@@ -31,6 +31,11 @@ Key Changes (code)
   - `app/(chat)/chat/[conversationId]/page.tsx`: remove “always falsy” debug expressions that tripped the TS checker.
   - `components/EventStream.tsx`: remove call to undefined `streamingSessionManager.complete()` in error path.
 
+- Dynamic imports migration (removing `require()` where safe)
+  - `lib/streaming/frontendEventHandler.ts`: added lazy loaders and replaced `require()` calls with cached `import()` paths for builder/registry/overlay; added small helpers (`getDraftById`, `setOverlayState`, etc.).
+  - `lib/streaming/eventBuilder.ts`: uses dynamic import to update streaming meta.
+  - `components/EventList/SequentialSegmentRenderer.tsx`: dynamic import for registry polling and overlay subscription.
+
 Context: broader branch diffs vs main
 
 This branch also contains the ongoing unified streaming work (already reviewed in prior PR notes) including:
@@ -68,4 +73,3 @@ Follow-ups (optional)
 - Gradually replace remaining `require()` usage with dynamic imports where safe.
 - Tighten types to reduce remaining `any` warnings (non-blocking).
 - Consider a lightweight visual for overlay “idle” vs “writing” to distinguish pre‑text vs text phases.
-

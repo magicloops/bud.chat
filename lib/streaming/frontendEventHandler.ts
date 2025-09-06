@@ -4,6 +4,9 @@ import { ReasoningData, Segment } from '@/lib/types/events';
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 import { ProgressState, ActivityType } from '@/lib/types/progress';
 import { ToolCallId } from '@/lib/types/branded';
+import { EventBuilder } from './eventBuilder';
+import { setDraft, clearDraft, getDraft, renameDraft } from './eventBuilderRegistry';
+import { setOverlay, getOverlay } from './ephemeralOverlayRegistry';
 // import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
@@ -100,6 +103,8 @@ export class FrontendEventHandler {
   private textStartedForCurrentEvent = false;
   // Track first token logged per event to limit logs
   private firstTokenLoggedFor: Set<string> = new Set();
+
+  // Removed dynamic import helpers; using static imports for determinism
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();
@@ -165,12 +170,7 @@ export class FrontendEventHandler {
     this.assistantPlaceholder = placeholder;
     this.hasCreatedPostToolPlaceholder = false; // Reset flag for new stream
     this.useLocalStreaming = !!options?.useLocalStreaming;
-    // Initialize EventBuilder
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { EventBuilder } = require('./eventBuilder');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { setDraft, clearDraft } = require('./eventBuilderRegistry');
       this.builder = new EventBuilder({
         placeholderEventId: placeholder.id,
         baseEvent: placeholder,
@@ -183,13 +183,8 @@ export class FrontendEventHandler {
         }
       });
       this.dbg('builder_init', { placeholderId: placeholder.id, segCount: placeholder.segments?.length || 0 });
-      // Initialize ephemeral overlay idle state
-      try {
-        const { setOverlay } = require("./ephemeralOverlayRegistry");
-        setOverlay(placeholder.id, { eventId: placeholder.id, kind: "idle" });
-      } catch {}
-      // Reset text-started flag for new stream
       this.textStartedForCurrentEvent = false;
+      try { setOverlay(placeholder.id, { eventId: placeholder.id, kind: 'idle' }); } catch {}
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -201,10 +196,6 @@ export class FrontendEventHandler {
    */
   private createBuilderForPlaceholder(placeholder: Event): void {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { EventBuilder } = require('./eventBuilder');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { setDraft, clearDraft } = require('./eventBuilderRegistry');
       this.builder = new EventBuilder({
         placeholderEventId: placeholder.id,
         baseEvent: placeholder,
@@ -216,13 +207,8 @@ export class FrontendEventHandler {
           }
         }
       });
-      // Reset text-started flag when rebinding builder
       this.textStartedForCurrentEvent = false;
-      // Initialize ephemeral overlay idle state for this server event id
-      try {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(placeholder.id, { eventId: placeholder.id, kind: 'idle' });
-      } catch {}
+      try { setOverlay(placeholder.id, { eventId: placeholder.id, kind: 'idle' }); } catch {}
     } catch (e) {
       if (this.options.debug) console.warn('[STREAM][handler] EventBuilder init failed:', e);
       this.builder = null;
@@ -262,10 +248,7 @@ export class FrontendEventHandler {
           });
           this.dbg('rename_placeholder', { from: placeholderId, to: serverId, eventsCount: events.length });
           // Also rename draft immediately to avoid polling gaps
-          try {
-            const { renameDraft } = require('./eventBuilderRegistry');
-            renameDraft(placeholderId, serverId);
-          } catch {}
+          try { renameDraft(placeholderId, serverId); } catch {}
           // Find the renamed event to seed builder
           ensuredPlaceholder = events.find(e => e.id === serverId) || null;
         } else {
@@ -301,20 +284,23 @@ export class FrontendEventHandler {
     // Recreate builder bound to the server id, preserving current draft text/segments
     try {
       // Prefer draft from registry after rename (may be fresher than disposed builder)
-      let prevDraft: Event | undefined = undefined;
-      try {
-        const { getDraft } = require('./eventBuilderRegistry');
-        prevDraft = getDraft(serverId);
-      } catch {}
       const baseFromStore = this.assistantPlaceholder && this.assistantPlaceholder.id === serverId ? this.assistantPlaceholder : null;
-      const base: Event = prevDraft
-        ? { ...prevDraft, id: serverId }
-        : baseFromStore
-          ? baseFromStore
-          : { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') };
+      const base: Event = baseFromStore
+        ? baseFromStore
+        : { ...newEvent, segments: (newEvent.segments || []).filter(s => s.type !== 'text') } as Event;
       this.assistantPlaceholder = base;
       this.createBuilderForPlaceholder(base);
       this.dbg('builder_created', { eventId: base.id, seedSegments: base.segments?.length || 0 });
+      // Attempt reseed from existing draft if any (synchronous lookup)
+      try {
+        const prevDraft = getDraft(serverId);
+        if (prevDraft) {
+          const reseed = { ...prevDraft, id: serverId } as Event;
+          this.assistantPlaceholder = reseed;
+          this.createBuilderForPlaceholder(reseed);
+          this.dbg('builder_reseeded_from_draft', { eventId: reseed.id });
+        }
+      } catch {}
     } catch {
       // Fallback: just switch placeholder id
       if (this.assistantPlaceholder) this.assistantPlaceholder = { ...this.assistantPlaceholder, id: serverId } as Event;
@@ -603,13 +589,10 @@ export class FrontendEventHandler {
             }
           }
           // Clear overlay for this event id
-          try {
-            const finalId = (data.event as any).id;
-            if (finalId) {
-              const { setOverlay } = require('./ephemeralOverlayRegistry');
-              setOverlay(finalId, null);
-            }
-          } catch {}
+          const finalId = (data.event as any).id;
+          if (finalId) {
+            try { setOverlay(finalId, null); } catch {}
+          }
         }
         break;
       }
@@ -659,10 +642,7 @@ export class FrontendEventHandler {
     // no debug logs
     if (this.builder) this.builder.appendTextDelta(data.content);
     // Hide overlay once textual answer begins
-    try {
-      const { setOverlay } = require('./ephemeralOverlayRegistry');
-      setOverlay(this.assistantPlaceholder.id, null);
-    } catch {}
+    try { setOverlay(this.assistantPlaceholder.id, null); } catch {}
   }
 
   /**
@@ -676,16 +656,9 @@ export class FrontendEventHandler {
     if (this.builder) this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
     // UI reads tools from EventBuilder draft
     // Overlay: show tool activity only if text has not started
-    try {
-      if (!this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, {
-          eventId: this.assistantPlaceholder.id,
-          kind: 'tool',
-          tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
-        });
-      }
-    } catch {}
+    if (!this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'tool', tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() } }); } catch {}
+    }
   }
 
   /**
@@ -795,12 +768,9 @@ export class FrontendEventHandler {
       }
     }
     // Overlay: return to idle until next phase or text
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' }); } catch {}
+    }
   }
 
   /**
@@ -817,16 +787,9 @@ export class FrontendEventHandler {
       this.builder.startToolCall(data.tool_id as ToolCallId, data.tool_name);
     }
     // Overlay: show tool activity (MCP)
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, {
-          eventId: this.assistantPlaceholder.id,
-          kind: 'tool',
-          tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() }
-        });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'tool', tool: { id: String(data.tool_id), name: data.tool_name, status: 'in_progress', updatedAt: Date.now() } }); } catch {}
+    }
   }
 
   /**
@@ -864,12 +827,9 @@ export class FrontendEventHandler {
       this.builder.completeTool(data.tool_id as ToolCallId, output, err);
     }
     // Overlay: return to idle until next phase or text
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' }); } catch {}
+    }
   }
 
   /**
@@ -1020,11 +980,10 @@ export class FrontendEventHandler {
     }
     // UI reads reasoning parts from EventBuilder draft
     // Update ephemeral overlay reasoning text (single part streaming)
-    try {
-      if (this.textStartedForCurrentEvent) return; // do not update overlay after text has started
-      const { setOverlay, getOverlay } = require('./ephemeralOverlayRegistry');
-      if (this.assistantPlaceholder) {
-        const cur = getOverlay(this.assistantPlaceholder.id);
+    if (this.textStartedForCurrentEvent) return; // do not update overlay after text has started
+    if (this.assistantPlaceholder) {
+      try {
+        const cur: any = getOverlay(this.assistantPlaceholder.id);
         const incomingPart = summary_index!;
         const currentPart = cur?.reasoning?.currentPartIndex;
         const prevText = currentPart === incomingPart ? (cur?.reasoning?.text || '') : '';
@@ -1034,8 +993,8 @@ export class FrontendEventHandler {
           kind: 'reasoning',
           reasoning: { text: prevText + deltaText2, item_id: data.item_id!, currentPartIndex: incomingPart, updatedAt: Date.now() }
         });
-      }
-    } catch {}
+      } catch {}
+    }
   }
 
   private async handleReasoningSummaryPartDone(data: StreamEvent): Promise<void> {
@@ -1066,9 +1025,7 @@ export class FrontendEventHandler {
     // Overlay: mark complete for the streaming UI
     if (this.assistantPlaceholder) {
       try {
-        const { setOverlay, getOverlay } = require('./ephemeralOverlayRegistry');
-        const cur = getOverlay(this.assistantPlaceholder.id);
-        // keep reasoning overlay until next phase
+        const cur: any = getOverlay(this.assistantPlaceholder.id);
         if (cur && cur.kind === 'reasoning') {
           setOverlay(this.assistantPlaceholder.id, { ...cur, reasoning: { ...(cur.reasoning || { text: '' }), item_id: data.item_id!, updatedAt: Date.now() } });
         }
@@ -1209,12 +1166,9 @@ export class FrontendEventHandler {
     this.currentReasoningData.delete(item_id);
 
     // Overlay: keep visible as idle until next phase or text
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' }); } catch {}
+    }
   }
 
   private async handleReasoningStart(data: StreamEvent): Promise<void> {
@@ -1254,16 +1208,9 @@ export class FrontendEventHandler {
     // Update UI state to show empty reasoning segment that will be populated
     this.updateReasoningInState(item_id, reasoningData);
     // Overlay: show reasoning phase (empty text initially)
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, {
-          eventId: this.assistantPlaceholder.id,
-          kind: 'reasoning',
-          reasoning: { text: '', item_id, currentPartIndex: 0, updatedAt: Date.now() }
-        });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'reasoning', reasoning: { text: '', item_id, currentPartIndex: 0, updatedAt: Date.now() } }); } catch {}
+    }
   }
 
   // Helper method for logging reasoning events that don't need special handling
@@ -1347,15 +1294,9 @@ export class FrontendEventHandler {
     if (!item_id) return;
     this.updateProgressState('web_search', true);
     // Overlay: show built-in tool activity (only before text starts)
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, {
-          eventId: this.assistantPlaceholder.id,
-          kind: 'built_in'
-        });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'built_in' }); } catch {}
+    }
   }
 
   /**
@@ -1379,12 +1320,9 @@ export class FrontendEventHandler {
     
     this.updateProgressState(null, false);
     // Overlay: return to idle while waiting for next phase/text
-    try {
-      if (this.assistantPlaceholder) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
-      }
-    } catch {}
+    if (this.assistantPlaceholder) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' }); } catch {}
+    }
   }
 
   /**
@@ -1396,15 +1334,9 @@ export class FrontendEventHandler {
     if (!item_id) return;
     this.updateProgressState('code_interpreter', true);
     // Overlay: show built-in tool activity (only before text starts)
-    try {
-      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, {
-          eventId: this.assistantPlaceholder.id,
-          kind: 'built_in'
-        });
-      }
-    } catch {}
+    if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'built_in' }); } catch {}
+    }
   }
 
   /**
@@ -1428,12 +1360,9 @@ export class FrontendEventHandler {
     
     this.updateProgressState(null, false);
     // Overlay: return to idle while waiting for next phase/text
-    try {
-      if (this.assistantPlaceholder) {
-        const { setOverlay } = require('./ephemeralOverlayRegistry');
-        setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' });
-      }
-    } catch {}
+    if (this.assistantPlaceholder) {
+      try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, kind: 'idle' }); } catch {}
+    }
   }
 
   /**
@@ -1462,22 +1391,19 @@ export class FrontendEventHandler {
     if (data.activity) {
       this.updateProgressState(data.activity, true, data.server_label);
       // Reflect certain progress states in the ephemeral overlay to avoid duplicate UI
-      try {
-        if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
-          const { setOverlay } = require('./ephemeralOverlayRegistry');
-          const activity = data.activity;
-          let overlayState: any = null;
-          if (activity === 'mcp_tool_listing' || activity === 'mcp_tool_discovery') {
-            const msg = data.server_label ? `Loading tools from ${data.server_label}...` : 'Loading tools...';
-            overlayState = { kind: 'built_in', builtIn: { message: msg, updatedAt: Date.now() } };
-          } else if (activity === 'function_prep' || activity === 'response_starting' || activity === 'reasoning') {
-            overlayState = { kind: 'idle' };
-          }
-          if (overlayState) {
-            setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, ...overlayState });
-          }
+      if (this.assistantPlaceholder && !this.textStartedForCurrentEvent) {
+        const activity = data.activity;
+        let overlayState: any = null;
+        if (activity === 'mcp_tool_listing' || activity === 'mcp_tool_discovery') {
+          const msg = data.server_label ? `Loading tools from ${data.server_label}...` : 'Loading tools...';
+          overlayState = { kind: 'built_in', builtIn: { message: msg, updatedAt: Date.now() } };
+        } else if (activity === 'function_prep' || activity === 'response_starting' || activity === 'reasoning') {
+          overlayState = { kind: 'idle' };
         }
-      } catch {}
+        if (overlayState) {
+          try { setOverlay(this.assistantPlaceholder.id, { eventId: this.assistantPlaceholder.id, ...overlayState }); } catch {}
+        }
+      }
     }
   }
 
@@ -1501,11 +1427,9 @@ export class FrontendEventHandler {
     if (!this.assistantPlaceholder) return;
     // Update builder draft so leaf components reading getDraft(eventId) can render progress
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getDraft, setDraft } = require('./eventBuilderRegistry');
-      const current = getDraft(this.assistantPlaceholder.id) || this.assistantPlaceholder;
-      const updated = { ...current, progressState: { ...this.progressState } };
-      setDraft(this.assistantPlaceholder.id, updated);
+      const current = getDraft(this.assistantPlaceholder!.id) || this.assistantPlaceholder!;
+      const updated = { ...current, progressState: { ...this.progressState } } as Event;
+      setDraft(this.assistantPlaceholder!.id, updated);
     } catch {}
 
     // Also update local state array if provided
