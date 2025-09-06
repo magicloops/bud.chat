@@ -391,10 +391,10 @@ export default function ChatPage({ params }: ChatPageProps) {
                 }
                 // debug logs removed
               } else if (data.type === 'message_final') {
-                /* log removed */ null && console.log('[PAGE][message_final]', { id: (data.event && data.event.id) || 'unknown' });
+                // debug log intentionally removed
                 await eventHandler.handleStreamEvent(data);
               } else if (data.type === 'complete') {
-                /* log removed */ null && console.log('[PAGE][complete]');
+                // debug log intentionally removed
                 // Do not end local streaming yet; keep streaming summary visible
                 // until we have committed the canonical final event (or timed out).
                 
@@ -408,7 +408,7 @@ export default function ChatPage({ params }: ChatPageProps) {
 
                     // Wait briefly for message_final if it hasn't arrived yet
                     if (!finalReceived) {
-                      /* log removed */ null && console.log('[PAGE][complete] waiting for message_final...');
+                      // debug log intentionally removed
                       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 800));
                       await Promise.race([waitForFinal, timeout]);
                     }

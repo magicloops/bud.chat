@@ -1,6 +1,6 @@
 import { Event } from '@/state/eventChatStore';
 import { Segment, ReasoningPart } from '@/lib/types/events';
-import { generateEventId, ToolCallId } from '@/lib/types/branded';
+import { generateEventId, ToolCallId, toEventId } from '@/lib/types/branded';
 
 export interface EventBuilderOptions {
   placeholderEventId: string; // assistant placeholder id
@@ -50,14 +50,14 @@ export class EventBuilder {
 
   constructor(private opts: EventBuilderOptions) {
     const base: Event = opts.baseEvent || {
-      id: opts.placeholderEventId,
+      id: toEventId(opts.placeholderEventId),
       role: 'assistant',
       segments: [],
       ts: Date.now(),
     } as Event;
     // Clone incoming segments defensively (avoid mutating frozen/shared objects)
     const clonedSegments = (base.segments || []).map(s => ({ ...(s as any) }));
-    this.draft = { ...base, id: opts.placeholderEventId, segments: clonedSegments };
+    this.draft = { ...base, id: toEventId(opts.placeholderEventId), segments: clonedSegments };
     // no debug logs in production
 
     // Initialize streaming buckets from existing segments (arrival order approximation)

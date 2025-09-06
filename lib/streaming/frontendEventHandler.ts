@@ -24,7 +24,7 @@ export interface StreamEvent {
     // Progress events
     | 'progress_update' | 'progress_hide'
     // Internal-only event types
-    | 'finalize_only' | 'message_final';
+    | 'finalize_only' | 'message_final' | 'event_start' | 'event_complete' | 'segment';
   
   // Existing fields
   content?: string;
@@ -98,6 +98,8 @@ export class FrontendEventHandler {
   private builder: any | null = null;
   // Track whether textual answer has started for current assistant event
   private textStartedForCurrentEvent = false;
+  // Track first token logged per event to limit logs
+  private firstTokenLoggedFor: Set<string> = new Set();
   
   // Reasoning data tracking
   private currentReasoningData: Map<string, ReasoningData> = new Map();

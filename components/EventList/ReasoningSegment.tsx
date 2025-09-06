@@ -92,8 +92,8 @@ export function ReasoningSegment({
 
   const extractTitle = (md: string): string => {
     if (!md) return 'Reasoning';
-    // First bold section delimited by **...**
-    const m = md.match(/\*\*(.+?)\*\*/s);
+    // First bold section delimited by **...** (dotAll replacement for broader TS targets)
+    const m = md.match(/\*\*([\s\S]+?)\*\*/);
     if (m && m[1]) return m[1].trim();
     // Fallback: first line
     const firstLine = md.split('\n')[0]?.trim();

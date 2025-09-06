@@ -1,4 +1,5 @@
 import { Event } from '@/state/eventChatStore';
+import { toEventId } from '@/lib/types/branded';
 
 const drafts = new Map<string, Event>(); // key: assistantEventId
 const streamingMeta = new Map<string, { hasTextContent: boolean; preText: Event['segments']; postText: Event['segments'] }>();
@@ -21,7 +22,7 @@ export function renameDraft(oldId: string, newId: string) {
   const d = drafts.get(oldId);
   if (d) {
     drafts.delete(oldId);
-    drafts.set(newId, { ...d, id: newId });
+    drafts.set(newId, { ...d, id: toEventId(newId) });
     try {
       if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
         // eslint-disable-next-line no-console

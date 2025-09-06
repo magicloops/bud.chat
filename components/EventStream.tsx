@@ -169,7 +169,6 @@ const EventStreamComponent = function EventStream({
       
       // Clear local streaming state on error
       setIsLocalStreaming(false);
-      streamingSessionManager.complete();
       
       // Remove optimistic updates on error
       const errorStore = useEventChatStore.getState();
