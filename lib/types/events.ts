@@ -24,6 +24,8 @@ export type Segment =
       id: ToolCallId; 
       name: string; 
       args: object; 
+      started_at?: number;
+      completed_at?: number;
       server_label?: string;
       display_name?: string; // Human-readable tool name for UI
       server_type?: string; // Type of MCP server (local_mcp, remote_mcp)
@@ -34,7 +36,7 @@ export type Segment =
       output?: object;
       error?: string;
     }
-  | { type: 'tool_result'; id: ToolCallId; output: object; error?: string }
+  | { type: 'tool_result'; id: ToolCallId; output: object; error?: string; started_at?: number; completed_at?: number }
   | { 
       type: 'reasoning'; 
       id: string; // item_id from OpenAI
@@ -47,6 +49,8 @@ export type Segment =
       // Streaming state (client-side only, not persisted)
       streaming?: boolean;
       streaming_part_index?: number; // Which part is currently streaming
+      started_at?: number;
+      completed_at?: number;
     }
   | {
       type: 'web_search_call';
@@ -54,6 +58,8 @@ export type Segment =
       output_index: number;
       sequence_number: number;
       status: 'in_progress' | 'searching' | 'completed' | 'failed';
+      started_at?: number;
+      completed_at?: number;
       // For streaming state tracking
       streaming?: boolean;
     }
@@ -65,6 +71,8 @@ export type Segment =
       status: 'in_progress' | 'interpreting' | 'completed' | 'failed';
       // Code content (can be streaming)
       code?: string;
+      started_at?: number;
+      completed_at?: number;
       // For streaming state tracking
       streaming?: boolean;
     };
@@ -264,63 +272,101 @@ export class EventLog {
 
   private toAnthropicMessages(): unknown[] {
     const messages: unknown[] = [];
-    
+
+    // Walk events in order and group tool_results immediately after the prior assistant tool_use
     for (let i = 0; i < this.events.length; i++) {
       const event = this.events[i];
-      
+
+      // First event may be system; it is passed separately as the system param
       if (i === 0 && event.role === 'system') {
-        // First event is a system message, skip it (becomes system parameter)
         continue;
       }
 
-      const content: unknown[] = [];
-      
+      // Build the content blocks for this event (text + tool_use)
+      const content: any[] = [];
+      const toolUseIds: string[] = [];
+
       for (const segment of event.segments) {
-        switch (segment.type) {
-          case 'text':
-            if (segment.text && segment.text.trim()) {
-              content.push({
-                type: 'text',
-                text: segment.text
+        if (segment.type === 'text') {
+          if (segment.text && segment.text.trim()) {
+            content.push({ type: 'text', text: segment.text });
+          }
+        } else if (segment.type === 'tool_call') {
+          content.push({
+            type: 'tool_use',
+            id: segment.id,
+            name: segment.name,
+            input: segment.args
+          });
+          toolUseIds.push(segment.id);
+        }
+      }
+
+      // Push the assistant/user message for this event (if any textual/tool_use content)
+      if (content.length > 0) {
+        messages.push({ role: event.role, content });
+      }
+
+      // If this event contained tool_use blocks, the NEXT message must be a single user message
+      // containing tool_result blocks for ALL those tool_use ids.
+      if (toolUseIds.length > 0) {
+        const resultBlocks: any[] = [];
+        let j = i + 1;
+        // Consume subsequent tool_result events that match these ids
+        while (j < this.events.length) {
+          const nextEvent = this.events[j];
+          let consumedThisEvent = false;
+
+          for (const seg of nextEvent.segments) {
+            if (seg.type === 'tool_result' && toolUseIds.includes(seg.id)) {
+              let toolContent = JSON.stringify(seg.output);
+              const MAX_TOOL_RESULT_LENGTH = 30000; // ~7.5k tokens
+              if (toolContent.length > MAX_TOOL_RESULT_LENGTH) {
+                console.warn(`⚠️ [EventLog] Tool result truncated for Anthropic from ${toolContent.length} to ${MAX_TOOL_RESULT_LENGTH} characters`);
+                toolContent = toolContent.substring(0, MAX_TOOL_RESULT_LENGTH) + '... [truncated]';
+              }
+              resultBlocks.push({
+                type: 'tool_result',
+                tool_use_id: seg.id,
+                content: toolContent
               });
+              consumedThisEvent = true;
             }
+          }
+
+          if (consumedThisEvent) {
+            j++;
+          } else {
             break;
-          case 'tool_call':
-            content.push({
-              type: 'tool_use',
-              id: segment.id,
-              name: segment.name,
-              input: segment.args
-            });
-            break;
-          case 'tool_result':
-            // Tool results become separate messages in Anthropic
-            let toolContent = JSON.stringify(segment.output);
-            
-            // Truncate extremely large tool outputs to prevent context overflow
+          }
+        }
+
+        if (resultBlocks.length > 0) {
+          try {
+            console.log('[Anthropic Mapping] Inserting tool_result message for ids:', toolUseIds);
+          } catch {}
+          messages.push({ role: 'user', content: resultBlocks });
+          // Skip the consumed tool_result events
+          i = j - 1;
+        }
+      } else if (event.role === 'tool') {
+        // Fallback: handle standalone tool_result events (should be rare)
+        const resultBlocks: any[] = [];
+        for (const seg of event.segments) {
+          if (seg.type === 'tool_result') {
+            let toolContent = JSON.stringify(seg.output);
             const MAX_TOOL_RESULT_LENGTH = 30000; // ~7.5k tokens
             if (toolContent.length > MAX_TOOL_RESULT_LENGTH) {
               console.warn(`⚠️ [EventLog] Tool result truncated for Anthropic from ${toolContent.length} to ${MAX_TOOL_RESULT_LENGTH} characters`);
               toolContent = toolContent.substring(0, MAX_TOOL_RESULT_LENGTH) + '... [truncated]';
             }
-            
-            messages.push({
-              role: 'user',
-              content: [{
-                type: 'tool_result',
-                tool_use_id: segment.id,
-                content: toolContent
-              }]
-            });
-            break;
+            resultBlocks.push({ type: 'tool_result', tool_use_id: seg.id, content: toolContent });
+          }
         }
-      }
-
-      if (content.length > 0) {
-        messages.push({
-          role: event.role,
-          content
-        });
+        if (resultBlocks.length > 0) {
+          try { console.log('[Anthropic Mapping] Fallback tool_result message for standalone tool events'); } catch {}
+          messages.push({ role: 'user', content: resultBlocks });
+        }
       }
     }
 

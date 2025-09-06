@@ -1,49 +1,71 @@
 'use client';
 
-import React from 'react';
-// Legacy segment renderers are no longer used for steps
+import React, { useEffect, useState } from 'react';
 import { TextSegment } from './TextSegment';
 import StreamingTextSegment from './StreamingTextSegment';
 import { ProgressIndicator } from './ProgressIndicator';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
+import { getStreamingMeta, getDraft } from '@/lib/streaming/eventBuilderRegistry';
+import { getOverlay, subscribeOverlay } from '@/lib/streaming/ephemeralOverlayRegistry';
 import { Segment } from '@/lib/types/events';
-// Steps UI is rendered by EventItem; keep this renderer focused on content
+import { getRenderableSegments, deriveSteps } from '@/lib/streaming/rendering';
+import { ReasoningSegment } from './ReasoningSegment';
+// Removed overlay dependency
+import { ToolCallSegment } from './ToolCallSegment';
+import { BuiltInToolSegment } from './BuiltInToolSegment';
 
 interface SequentialSegmentRendererProps {
   event: Event;
   allEvents?: Event[]; // For finding tool results
   isStreaming?: boolean;
   className?: string;
+  showSteps?: boolean; // Controls expansion of non-text steps post-stream
 }
 
 export function SequentialSegmentRenderer({ 
   event, 
   allEvents, 
   isStreaming = false,
-  className 
+  className,
+  showSteps = false,
 }: SequentialSegmentRendererProps) {
-  // Sort segments by sequence_number, falling back to array order for segments without sequence_number
-  const sortedSegments = [...event.segments].sort((a, b) => {
-    // Get sequence numbers, using Infinity for segments without them to maintain array order
-    const aSeq = 'sequence_number' in a && a.sequence_number !== undefined ? a.sequence_number : Infinity;
-    const bSeq = 'sequence_number' in b && b.sequence_number !== undefined ? b.sequence_number : Infinity;
-    
-    // If both have sequence numbers, sort by them
-    if (aSeq !== Infinity && bSeq !== Infinity) {
-      return aSeq - bSeq;
+  // Poll progress from EventBuilder draft so indicator updates during streaming
+  const [progressState, setProgressState] = useState(() => event.progressState);
+  useEffect(() => {
+    if (!isStreaming) { setProgressState(event.progressState); return; }
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      const d = getDraft(event.id) || event;
+      const ps = d.progressState;
+      setProgressState(prev => {
+        const changed = JSON.stringify(prev) !== JSON.stringify(ps);
+        return changed ? (ps ? { ...ps } : undefined) : prev;
+      });
+    };
+    timer = setInterval(tick, 80);
+    tick();
+    return () => { if (timer) clearInterval(timer); };
+  }, [event.id, isStreaming]);
+  // Prefer EventBuilder streaming view for robust streaming phase handling
+  const renderSegments = getRenderableSegments(event, allEvents);
+  let hasAnyTextContent = false;
+  let postTextSegments: Segment[] = [];
+  try {
+    const meta = getStreamingMeta(event.id);
+    if (meta) {
+      hasAnyTextContent = !!meta.hasTextContent;
+      postTextSegments = meta.postText as Segment[];
     }
-    
-    // If neither has sequence numbers, maintain original array order
-    if (aSeq === Infinity && bSeq === Infinity) {
-      return event.segments.indexOf(a) - event.segments.indexOf(b);
-    }
-    
-    // If only one has a sequence number, prioritize it
-    return aSeq - bSeq;
-  });
+  } catch {}
+  const isStep = (s: Segment) => s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call';
+  // For finalized rendering, compute first text index (type-based is fine post-stream)
+  const firstTextIndexFinal = renderSegments.findIndex(s => s.type === 'text');
+  const preTextSegments = firstTextIndexFinal >= 0 ? renderSegments.slice(0, firstTextIndexFinal).filter(isStep) : [];
+  const hasPreTextSteps = preTextSegments.length > 0;
 
   let firstTextRendered = false;
+  // No overlays; segments render inline from Event (or draft)
 
   const renderSegment = (segment: Segment, index: number) => {
     const key = segment.type === 'reasoning' || segment.type === 'tool_call' || 
@@ -53,24 +75,43 @@ export function SequentialSegmentRenderer({
 
     switch (segment.type) {
       case 'reasoning':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        // Hide inline reasoning entirely during streaming; overlay handles pre-text
+        if (isStreaming) return null;
+        return (
+          <ReasoningSegment
+            key={key}
+            segment={segment}
+            isStreaming={false}
+            autoExpanded={false}
+            isLastSegment={false}
+          />
+        );
         
       case 'tool_call':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        // Render tool call inline; shows loading until result is available
+        return (
+          <ToolCallSegment
+            key={key}
+            segment={segment}
+            event={event}
+            allEvents={allEvents}
+            isStreaming={isStreaming}
+          />
+        );
         
       case 'text': {
         // When streaming, render a streaming text segment for the first text segment only
         if (isStreaming && !firstTextRendered) {
           firstTextRendered = true;
+          const baseText = '';
           return (
-            <StreamingTextSegment
-              key={key}
-              eventId={event.id}
-              baseText={segment.text || ''}
-              isStreaming={true}
-            />
+            <React.Fragment key={`frag-${key}`}>
+              <StreamingTextSegment
+                eventId={event.id}
+                baseText={baseText}
+                isStreaming={true}
+              />
+            </React.Fragment>
           );
         }
         return (
@@ -82,38 +123,98 @@ export function SequentialSegmentRenderer({
       }
         
       case 'tool_result':
-        // Tool results are rendered inline with their corresponding tool calls
-        // So we don't render them separately here
+        // Should not occur because getRenderableSegments removes standalone tool_result
         return null;
         
       case 'web_search_call':
       case 'code_interpreter_call':
-        // Hidden; shown via StepsOverlay/StepsDropdown
-        return null;
+        return (
+          <BuiltInToolSegment
+            key={key}
+            segment={segment as Extract<Segment, { type: 'web_search_call' } | { type: 'code_interpreter_call' }>}
+            isStreaming={isStreaming}
+          />
+        );
         
       default:
-        // Handle any unknown segment types gracefully
-        console.warn('Unknown segment type:', (segment as unknown as { type: string }).type);
-        return null;
+        // Fallback: render unknown segments as JSON for now
+        try {
+          return (
+            <div key={key} className="text-segment my-1">
+              <MarkdownRenderer content={`
+\n\n\n\n\n\n\n\n` +
+                '```json\n' +
+                JSON.stringify(segment as any, null, 2) +
+                '\n```'} />
+            </div>
+          );
+        } catch {
+          return null;
+        }
     }
   };
 
   // Check if progress indicator should be shown
-  const progressState = event.progressState;
-  const shouldShowProgress = progressState?.isVisible && progressState.currentActivity;
-  const hasContent = sortedSegments.length > 0;
+  // Suppress progress indicator if an ephemeral overlay is present for this event
+  const [hasOverlay, setHasOverlay] = useState(false);
+  useEffect(() => {
+    setHasOverlay(!!getOverlay(event.id));
+    const unsub = subscribeOverlay(event.id, (state) => setHasOverlay(!!state));
+    return () => { unsub(); };
+  }, [event.id]);
+  const shouldShowProgress = !!(progressState?.isVisible && progressState.currentActivity && !hasOverlay);
+  const hasContent = renderSegments.length > 0;
+
+  // Derive steps (non-text) for post-stream display; active step not used here
+  const { steps } = deriveSteps(event);
   
   // Typing indicator is handled inside StreamingTextSegment; disable here to avoid duplication
   const shouldShowTypingIndicator = false;
 
   return (
     <div className={className}>
-      {sortedSegments.map(renderSegment)}
+      {/* Streaming: render only text segments; current phase shown via EphemeralOverlay */}
+      {isStreaming ? (
+        <>
+          {/* Stream text as usual */}
+          {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+          {/* After text begins, render post-text non-text from builder view (except reasoning) */}
+          {hasAnyTextContent && postTextSegments.map((segment, idx) => (
+            segment.type === 'reasoning' ? null : renderSegment(segment, idx)
+          ))}
+        </>
+      ) : (
+        // Post-stream: hide pre-text steps behind header toggle; always render text; post-text steps render inline
+        <>
+          {hasPreTextSteps ? (
+            <div className="mb-2">
+              {showSteps && (
+                <div className="mb-2 space-y-1">
+                  {renderSegments.map((segment, index) => {
+                    if (index >= firstTextIndexFinal) return null; // pre-text only
+                    return isStep(segment) ? renderSegment(segment, index) : null;
+                  })}
+                </div>
+              )}
+              {/* Always render text segments in order */}
+              {renderSegments.map((segment, index) => segment.type === 'text' ? renderSegment(segment, index) : null)}
+              {/* Render post-text non-text segments inline */}
+              {renderSegments.map((segment, index) => {
+                if (index <= firstTextIndexFinal) return null;
+                return isStep(segment) ? renderSegment(segment, index) : null;
+              })}
+            </div>
+          ) : (
+            // Single (or zero) step: render everything inline in order
+            <>{renderSegments.map(renderSegment)}</>
+          )}
+        </>
+      )}
       {/* Steps UI intentionally omitted here (owned by EventItem) */}
       
       {/* Show typing indicator for empty assistant events */}
       {shouldShowTypingIndicator && (
-        <div className="text-segment" data-testid="typing-indicator">
+        <div className="text-segment my-1" data-testid="typing-indicator">
           <MarkdownRenderer content="|" />
         </div>
       )}

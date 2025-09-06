@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
 import {
@@ -47,54 +47,39 @@ export function ToolCallSegment({
 }: ToolCallSegmentProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   
-  // Find the corresponding tool result
-  // For Responses API, check if output is directly on the tool_call segment
-  let hasResult = segment.output !== undefined;
-  let hasError = segment.error !== undefined;
-  let resultOutput = segment.output;
-  let resultError = segment.error;
-  
-  // If not on the segment itself, look for separate tool_result segment
-  if (!hasResult) {
-    // First check in the same event
-    let resultSegment = event?.segments.find(seg => 
-      seg.type === 'tool_result' && seg.id === segment.id
-    ) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
-    
-    // If not found in same event, check other events (for traditional tool calls)
-    if (!resultSegment && allEvents) {
-      const toolResult = allEvents.find(e => 
-        e.segments.some(seg => 
-          seg.type === 'tool_result' && seg.id === segment.id
-        )
-      );
-      
-      resultSegment = toolResult?.segments.find(seg => 
-        seg.type === 'tool_result' && seg.id === segment.id
-      ) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
+  // Resolve tool result (memoized) and measure cost for debugging
+  const { hasResult, hasError, resultContent } = useMemo(() => {
+    let _hasResult = segment.output !== undefined;
+    let _hasError = segment.error !== undefined;
+    let resultOutput: unknown = segment.output;
+    let resultError: unknown = segment.error;
+
+    if (!_hasResult) {
+      let resultSegment = event?.segments.find(seg => seg.type === 'tool_result' && seg.id === segment.id) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
+      if (!resultSegment && allEvents) {
+        const toolResult = allEvents.find(e => e.segments.some(seg => seg.type === 'tool_result' && seg.id === segment.id));
+        resultSegment = toolResult?.segments.find(seg => seg.type === 'tool_result' && seg.id === segment.id) as { type: 'tool_result'; id: string; output: object; error?: string } | undefined;
+      }
+      if (resultSegment) {
+        _hasResult = true;
+        _hasError = resultSegment.error !== undefined;
+        resultOutput = resultSegment.output;
+        resultError = resultSegment.error;
+      }
     }
-    
-    if (resultSegment) {
-      hasResult = true;
-      hasError = resultSegment.error !== undefined;
-      resultOutput = resultSegment.output;
-      resultError = resultSegment.error;
-    }
-  }
-  
-  // Get result content
-  const resultContent = hasError 
-    ? resultError 
-    : resultOutput ? (
-        typeof resultOutput === 'object' && 
-        resultOutput !== null && 
-        'content' in resultOutput
-          ? (resultOutput as { content: string }).content
-          : JSON.stringify(resultOutput, null, 2)
-      ) : null;
+
+    const content = _hasError
+      ? (resultError as string | undefined) ?? null
+      : resultOutput
+        ? (typeof resultOutput === 'object' && resultOutput !== null && 'content' in (resultOutput as Record<string, unknown>)
+            ? (resultOutput as { content: string }).content
+            : JSON.stringify(resultOutput, null, 2))
+        : null;
+    return { hasResult: _hasResult, hasError: _hasError, resultContent: content };
+  }, [segment.id, segment.output, segment.error, event, allEvents]);
 
   const toggleExpanded = () => {
-    setIsExpanded(!isExpanded);
+    setIsExpanded(prev => !prev);
   };
 
   // Show loading animation if no result yet (same logic as original EventItem)
@@ -107,7 +92,13 @@ export function ToolCallSegment({
       data-type="tool_call"
     >
       <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg">
-        <div className="flex items-center gap-2">
+        <div
+          className="flex items-center gap-2 cursor-pointer select-none rounded"
+          role="button"
+          tabIndex={0}
+          onClick={toggleExpanded}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpanded(); } }}
+        >
           <Wrench className="h-4 w-4 text-blue-600 dark:text-blue-400" />
           <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
             Tool Call: {segment.metadata?.display_name || segment.display_name || segment.name}
@@ -139,19 +130,14 @@ export function ToolCallSegment({
               )}
             </div>
           )}
-          
-          {/* Expand/collapse toggle */}
-          <button
-            onClick={toggleExpanded}
-            className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
+          {/* Expand chevron indicator */}
+          <div className="ml-auto text-muted-foreground">
             {isExpanded ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
               <ChevronRight className="h-3 w-3" />
             )}
-            Details
-          </button>
+          </div>
         </div>
       
         {/* Collapsible tool details */}
@@ -196,7 +182,7 @@ export function ToolCallSegment({
                       </div>
                     ) : (
                       <div className="prose prose-xs max-w-none dark:prose-invert">
-                        <MarkdownRenderer content={resultContent || ''} />
+                        <MarkdownRenderer light content={resultContent || ''} />
                       </div>
                     )}
                   </div>

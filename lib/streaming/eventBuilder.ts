@@ -1,372 +1,303 @@
-// EventStreamBuilder for building events during streaming
+import { Event } from '@/state/eventChatStore';
+import { Segment, ReasoningPart } from '@/lib/types/events';
+import { generateEventId, ToolCallId, toEventId } from '@/lib/types/branded';
+import { setStreamingMeta } from './eventBuilderRegistry';
 
-import { Event, Segment, Role, ReasoningData, ReasoningPart } from '@/lib/types/events';
-import { ToolCallId, EventId } from '@/lib/types/branded';
-// createMixedEvent currently unused
-
-export class EventStreamBuilder {
-  private eventId: string;
-  private role: Role;
-  private segments: Segment[] = [];
-  private currentTextSegment: { type: 'text'; text: string } | null = null;
-  private pendingToolCalls: Map<string, { id: string; name: string; args: string }> = new Map();
-  private ts: number;
-  private reasoningData: ReasoningData | null = null;
-  private reasoningSegments: Map<string, Segment> = new Map();
-
-  constructor(role: Role = 'assistant', eventId?: string) {
-    this.role = role;
-    this.eventId = eventId || crypto.randomUUID();
-    this.ts = Date.now();
-  }
-
-  /**
-   * Add text content to the current event
-   */
-  addTextChunk(text: string): void {
-    if (!text) return;
-
-    // Find or create text segment
-    if (!this.currentTextSegment) {
-      this.currentTextSegment = { type: 'text', text: '' };
-      this.segments.push(this.currentTextSegment);
-    }
-
-    this.currentTextSegment.text += text;
-  }
-
-  /**
-   * Add or update a reasoning segment by item_id
-   */
-  upsertReasoningSegment(params: {
-    id: string;
-    output_index?: number;
-    sequence_number?: number;
-    parts?: ReasoningPart[];
-    combined_text?: string;
-    effort_level?: 'low' | 'medium' | 'high';
-    reasoning_tokens?: number;
-    streaming_part_index?: number | undefined;
-  }): void {
-    type ReasoningSeg = Extract<Segment, { type: 'reasoning' }>;
-    const existing = this.reasoningSegments.get(params.id) as ReasoningSeg | undefined;
-    // Merge parts if provided
-    const mergedParts: ReasoningPart[] = existing?.parts ? existing.parts.map(p => ({ ...p })) : [];
-    const incomingParts: ReasoningPart[] = params.parts ?? [];
-    for (const p of incomingParts) {
-      const idx = mergedParts.findIndex(ep => ep.summary_index === p.summary_index);
-      if (idx >= 0) mergedParts[idx] = { ...mergedParts[idx], ...p };
-      else mergedParts.push(p);
-    }
-
-    const next: ReasoningSeg = {
-      type: 'reasoning',
-      id: params.id,
-      output_index: params.output_index ?? existing?.output_index ?? 0,
-      sequence_number: params.sequence_number ?? existing?.sequence_number ?? 0,
-      parts: mergedParts,
-      combined_text: params.combined_text ?? existing?.combined_text,
-      effort_level: params.effort_level ?? existing?.effort_level,
-      reasoning_tokens: params.reasoning_tokens ?? existing?.reasoning_tokens,
-      streaming: params.streaming_part_index !== undefined,
-      streaming_part_index: params.streaming_part_index
-    };
-
-    this.reasoningSegments.set(params.id, next);
-
-    // Replace or append in segments array
-    const idx = this.segments.findIndex(s => s.type === 'reasoning' && (s as ReasoningSeg).id === params.id);
-    if (idx >= 0) {
-      this.segments[idx] = next;
-    } else {
-      this.segments.push(next);
-    }
-  }
-
-  /**
-   * Add a tool call to the current event
-   */
-  addToolCall(
-    id: string, 
-    name: string, 
-    args: object, 
-    metadata?: { 
-      server_label?: string; 
-      display_name?: string; 
-      server_type?: string; 
-    }
-  ): void {
-    console.log('🔧 [EVENTBUILDER] Adding tool call segment:', { 
-      id, 
-      name, 
-      args_keys: Object.keys(args),
-      metadata
-    });
-    
-    // Remove from pending if it was there
-    this.pendingToolCalls.delete(id);
-    
-    // Add completed tool call segment
-    this.segments.push({
-      type: 'tool_call',
-      id: id as ToolCallId,
-      name,
-      args,
-      ...(metadata?.server_label && { server_label: metadata.server_label }),
-      ...(metadata?.display_name && { display_name: metadata.display_name }),
-      ...(metadata?.server_type && { server_type: metadata.server_type }),
-    });
-    
-    console.log('🔧 [EVENTBUILDER] ✅ Tool call segment added. Total segments:', this.segments.length);
-  }
-
-  /**
-   * Start a streaming tool call (for gradual argument building)
-   */
-  startToolCall(id: string, name: string): void {
-    this.pendingToolCalls.set(id, { id, name, args: '' });
-  }
-
-  /**
-   * Add arguments to a streaming tool call
-   */
-  addToolCallArguments(id: string, argsChunk: string): void {
-    const pendingCall = this.pendingToolCalls.get(id);
-    if (pendingCall) {
-      pendingCall.args += argsChunk;
-    }
-  }
-
-  /**
-   * Complete a streaming tool call
-   */
-  completeToolCall(id: string): void {
-    const pendingCall = this.pendingToolCalls.get(id);
-    if (pendingCall) {
-      try {
-        const args = JSON.parse(pendingCall.args);
-        this.addToolCall(id, pendingCall.name, args);
-      } catch (e) {
-        console.error('Failed to parse tool call arguments:', e);
-        this.addToolCall(id, pendingCall.name, {});
-      }
-      this.pendingToolCalls.delete(id);
-    }
-  }
-
-  /**
-   * Get tool call ID at a specific index (for streaming updates)
-   * The index corresponds to Anthropic's content block index, not tool call index
-   */
-  getToolCallIdAtIndex(index: number): string | null {
-    // Count content blocks up to the given index to find the corresponding tool call
-    let contentBlockIndex = 0;
-    
-    // Check segments first (completed content blocks)
-    for (const segment of this.segments) {
-      if (contentBlockIndex === index) {
-        if (segment.type === 'tool_call') {
-          return segment.id;
-        }
-        return null;
-      }
-      contentBlockIndex++;
-    }
-    
-    // Check pending tool calls (current streaming content blocks)
-    const pendingIds = Array.from(this.pendingToolCalls.keys());
-    const pendingToolCallIndex = index - contentBlockIndex;
-    
-    if (pendingToolCallIndex >= 0 && pendingToolCallIndex < pendingIds.length) {
-      return pendingIds[pendingToolCallIndex];
-    }
-    
-    return null;
-  }
-
-  /**
-   * Add a tool result to the current event
-   */
-  addToolResult(id: string, output: object): void {
-    this.segments.push({
-      type: 'tool_result',
-      id: id as ToolCallId,
-      output
-    });
-  }
-
-  /**
-   * Set reasoning data for the current event
-   */
-  setReasoningData(reasoning: ReasoningData): void {
-    this.reasoningData = reasoning;
-  }
-
-  /**
-   * Get current reasoning data
-   */
-  getReasoningData(): ReasoningData | null {
-    return this.reasoningData;
-  }
-
-  /**
-   * Get current segments (for real-time updates)
-   */
-  getCurrentSegments(): Segment[] {
-    return [...this.segments];
-  }
-
-  /**
-   * Get current event state (for real-time updates)
-   */
-  getCurrentEvent(): Event {
-    return {
-      id: this.eventId as EventId,
-      role: this.role,
-      segments: this.getCurrentSegments(),
-      ts: this.ts,
-      ...(this.reasoningData && { reasoning: this.reasoningData })
-    };
-  }
-
-  /**
-   * Check if the event has any content
-   */
-  hasContent(): boolean {
-    return this.segments.length > 0 || this.pendingToolCalls.size > 0;
-  }
-
-  /**
-   * Finalize the event and return it
-   */
-  finalize(): Event {
-    console.log('🔧 [EVENTBUILDER] Finalizing event. Current segments:', this.segments.length);
-    console.log('🔧 [EVENTBUILDER] Segment types:', this.segments.map(s => ({ type: s.type, ...(s.type === 'tool_call' ? { id: s.id, name: s.name } : {}) })));
-    
-    // Complete any pending tool calls
-    for (const [id, _pendingCall] of this.pendingToolCalls.entries()) {
-      console.log('🔧 [EVENTBUILDER] Completing pending tool call:', id);
-      this.completeToolCall(id);
-    }
-
-    // Clean up empty text segments
-    this.segments = this.segments.filter(segment => {
-      if (segment.type === 'text') {
-        return segment.text.trim().length > 0;
-      }
-      return true;
-    });
-
-    // Ensure any reasoning segments tracked are included (already ensured in upsert)
-
-    console.log('🔧 [EVENTBUILDER] After cleanup - Final segments:', this.segments.length);
-
-    return {
-      id: this.eventId as EventId,
-      role: this.role,
-      segments: this.segments,
-      ts: this.ts,
-      ...(this.reasoningData && { reasoning: this.reasoningData })
-    };
-  }
-
-  /**
-   * Reset the builder for a new event
-   */
-  reset(role: Role = 'assistant', eventId?: string): void {
-    this.role = role;
-    this.eventId = eventId || crypto.randomUUID();
-    this.segments = [];
-    this.currentTextSegment = null;
-    this.pendingToolCalls.clear();
-    this.reasoningData = null;
-    this.ts = Date.now();
-  }
-
-  /**
-   * Clone the builder (for branching scenarios)
-   */
-  clone(): EventStreamBuilder {
-    const clone = new EventStreamBuilder(this.role, this.eventId);
-    clone.segments = JSON.parse(JSON.stringify(this.segments));
-    clone.currentTextSegment = this.currentTextSegment ? { ...this.currentTextSegment } : null;
-    clone.pendingToolCalls = new Map(this.pendingToolCalls);
-    clone.reasoningData = this.reasoningData ? JSON.parse(JSON.stringify(this.reasoningData)) : null;
-    clone.ts = this.ts;
-    return clone;
-  }
+export interface EventBuilderOptions {
+  placeholderEventId: string; // assistant placeholder id
+  baseEvent?: Event; // optional seed (role, metadata)
+  onUpdate?: (draft: Event) => void;
+  onFinalize?: (finalEvent: Event) => void;
 }
 
 /**
- * Utility class for managing multiple event builders during streaming
+ * Builds a canonical Event incrementally from streaming updates.
+ * Keeps segments ordered; emits updates and finalization callbacks.
  */
-export class StreamingEventManager {
-  private builders: Map<string, EventStreamBuilder> = new Map();
-  private activeBuilders: string[] = [];
+export class EventBuilder {
+  private draft: Event;
+  private hasAnyNonReasoning = false;
+  private textBuffer = '';
+  private textFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
+  // Track the index of the current ephemeral step (reasoning/tool), if any
+  private currentStepIndex: number | null = null;
 
-  /**
-   * Create a new event builder
-   */
-  createBuilder(role: Role = 'assistant', eventId?: string): EventStreamBuilder {
-    const builder = new EventStreamBuilder(role, eventId);
-    this.builders.set(builder.getCurrentEvent().id, builder);
-    this.activeBuilders.push(builder.getCurrentEvent().id);
-    return builder;
+  // Streaming-phase helpers (builder-owned)
+  private _hasTextContent = false;
+  private _preText: Segment[] = [];
+  private _postText: Segment[] = [];
+
+  private updateStreamingMeta() {
+    try {
+      setStreamingMeta(this.draft.id, {
+        hasTextContent: this._hasTextContent,
+        preText: [...this._preText],
+        postText: [...this._postText],
+      });
+    } catch {}
   }
 
-  /**
-   * Get a builder by ID
-   */
-  getBuilder(eventId: string): EventStreamBuilder | undefined {
-    return this.builders.get(eventId);
+  public hasTextContent(): boolean {
+    return this._hasTextContent;
   }
 
-  /**
-   * Get the current active builder
-   */
-  getCurrentBuilder(): EventStreamBuilder | undefined {
-    const activeId = this.activeBuilders[this.activeBuilders.length - 1];
-    return activeId ? this.builders.get(activeId) : undefined;
+  public getStreamingView(): { preText: Segment[]; text: Extract<Segment, { type: 'text' }> | null; postText: Segment[] } {
+    const textSeg = (this.draft.segments.find(s => s.type === 'text') as Extract<Segment, { type: 'text' }> | undefined) || null;
+    return { preText: [...this._preText], text: textSeg, postText: [...this._postText] };
   }
 
-  /**
-   * Finalize a builder and remove it from active list
-   */
-  finalizeBuilder(eventId: string): Event | undefined {
-    const builder = this.builders.get(eventId);
-    if (!builder) return undefined;
+  constructor(private opts: EventBuilderOptions) {
+    const base: Event = opts.baseEvent || {
+      id: toEventId(opts.placeholderEventId),
+      role: 'assistant',
+      segments: [],
+      ts: Date.now(),
+    } as Event;
+    // Clone incoming segments defensively (avoid mutating frozen/shared objects)
+    const clonedSegments = (base.segments || []).map(s => ({ ...(s as any) }));
+    this.draft = { ...base, id: toEventId(opts.placeholderEventId), segments: clonedSegments };
+    // no debug logs in production
 
-    const event = builder.finalize();
-    this.builders.delete(eventId);
-    this.activeBuilders = this.activeBuilders.filter(id => id !== eventId);
-    return event;
-  }
-
-  /**
-   * Get all current events
-   */
-  getCurrentEvents(): Event[] {
-    return Array.from(this.builders.values()).map(builder => builder.getCurrentEvent());
-  }
-
-  /**
-   * Finalize all builders
-   */
-  finalizeAll(): Event[] {
-    const events: Event[] = [];
-    for (const [_eventId, builder] of this.builders.entries()) {
-      events.push(builder.finalize());
+    // Initialize streaming buckets from existing segments (arrival order approximation)
+    let seenTextContent = false;
+    for (const seg of this.draft.segments as Segment[]) {
+      if (seg.type === 'text') {
+        const txt = (seg as any).text || '';
+        if (typeof txt === 'string' && txt.trim().length > 0) {
+          seenTextContent = true;
+          this._hasTextContent = true;
+        }
+        continue;
+      }
+      if (!seenTextContent) this._preText.push(seg); else this._postText.push(seg);
     }
-    this.builders.clear();
-    this.activeBuilders = [];
-    return events;
+    this.updateStreamingMeta();
   }
 
-  /**
-   * Clear all builders
-   */
-  clear(): void {
-    this.builders.clear();
-    this.activeBuilders = [];
+  getDraft(): Event { return { ...this.draft, segments: this.draft.segments.map(s => ({ ...(s as any) })) }; }
+
+  private emitUpdate() { this.opts.onUpdate?.(this.getDraft()); }
+
+  appendTextDelta(text: string) {
+    if (this.disposed) return;
+    if (!text) return;
+    // no debug logs
+    this.textBuffer += text;
+    if (!this.textFlushTimer) {
+      this.textFlushTimer = setTimeout(() => {
+        this.flushTextBuffer();
+      }, 25);
+    }
+  }
+
+  private flushTextBuffer() {
+    if (this.disposed) {
+      // Ensure timer is cleared if called after disposal
+      this.textFlushTimer && clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+      this.textBuffer = '';
+      return;
+    }
+    if (!this.textBuffer) {
+      this.textFlushTimer && clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+      return;
+    }
+    const delta = this.textBuffer;
+    this.textBuffer = '';
+    this.textFlushTimer && clearTimeout(this.textFlushTimer);
+    this.textFlushTimer = null;
+    // no debug logs
+    const idx = this.draft.segments.findIndex(s => s.type === 'text');
+    if (idx === -1) {
+      this.draft.segments = [...this.draft.segments, { type: 'text', text: delta } as Segment];
+      if (delta.trim().length > 0) this._hasTextContent = true;
+    } else {
+      const current = this.draft.segments[idx] as Extract<Segment, { type: 'text' }>;
+      const updated: Extract<Segment, { type: 'text' }> = { ...current, text: (current.text || '') + delta };
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+      if (delta.trim().length > 0) this._hasTextContent = true;
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+    this.updateStreamingMeta();
+  }
+
+  startToolCall(id: ToolCallId, name: string) {
+    const now = Date.now();
+    const idx = this.draft.segments.findIndex(s => s.type === 'tool_call' && s.id === id);
+    if (idx === -1) {
+      const seg = { type: 'tool_call', id, name, args: {}, started_at: now } as any as Segment;
+      this.draft.segments.push(seg);
+      if (!this._hasTextContent) this._preText.push(seg); else this._postText.push(seg);
+      this.currentStepIndex = this.draft.segments.length - 1;
+    } else {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, started_at: seg.started_at || now } as any;
+      this.draft.segments[idx] = updated;
+      // Update in buckets as well
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => {
+        const i = arr.findIndex(s => (s as any).id === id && s.type === 'tool_call'); if (i>=0) arr[i] = upd;
+      };
+      updBucket(this._preText); updBucket(this._postText);
+      this.currentStepIndex = idx;
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+    this.updateStreamingMeta();
+  }
+
+  finalizeToolArgs(id: ToolCallId, args: object | undefined) {
+    const segIndex = this.draft.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === id);
+    if (segIndex >= 0 && args && typeof args === 'object') {
+      const seg = this.draft.segments[segIndex] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, args };
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, segIndex),
+        updated,
+        ...this.draft.segments.slice(segIndex + 1)
+      ];
+      // Update bucket
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => { const i = arr.findIndex(s => (s as any).id === id && s.type === 'tool_call'); if (i>=0) arr[i] = upd; };
+      updBucket(this._preText); updBucket(this._postText);
+    }
+    this.hasAnyNonReasoning = true;
+    this.markReasoningInactive();
+    this.emitUpdate();
+    this.updateStreamingMeta();
+  }
+
+  completeTool(id: ToolCallId, output?: object, error?: string) {
+    // Mark tool_call completed_at where possible
+    const idx = this.draft.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === id);
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'tool_call' }>;
+      const updated: Extract<Segment, { type: 'tool_call' }> = { ...seg, completed_at: Date.now() } as any;
+      this.draft.segments[idx] = updated;
+    }
+    // Append a tool_result segment for completeness; renderer associates it
+    const tr = { type: 'tool_result', id, output: output || {}, error, started_at: undefined, completed_at: Date.now() } as any as Segment;
+    this.draft.segments.push(tr);
+    if (!this._hasTextContent) this._preText.push(tr); else this._postText.push(tr);
+    // Clear current step index if this was the current step
+    if (this.currentStepIndex === idx) this.currentStepIndex = null;
+    this.emitUpdate();
+    this.updateStreamingMeta();
+  }
+
+  upsertReasoningPart(part: ReasoningPart) {
+    // Find or create reasoning segment (single segment per event)
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx === -1) {
+      const now = Date.now();
+      const newSeg: Extract<Segment, { type: 'reasoning' }> = {
+        type: 'reasoning',
+        id: `reasoning-${this.draft.id}`,
+        output_index: 0,
+        sequence_number: part.sequence_number || 0,
+        parts: [part],
+        streaming: !this.hasAnyNonReasoning,
+        streaming_part_index: part.summary_index,
+        started_at: now,
+      } as any;
+      this.draft.segments = [...this.draft.segments, newSeg];
+      if (!this._hasTextContent) this._preText.push(newSeg); else this._postText.push(newSeg);
+      this.currentStepIndex = this.draft.segments.length - 1;
+    } else {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const parts = Array.isArray(seg.parts) ? [...seg.parts] : [];
+      const existingIndex = parts.findIndex(p => p.summary_index === part.summary_index);
+      if (existingIndex >= 0) {
+        const prev = parts[existingIndex];
+        const merged: ReasoningPart = {
+          ...prev,
+          text: (prev.text || '') + (part.text || ''),
+          is_complete: part.is_complete ?? prev.is_complete,
+          sequence_number: part.sequence_number ?? prev.sequence_number,
+          // Preserve original created_at
+          created_at: prev.created_at,
+        };
+        parts[existingIndex] = merged;
+      } else {
+        parts.push(part);
+      }
+      parts.sort((a, b) => a.summary_index - b.summary_index);
+      const updated: Extract<Segment, { type: 'reasoning' }> = {
+        ...seg,
+        parts,
+        streaming: !this.hasAnyNonReasoning,
+        streaming_part_index: part.summary_index,
+        started_at: (seg as any).started_at || Date.now(),
+      } as any;
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+      // Update bucket copy
+      const upd = updated as unknown as Segment;
+      const updBucket = (arr: Segment[]) => { const i = arr.findIndex(s => s.type === 'reasoning'); if (i>=0) arr[i] = upd; };
+      updBucket(this._preText); updBucket(this._postText);
+      this.currentStepIndex = idx;
+    }
+    this.emitUpdate();
+    this.updateStreamingMeta();
+  }
+
+  private markReasoningInactive() {
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const updated: Extract<Segment, { type: 'reasoning' }> = { ...seg, streaming: false } as any;
+      this.draft.segments = [
+        ...this.draft.segments.slice(0, idx),
+        updated,
+        ...this.draft.segments.slice(idx + 1)
+      ];
+    }
+  }
+
+  // Public method to mark reasoning complete (used by handler-to-builder link via segment events)
+  completeReasoning() {
+    const idx = this.draft.segments.findIndex(s => s.type === 'reasoning');
+    if (idx >= 0) {
+      const seg = this.draft.segments[idx] as Extract<Segment, { type: 'reasoning' }>;
+      const updated: Extract<Segment, { type: 'reasoning' }> = { ...seg, streaming: false, completed_at: (seg as any).completed_at || Date.now() } as any;
+      this.draft.segments[idx] = updated;
+      if (this.currentStepIndex === idx) this.currentStepIndex = null;
+      this.emitUpdate();
+    }
+  }
+
+  finalizeCurrentEvent(finalEvent?: Event) {
+    // Ensure any pending text is flushed before finalizing
+    this.flushTextBuffer();
+    // no debug logs
+    const result = finalEvent ? finalEvent : this.getDraft();
+    this.opts.onFinalize?.(result);
+  }
+
+  // Public helpers for lifecycle control
+  flush() {
+    this.flushTextBuffer();
+  }
+
+  dispose() {
+    if (this.textFlushTimer) {
+      clearTimeout(this.textFlushTimer);
+      this.textFlushTimer = null;
+    }
+    this.textBuffer = '';
+    this.disposed = true;
+    // no debug logs
   }
 }

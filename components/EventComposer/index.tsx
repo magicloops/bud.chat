@@ -72,9 +72,8 @@ export function EventComposer({
         <div className="flex gap-2">
           <div className="flex-1">
             <div
-              className="rounded-md transition-shadow border border-transparent
-                         focus-within:border-emerald-400 dark:focus-within:border-emerald-300 focus-within:border
-                         focus-within:shadow-[0_0_12px_rgba(16,185,129,0.6)] dark:focus-within:shadow-[0_0_14px_rgba(52,211,153,0.65)]"
+              className="rounded-md border border-transparent
+                         focus-within:border-emerald-400 dark:focus-within:border-emerald-300 focus-within:border"
             >
               <Textarea
                 ref={textareaRef}

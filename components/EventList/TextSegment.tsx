@@ -26,7 +26,7 @@ export function TextSegment({ segment, className }: TextSegmentProps) {
 
   return (
     <div 
-      className={cn('text-segment', className)}
+      className={cn('text-segment my-1', className)}
       data-testid="segment-text"
       data-type="text"
     >

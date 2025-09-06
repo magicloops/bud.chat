@@ -175,7 +175,7 @@ export class AnthropicProvider extends BaseProvider {
       
       let currentEvent: Event | null = null;
       let currentText = '';
-      const currentToolCalls: Array<{ id: string; name: string; input: string }> = [];
+      const currentToolCalls: Array<{ id: string; name: string; input: string; startedAt?: number }> = [];
       
       for await (const chunk of stream) {
         if (chunk.type === 'message_start') {
@@ -185,23 +185,40 @@ export class AnthropicProvider extends BaseProvider {
             segments: [],
             ts: Date.now()
           };
+          // Emit the event as soon as the message starts so the server can
+          // send an event_start to the frontend for proper turn separation.
+          yield {
+            type: 'event',
+            data: { event: currentEvent }
+          };
         }
         
         if (chunk.type === 'content_block_start') {
           if (chunk.content_block.type === 'text') {
             currentText = '';
           } else if (chunk.content_block.type === 'tool_use') {
-            console.log('🔧 [AnthropicProvider] Tool use started:', {
-              id: chunk.content_block.id,
-              name: chunk.content_block.name
-            });
             currentToolCalls.push({
               id: chunk.content_block.id,
               name: chunk.content_block.name,
-              input: ''
+              input: '',
+              startedAt: Date.now()
             });
-            
-            // Don't emit segment events - let the route handler convert to proper events
+            // Emit a tool_call start segment immediately (no args yet)
+            if (currentEvent) {
+              yield {
+                type: 'segment',
+                data: {
+                  segment: {
+                    type: 'tool_call',
+                    id: chunk.content_block.id as ToolCallId,
+                    name: chunk.content_block.name,
+                    args: {},
+                    started_at: currentToolCalls[currentToolCalls.length - 1]?.startedAt
+                  },
+                  segmentIndex: 0
+                }
+              };
+            }
           }
         }
         
@@ -241,18 +258,31 @@ export class AnthropicProvider extends BaseProvider {
             if (lastToolCall && lastToolCall.input) {
               try {
                 const args = JSON.parse(lastToolCall.input);
-                console.log('🔧 [AnthropicProvider] Tool call completed:', {
-                  id: lastToolCall.id,
-                  name: lastToolCall.name,
-                  args
-                });
                 // Only add to event segments, don't emit again
                 currentEvent.segments.push({
                   type: 'tool_call',
                   id: lastToolCall.id as ToolCallId,
                   name: lastToolCall.name,
-                  args
+                  args,
+                  started_at: lastToolCall.startedAt,
+                  completed_at: Date.now()
                 });
+                // Also yield a tool_call segment with finalized args so the
+                // route can emit tool_finalized immediately for UI
+                yield {
+                  type: 'segment',
+                  data: {
+                    segment: {
+                      type: 'tool_call',
+                      id: lastToolCall.id as ToolCallId,
+                      name: lastToolCall.name,
+                      args,
+                      started_at: lastToolCall.startedAt,
+                      completed_at: Date.now()
+                    },
+                    segmentIndex: 0
+                  }
+                };
               } catch (e) {
                 console.error('Failed to parse tool call input:', e, 'Raw input:', lastToolCall.input);
               }
@@ -260,15 +290,8 @@ export class AnthropicProvider extends BaseProvider {
           }
         }
         
-        if (chunk.type === 'message_delta' && chunk.usage) {
-          // Final message with usage data
-          if (currentEvent) {
-            yield {
-              type: 'event',
-              data: { event: currentEvent }
-            };
-          }
-        }
+        // Do not emit another 'event' here; we already emitted on message_start.
+        // Usage accounting can be handled separately if needed.
       }
       
       // Emit done event

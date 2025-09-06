@@ -8,10 +8,10 @@ import { ToolCallId } from '@/lib/types/branded';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
-import { streamingSessionManager } from '@/lib/streaming/StreamingSessionManager';
+import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
 import StreamingTextSegment from './StreamingTextSegment';
-import { streamingBus } from '@/lib/streaming/streamingBus';
-import StepsPanel from './StepsPanel';
+import EphemeralOverlay from './EphemeralOverlay';
+import { deriveSteps } from '@/lib/streaming/rendering';
 import {
   Copy,
   Edit,
@@ -60,38 +60,36 @@ export const EventItemSequential = memo(function EventItemSequential({
   const isTool = event.role === 'tool';
   
   // Determine if this event is the active streaming placeholder
-  const session = streamingSessionManager.getState();
-  const isStreamingActive = isAssistant && session.active && session.assistantEventId === event.id;
+  const isStreamingActive = isAssistant && !!conversation?.isStreaming && conversation?.streamingEventId === event.id;
   
   // Streaming header status: reasoning vs tools vs typing
   const [headerStatus, setHeaderStatus] = useState<'thinking' | 'using-tools' | 'typing'>('thinking');
   useEffect(() => {
     if (!(isStreamingActive || isStreaming)) return;
-    const compute = () => {
-      const tools = streamingBus.getTools(event.id);
-      if (tools && tools.some(t => t.status === 'in_progress' || t.status === 'finalized')) {
-        setHeaderStatus('using-tools');
-        return;
-      }
-      const parts = streamingBus.getReasoningParts(event.id);
-      if (parts && parts.length > 0 && parts.some(p => !p.is_complete)) {
-        setHeaderStatus('thinking');
-        return;
-      }
-      const text = streamingBus.get(event.id);
-      if (text && text.length > 0) {
-        setHeaderStatus('typing');
-        return;
-      }
-      // Default to thinking at stream start
+    const interval = setInterval(() => {
+      const draft = getDraft(event.id);
+      const segs = draft?.segments || event.segments;
+      const toolCalls = segs.filter(s => s.type === 'tool_call') as any[];
+      const toolResults = segs.filter(s => s.type === 'tool_result') as any[];
+      // consider results that may arrive in separate 'tool' events (multi-turn execution)
+      const unresolved = toolCalls.some(tc => {
+        const resolvedInEvent = toolResults.some(tr => tr.id === tc.id);
+        if (resolvedInEvent) return false;
+        if (allEvents && allEvents.length > 0) {
+          const resolvedInOthers = allEvents.some(e => e.segments.some(s => s.type === 'tool_result' && (s as any).id === tc.id));
+          if (resolvedInOthers) return false;
+        }
+        return true;
+      });
+      if (unresolved) { setHeaderStatus('using-tools'); return; }
+      const reasoning = segs.find(s => s.type === 'reasoning') as any;
+      if (reasoning && reasoning.streaming) { setHeaderStatus('thinking'); return; }
+      const textSeg = segs.find(s => s.type === 'text') as any;
+      if (textSeg && textSeg.text && textSeg.text.length > 0) { setHeaderStatus('typing'); return; }
       setHeaderStatus('thinking');
-    };
-    const unsubA = streamingBus.subscribeTools(event.id, compute);
-    const unsubB = streamingBus.subscribeReasoningParts(event.id, compute);
-    const unsubC = streamingBus.subscribe(event.id, compute);
-    compute();
-    return () => { unsubA(); unsubB(); unsubC(); };
-  }, [isStreamingActive, isStreaming, event.id]);
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isStreamingActive, isStreaming, event.id, event.segments, allEvents]);
   
   // Extract text content for fallback and editing
   const textContent = event.segments
@@ -116,8 +114,23 @@ export const EventItemSequential = memo(function EventItemSequential({
     setLocalTextContent(textContent);
   }, [textContent]);
   
-  // Check if event has any content to render
-  const hasSegments = event.segments && event.segments.length > 0;
+  // Prefer draft event from EventBuilder during streaming
+  const displayEvent = isStreamingActive ? (getDraft(event.id) || event) : event;
+  const hasStreamingText = useMemo(() => {
+    if (!isStreamingActive) return false;
+    try {
+      const segs = (displayEvent?.segments || []) as any[];
+      const textSeg = segs.find(s => s.type === 'text' && s.text && String(s.text).trim().length > 0);
+      return !!textSeg;
+    } catch {
+      return false;
+    }
+  }, [isStreamingActive, displayEvent]);
+
+  // Intentionally minimal logs here to avoid noise
+
+  // Check if event has any content to render (use displayEvent so streaming text suppresses cursor)
+  const hasSegments = displayEvent.segments && displayEvent.segments.length > 0;
   const hasReasoningSegments = event.segments.some(s => s.type === 'reasoning');
   const hasToolCalls = event.segments.some(s => s.type === 'tool_call');
   // Outer steps toggle removed; rely on inner Reasoning/Tool controls
@@ -183,10 +196,65 @@ export const EventItemSequential = memo(function EventItemSequential({
   const canEdit = isUser && !isPending;
   const canDelete = !isPending;
   const canBranch = !isPending && !isSystem;
+
+  // Steps & duration for header button (post-stream only)
+  const { steps } = useMemo(() => deriveSteps(event), [event]);
+  // Determine if there are pre-text steps to hide behind the dropdown
+  const firstTextIdx = useMemo(() => event.segments.findIndex(s => s.type === 'text'), [event]);
+  const isStepSeg = (s: any) => s && (s.type === 'reasoning' || s.type === 'tool_call' || s.type === 'web_search_call' || s.type === 'code_interpreter_call');
+  const hasPreTextSteps = useMemo(() => {
+    if (firstTextIdx < 0) return false;
+    return event.segments.slice(0, firstTextIdx).some(isStepSeg);
+  }, [event, firstTextIdx]);
+  // Compute duration for pre-text steps only
+  const preTextStepIds = useMemo(() => {
+    if (firstTextIdx < 0) return new Set<string>();
+    const ids = new Set<string>();
+    for (const seg of event.segments.slice(0, firstTextIdx)) {
+      if (isStepSeg(seg)) {
+        // Reasoning/tool_call have IDs; built-ins also have ids
+        const id = (seg as any).id;
+        if (id) ids.add(String(id));
+      }
+    }
+    return ids;
+  }, [event, firstTextIdx]);
+  const preTextSteps = useMemo(() => steps.filter(s => preTextStepIds.has(String((s as any).id))), [steps, preTextStepIds]);
+  const { totalDurationMs: preTextDurationMs } = useMemo(() => {
+    let total = 0;
+    let minStart: number | undefined;
+    let maxEnd: number | undefined;
+    for (const s of preTextSteps as any[]) {
+      const started = s.started_at as number | undefined;
+      const done = s.completed_at as number | undefined;
+      if (started) minStart = minStart === undefined ? started : Math.min(minStart, started);
+      if (done) maxEnd = maxEnd === undefined ? done : Math.max(maxEnd, done);
+      if (started && done) total += Math.max(0, done - started);
+    }
+    const fallback = (minStart !== undefined && maxEnd !== undefined && total === 0) ? Math.max(0, maxEnd - minStart) : total;
+    return { totalDurationMs: fallback };
+  }, [preTextSteps]);
+  const durationLabel = preTextDurationMs > 0
+    ? `Ran for ${Math.max(0, Math.round(preTextDurationMs / 100) / 10)}s`
+    : 'Steps';
+  const [showSteps, setShowSteps] = useState(false);
+  const toggleShowSteps = useCallback(() => setShowSteps(v => !v), []);
   
   // Determine if this should be a continuation (compact view)
-  const shouldShowAsContinuation = isAssistant && previousEvent && 
-    (previousEvent.role === 'assistant' || previousEvent.role === 'tool');
+  // Find the previous visible assistant event, skipping tool events that are not rendered
+  const previousVisibleAssistant = useMemo(() => {
+    if (!allEvents) return null;
+    const idx = allEvents.findIndex(e => e.id === event.id);
+    if (idx <= 0) return null;
+    for (let i = idx - 1; i >= 0; i--) {
+      const e = allEvents[i];
+      if (e.role === 'tool') continue; // skip hidden tool events
+      if (e.role === 'assistant') return e;
+      break; // stop on any non-tool, non-assistant event
+    }
+    return null;
+  }, [allEvents, event.id]);
+  const shouldShowAsContinuation = isAssistant && !!previousVisibleAssistant;
 
   // Render system messages with editing capability
   if (isSystem) {
@@ -261,6 +329,8 @@ export const EventItemSequential = memo(function EventItemSequential({
     shouldShowAsContinuation && 'continuation-view'
   );
 
+  // displayEvent already computed above
+
   return (
     <div className={containerClasses}>
       <div className="flex items-start gap-3">
@@ -284,41 +354,58 @@ export const EventItemSequential = memo(function EventItemSequential({
               </span>
               <span className="text-xs text-muted-foreground">
                 · {isStreamingActive
-                    ? headerStatus === 'using-tools'
-                      ? 'using tools...'
-                      : headerStatus === 'typing'
-                        ? 'typing...'
-                        : 'thinking...'
+                    ? (headerStatus === 'using-tools' ? 'using tools...' : 'thinking...')
                     : formatEventDuration(event, _index)}
               </span>
+              {/* Steps button in header (post-stream only) */}
+              {!isStreamingActive && hasPreTextSteps && (
+                <>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <button
+                    onClick={toggleShowSteps}
+                    className={cn(
+                      'text-xs transition-colors',
+                      showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    {durationLabel} {showSteps ? '▾' : '▸'}
+                  </button>
+                </>
+              )}
             </div>
           )}
-          
+          {/* Continuation view: show only the steps button above content if applicable */}
+          {shouldShowAsContinuation && !isStreamingActive && hasPreTextSteps && (
+            <div className="mb-1">
+              <button
+                onClick={toggleShowSteps}
+                className={cn(
+                  'text-xs transition-colors',
+                  showSteps ? 'font-semibold text-foreground' : 'italic text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {durationLabel} {showSteps ? '▾' : '▸'}
+              </button>
+            </div>
+          )}
+
           <div className="relative">
-            {/* Streaming cursor when no content yet */}
-            {isStreaming && !hasSegments && (
-              <span className="animate-bounce animate-pulse text-muted-foreground/60 text-sm ml-1">|</span>
+            {isStreamingActive && !hasStreamingText && (
+              <EphemeralOverlay eventId={event.id} />
+            )}
+            {/* Typing cursor removed; ephemeral overlay indicates activity */}
+
+            {/* Content: render segments inline; renderer handles streaming mode */}
+            {(
+              <SequentialSegmentRenderer
+                event={displayEvent}
+                allEvents={allEvents}
+                isStreaming={isStreamingActive || isStreaming}
+                showSteps={!isStreamingActive && showSteps}
+              />
             )}
 
-            {/* Steps panel on top (handles both streaming and non-streaming) */}
-            {((isStreamingActive || isStreaming) || (hasSegments && (hasReasoningSegments || hasToolCalls))) && (
-              <div className="mb-2">
-                <StepsPanel event={event} allEvents={allEvents} isStreaming={isStreamingActive || isStreaming} />
-              </div>
-            )}
-
-            {/* Content: stream text for active placeholder; otherwise render segments */}
-            {isStreamingActive ? (
-              <StreamingTextSegment eventId={event.id} baseText={''} isStreaming={true} />
-            ) : (
-              hasSegments && (
-                <SequentialSegmentRenderer
-                  event={event}
-                  allEvents={allEvents}
-                  isStreaming={isStreaming}
-                />
-              )
-            )}
+            {/* Steps are now rendered inline within SequentialSegmentRenderer to preserve segment order */}
             
             
             {/* Error Display */}
