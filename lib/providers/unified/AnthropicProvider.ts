@@ -8,10 +8,10 @@ import {
   ValidationResult, 
   ProviderFeature 
 } from './types';
-import { Event, EventLog } from '@/lib/types/events';
+import { Event, EventLog } from '@budchat/events';
 import { generateEventId, ToolCallId } from '@/lib/types/branded';
 // import { createTextEvent, createToolCallEvent, createToolResultEvent, createMixedEvent } from '@/lib/types/events'; // Not currently used
-import { getApiModelName } from '@/lib/modelMapping';
+import { getApiModelName } from '@budchat/models';
 
 // Type for Anthropic tool input schema that matches the SDK requirements
 interface AnthropicInputSchema {

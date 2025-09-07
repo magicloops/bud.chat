@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import { BaseProvider } from './BaseProvider';
 import { ProviderFeature } from './types';
 import { AppError, ErrorCode } from '@/lib/errors';
-import { getApiModelName } from '@/lib/modelMapping';
+import { getApiModelName } from '@budchat/models';
 
 export abstract class OpenAIBaseProvider extends BaseProvider {
   protected client: OpenAI;

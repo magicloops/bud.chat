@@ -1,8 +1,8 @@
 // Unified Chat API - Consolidates all chat endpoints using new abstractions
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { ProviderFactory, UnifiedChatRequest, UnifiedTool } from '@/lib/providers/unified';
-import { StreamingFormat } from '@/lib/events';
+import { ProviderFactory, UnifiedChatRequest, UnifiedTool } from '@budchat/providers';
+import { StreamingFormat } from '@budchat/events';
 // import { EventConverter } from '@/lib/events'; // Not currently used
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
 import { 
@@ -13,7 +13,7 @@ import {
   Event,
   DatabaseEvent,
   ToolCall
-} from '@/lib/types/events';
+} from '@budchat/events';
 import { 
   WorkspaceId, 
   BudId, // Used in getToolsForBud function 
@@ -821,7 +821,7 @@ export async function POST(request: NextRequest) {
               const unresolvedPreCall = eventLog.getUnresolvedToolCalls();
               console.log('📤 [Chat API] Preparing provider call — unresolved before call:', unresolvedPreCall.map(c => c.id));
               if (provider.name === 'Anthropic') {
-                const { EventLog: EventLogClass } = await import('@/lib/types/events');
+                const { EventLog: EventLogClass } = await import('@budchat/events');
                 const ev = new EventLogClass(chatRequest.events);
                 // Summarize the final few Anthropic messages
                 const msgs = (ev as any).toProviderMessages('anthropic') as any[];

@@ -7,7 +7,7 @@ import {
   ValidationResult, 
   ProviderFeature 
 } from './types';
-import { Event, EventLog } from '@/lib/types/events';
+import { Event, EventLog } from '@budchat/events';
 
 export abstract class BaseProvider implements LLMProvider {
   abstract readonly name: string;

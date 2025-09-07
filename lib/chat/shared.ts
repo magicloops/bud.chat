@@ -1,7 +1,7 @@
 // Shared utilities for chat routes
 
 import { createClient } from '@/lib/supabase/server';
-import { Event, Segment } from '@/lib/types/events';
+import { Event, Segment } from '@budchat/events';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({

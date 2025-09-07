@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
-import { ProviderFactory } from '@/lib/providers/unified/ProviderFactory';
+import { ProviderFactory } from '@budchat/providers';
 import { AppError, handleApiError } from '@/lib/errors';
-import { createTextEvent, Event } from '@/lib/types/events';
+import { createTextEvent, Event } from '@budchat/events';
 
 export async function POST(request: NextRequest) {
   try {

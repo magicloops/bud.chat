@@ -3,7 +3,7 @@ import { LLMProvider } from './types';
 import { AnthropicProvider } from './AnthropicProvider';
 import { OpenAIChatProvider } from './OpenAIChatProvider';
 import { OpenAIResponsesProvider } from './OpenAIResponsesProvider';
-import { getModelProvider, isReasoningModel } from '@/lib/modelMapping';
+import { getModelProvider, isReasoningModel } from '@budchat/models';
 
 export class ProviderFactory {
   private static anthropicInstance: AnthropicProvider | null = null;

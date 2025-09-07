@@ -11,6 +11,9 @@
     "lint:fix": "next lint --fix"
   },
   "dependencies": {
+    "@budchat/events": "workspace:*",
+    "@budchat/models": "workspace:*",
+    "@budchat/providers": "workspace:*",
     "@anthropic-ai/sdk": "^0.56.0",
     "@hookform/resolvers": "^3.9.1",
     "@modelcontextprotocol/sdk": "1.13.2",

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
 import { saveEvent } from '@/lib/db/events';
-import { createTextEvent } from '@/lib/types/events';
+import { createTextEvent } from '@budchat/events';
 import { generateKeyBetween } from 'fractional-indexing';
 import { Database } from '@/lib/types/database';
 import { BudConfig } from '@/lib/types';

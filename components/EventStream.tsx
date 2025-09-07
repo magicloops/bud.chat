@@ -6,7 +6,7 @@ import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
 import { Bud } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { getDefaultModel } from '@/lib/modelMapping';
+import { getDefaultModel } from '@budchat/models';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';

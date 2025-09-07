@@ -1,9 +1,8 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
-import { ReasoningData, Segment } from '@/lib/types/events';
+import { ReasoningData, Segment } from '@budchat/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
-import { ProgressState, ActivityType } from '@/lib/types/progress';
-import { ToolCallId } from '@/lib/types/branded';
+import { ProgressState, ActivityType, ToolCallId } from '@budchat/events';
 import { EventBuilder } from './eventBuilder';
 import { setDraft, clearDraft, getDraft, renameDraft } from './eventBuilderRegistry';
 import { setOverlay, getOverlay } from './ephemeralOverlayRegistry';

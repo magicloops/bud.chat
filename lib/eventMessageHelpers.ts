@@ -1,7 +1,7 @@
 // Event-based message helpers for optimistic UI
 // These maintain compatibility with existing patterns while using events
 
-import { Event, createTextEvent, Segment, ReasoningPart, ResponseMetadata, createReasoningSegment, sortSegmentsBySequence } from '@/lib/types/events';
+import { Event, createTextEvent, Segment, ReasoningPart, ResponseMetadata, createReasoningSegment, sortSegmentsBySequence } from '@budchat/events';
 import { ToolCallId, generateEventId } from '@/lib/types/branded';
 // createMixedEvent currently unused
 import { EventConversation, EventConversationMeta } from '@/state/eventChatStore';

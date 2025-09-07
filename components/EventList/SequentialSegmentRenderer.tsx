@@ -8,7 +8,7 @@ import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event } from '@/state/eventChatStore';
 import { getStreamingMeta, getDraft } from '@/lib/streaming/eventBuilderRegistry';
 import { getOverlay, subscribeOverlay } from '@/lib/streaming/ephemeralOverlayRegistry';
-import { Segment } from '@/lib/types/events';
+import { Segment } from '@budchat/events';
 import { getRenderableSegments, deriveSteps } from '@/lib/streaming/rendering';
 import { ReasoningSegment } from './ReasoningSegment';
 // Removed overlay dependency

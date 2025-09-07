@@ -20,7 +20,7 @@ import { Separator } from '@/components/ui/separator';
 
 import { Bud, BudConfig, RemoteMCPConfig } from '@/lib/types';
 import { budManager, getBudConfig, getBudDisplayName, getBudAvatar, getBudModel } from '@/lib/budHelpers';
-import { getModelsForUI } from '@/lib/modelMapping';
+import { getModelsForUI } from '@budchat/models';
 import { Database } from '@/lib/types/database';
 
 type MCPServer = Database['public']['Tables']['mcp_servers']['Row'];

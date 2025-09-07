@@ -1,4 +1,4 @@
-import { Segment } from '@/lib/types/events';
+import { Segment } from '@budchat/events';
 
 export type StepType = 'reasoning_part' | 'web_search' | 'code_interpreter' | 'mcp_call';
 
@@ -47,4 +47,3 @@ export function hasAnyStepWorthySegments(segments: Segment[]): boolean {
     s.type === 'reasoning' || s.type === 'web_search_call' || s.type === 'code_interpreter_call' || s.type === 'tool_call'
   );
 }
-

@@ -1,5 +1,5 @@
 // Unified types for provider abstraction layer
-import { Event, Segment } from '@/lib/types/events';
+import { Event, Segment } from '@budchat/events';
 import { MCPBudConfig, BuiltInToolsConfig, ReasoningConfig, TextGenerationConfig } from '@/lib/types';
 
 export interface UnifiedChatRequest {

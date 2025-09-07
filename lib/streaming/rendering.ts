@@ -1,5 +1,5 @@
 import { Event } from '@/state/eventChatStore';
-import { Segment } from '@/lib/types/events';
+import { Segment } from '@budchat/events';
 
 /**
  * Produce the renderable segments for an event, resolving tool results

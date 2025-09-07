@@ -1,5 +1,5 @@
 import { Event } from '@/state/eventChatStore';
-import { Segment, ReasoningPart } from '@/lib/types/events';
+import { Segment, ReasoningPart } from '@budchat/events';
 import { generateEventId, ToolCallId, toEventId } from '@/lib/types/branded';
 import { setStreamingMeta } from './eventBuilderRegistry';
 

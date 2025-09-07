@@ -3,6 +3,7 @@ const nextConfig = {
   eslint: {
     dirs: ['app', 'components', 'lib', 'state'],
   },
+  transpilePackages: ['@budchat/events', '@budchat/models', '@budchat/providers'],
   typescript: {
     ignoreBuildErrors: false,
   },

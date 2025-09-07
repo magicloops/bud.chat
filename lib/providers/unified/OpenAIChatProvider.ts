@@ -14,7 +14,7 @@ import {
   EventLog,
   ToolCall,
   Segment,
-} from '@/lib/types/events';
+} from '@budchat/events';
 import { generateToolCallId, generateEventId, ToolCallId } from '@/lib/types/branded';
 
 export class OpenAIChatProvider extends OpenAIBaseProvider {

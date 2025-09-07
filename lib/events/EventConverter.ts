@@ -1,5 +1,5 @@
 // Unified event conversion utilities
-import { Event, Segment, EventLog, ToolCall, ToolResult } from '@/lib/types/events';
+import { Event, Segment, EventLog, ToolCall, ToolResult } from '@budchat/events';
 import { ToolCallId } from '@/lib/types/branded';
 // import { generateToolCallId } from '@/lib/types/branded'; // Not currently used
 import OpenAI from 'openai';

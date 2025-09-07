@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { createClient } from '@/lib/supabase/client';
-import { Event, Role } from '@/lib/types/events';
+import { Event, Role } from '@budchat/events';
 import { EventId, ToolCallId } from '@/lib/types/branded';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 

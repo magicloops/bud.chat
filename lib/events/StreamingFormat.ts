@@ -1,5 +1,5 @@
 // Unified streaming format for consistent SSE events
-import { Event, Segment } from '@/lib/types/events';
+import { Event, Segment } from '@budchat/events';
 import { AppError } from '@/lib/errors';
 
 export interface StreamingEvent {

@@ -12,9 +12,9 @@ import {
   // EventLog, // Not currently used
   ReasoningPart,
   Segment
-} from '@/lib/types/events';
+} from '@budchat/events';
 import { generateEventId, ToolCallId, generateToolCallId } from '@/lib/types/branded';
-import { processResponsesAPIStream } from './utils/openaiResponsesUtils';
+import { processResponsesAPIStream } from '@budchat/providers';
 
 // Extended stream event for custom event types
 interface ExtendedStreamEvent {

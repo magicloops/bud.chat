@@ -1,7 +1,7 @@
 // Database layer for events
 
 import { createClient } from '@/lib/supabase/server';
-import { Event, DatabaseEvent } from '@/lib/types/events';
+import { Event, DatabaseEvent } from '@budchat/events';
 import { ConversationId } from '@/lib/types/branded';
 import { generateKeyBetween } from 'fractional-indexing';
 
