@@ -1,5 +1,3 @@
-import { Event } from '@/state/eventChatStore';
-
 export type EphemeralKind = 'idle' | 'reasoning' | 'tool' | 'built_in' | 'writing';
 
 export interface EphemeralOverlayState {
@@ -41,7 +39,6 @@ export function subscribeOverlay(eventId: string, cb: Listener): () => void {
     listeners.set(eventId, ls);
   }
   ls.add(cb);
-  // push current
   try { cb(getOverlay(eventId)); } catch {}
   return () => {
     const cur = listeners.get(eventId);
@@ -52,5 +49,3 @@ export function subscribeOverlay(eventId: string, cb: Listener): () => void {
   };
 }
 
-// Sticky query helper for renderers that need to know if a non-idle overlay ever occurred
-// no additional helpers

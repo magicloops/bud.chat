@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import MarkdownRenderer from '@/components/markdown-renderer';
 import { Event, Conversation } from '@/state/eventChatStore';
-import { ToolCallId } from '@/lib/types/branded';
+import { ToolCallId } from '@budchat/events';
 import { cn } from '@/lib/utils';
 import StepsDropdown from '@/components/Steps/StepsDropdown';
 import StepsOverlay from '@/components/Steps/StepsOverlay';

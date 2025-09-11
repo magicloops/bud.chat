@@ -42,6 +42,31 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): any | any[]
   }
 
   switch (event.type) {
+
+    case 'response.completed':
+      return { type: 'response.completed', response: event.response as unknown, sequence_number: event.sequence_number as number };
+    case 'response.output_item.added': {
+      const item = (event as { item?: any }).item;
+      if (item && item.type === 'message') {
+        return { type: 'message_start', item_id: item.id as string, output_index: (event as any).output_index as number, sequence_number: (event as any).sequence_number as number };
+      }
+      // Pass through for non-message items (e.g., reasoning, mcp_call)
+      return { type: 'response.output_item.added', item, output_index: (event as any).output_index as number, sequence_number: (event as any).sequence_number as number };
+    }
+    case 'response.content_part.added': {
+      const part = (event as { part?: any }).part;
+      if (part && part.type === 'output_text') {
+        return {
+          type: 'text_start',
+          item_id: (event as any).item_id as string,
+          output_index: (event as any).output_index as number,
+          sequence_number: (event as any).sequence_number as number,
+          content: typeof part.text === 'string' ? part.text : ''
+        } as any;
+      }
+      return null;
+    }
+
     case 'response.created':
       return { type: 'response.created', response: event.response as unknown, sequence_number: event.sequence_number as number };
     case 'response.in_progress':

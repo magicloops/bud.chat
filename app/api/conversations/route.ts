@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { saveEvent } from '@/lib/db/events';
+import { saveEvent as repoSaveEvent } from '@budchat/data';
 import { createTextEvent } from '@budchat/events';
 import { generateKeyBetween } from 'fractional-indexing';
 import { Database } from '@/lib/types/database';
@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
     if (systemPrompt) {
       try {
         const systemEvent = createTextEvent('system', systemPrompt);
-        await saveEvent(systemEvent, {
+        await repoSaveEvent(supabase, systemEvent, {
           conversationId: conversation.id,
           orderKey: 'a0'
         });
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
         try {
           const orderKey = generateKeyBetween(lastOrderKey, null);
           const event = createTextEvent(message.role, message.content);
-          await saveEvent(event, {
+          await repoSaveEvent(supabase, event, {
             conversationId: conversation.id,
             orderKey: orderKey
           });

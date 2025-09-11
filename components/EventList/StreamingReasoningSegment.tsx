@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
+import { getDraft } from '@budchat/streaming';
 // no extra UI chrome imports needed here
 
 interface StreamingReasoningSegmentProps {

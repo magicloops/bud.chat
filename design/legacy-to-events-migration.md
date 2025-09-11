@@ -20,7 +20,7 @@ This document outlines the complete migration from the legacy message-based syst
 - `/lib/eventMessageHelpers.ts` - Event message utilities
 - `/lib/types/events.ts` - Core event types
 - `/lib/providers/` - Provider mappers
-- `/lib/db/events.ts` - Database layer
+- `@budchat/data` - Database repository layer
 - `/components/EventMessage.tsx` - Event message components
 - `/components/EventStream.tsx` - Event streaming components
 - `/hooks/useUnifiedChat.ts` - Unified chat hook

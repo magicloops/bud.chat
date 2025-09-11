@@ -56,8 +56,10 @@ Keep path aliases in app pointing to packages (or use relative imports initially
   - Updated UI and providers to import from `@budchat/models`.
   - Removed `lib/modelMapping.ts`.
 
-- Phase 3 — Providers: IN PROGRESS (next)
-  - Plan: scaffold `@budchat/providers` (re-export of unified providers), flip a key import (`ProviderFactory`) to validate, then move implementations.
+- Phase 3 — Providers: COMPLETE
+  - Implemented `@budchat/providers` with unified provider implementations (OpenAI Chat, OpenAI Responses, Anthropic, Base, Factory).
+  - Migrated Responses utils into the package and removed legacy copy; legacy provider now imports from the package.
+  - Updated API routes to use `@budchat/providers`.
 
 ## Package Responsibilities and APIs
 
@@ -142,11 +144,7 @@ Phase 2: Extract model mapping
 - Keep function names and behavior unchanged to avoid UI churn.
 
 Phase 3: Extract providers
-- Scaffold `@budchat/providers` re-exporting `lib/providers/unified/*`.
-- Flip `ProviderFactory` import in Chat API to `@budchat/providers` to validate.
-- Move `lib/providers/unified/*` into `packages/providers` with unchanged APIs; update imports across app.
-- Inject API keys through constructor options with environment fallback.
-- Add tests (mock OpenAI/Anthropic); verify tool-call and reasoning streams.
+- Done.
 
 Phase 4: Extract streaming
 - Move `lib/streaming/eventBuilder.ts`, `frontendEventHandler.ts`, `rendering.ts`, overlay registries → `packages/streaming`.
@@ -197,3 +195,15 @@ Keep tests co‑located in each package; ensure packages compile independently.
 - Document package READMEs with public APIs and examples.
 
 This plan modularizes along natural boundaries already present in the repo, keeps the streaming UX intact, and makes provider, event, MCP, and data logic independently testable and evolvable.
+- Phase 4 — Data: IN PROGRESS
+  - Implemented `@budchat/data` with conversation/event repository helpers:
+    - `loadConversationEvents`, `saveEvents`, `createConversation`, `getPostgrestErrorCode`.
+  - Updated `app/api/chat/route.ts` to import and use these helpers; removed inline implementations.
+  - Next: move additional DB helpers (latest event, update segments, tool timing persistence) and update other routes accordingly.
+
+- Phase 5 — Streaming: IN PROGRESS
+  - Implemented `@budchat/streaming` and moved streaming primitives:
+    - `eventBuilderRegistry`, `ephemeralOverlayRegistry`, `rendering`, and `EventBuilder`.
+  - Added `sseIterator` (Response → SSE JSON) to decouple parsing from app.
+  - Updated UI imports to use `@budchat/streaming`.
+  - FrontendEventHandler remains in app for now (store-coupled), now delegates parsing to `sseIterator` and uses package `EventBuilder`.

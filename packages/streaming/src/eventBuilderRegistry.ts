@@ -1,5 +1,4 @@
-import { Event } from '@/state/eventChatStore';
-import { toEventId } from '@/lib/types/branded';
+import { Event, toEventId } from '@budchat/events';
 
 const drafts = new Map<string, Event>(); // key: assistantEventId
 const streamingMeta = new Map<string, { hasTextContent: boolean; preText: Event['segments']; postText: Event['segments'] }>();
@@ -44,3 +43,4 @@ export function setStreamingMeta(eventId: string, meta: { hasTextContent: boolea
 export function getStreamingMeta(eventId: string): { hasTextContent: boolean; preText: Event['segments']; postText: Event['segments'] } | undefined {
   return streamingMeta.get(eventId);
 }
+

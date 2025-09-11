@@ -6,10 +6,10 @@
 
 ## Where `order_key` Is Generated/Used
 
-- `lib/db/events.ts`
-  - `saveEvent(...)`: If no `orderKey` provided, fetches last `order_key` for the conversation (order by `order_key` desc) and uses `generateKeyBetween(last, null)`.
-  - `saveEvents(...)`: Batch path; fetches last `order_key` (desc) then iteratively calls `generateKeyBetween(last, null)` for each new event.
-  - `getConversationEvents(...)`: Reads and sorts by `order_key` ascending.
+- `@budchat/data`
+  - `saveEvent(supabase, event, { conversationId, orderKey? })`: If no `orderKey` provided, fetches last `order_key` for the conversation (order by `order_key` desc) and uses `generateKeyBetween(last, null)`.
+  - `saveEvents(supabase, events, conversationId)`: Batch path; fetches last `order_key` (desc) then iteratively calls `generateKeyBetween(last, null)` for each new event.
+  - `getConversationEvents(supabase, conversationId)`: Reads and sorts by `order_key` ascending.
 
 - `app/api/chat/route.ts`
   - Helper `saveEvents(...)`: Carries a running `orderKey`, repeatedly calls `generateKeyBetween(orderKey, null)` when saving multiple new events during a request.
@@ -66,7 +66,7 @@ Because the `events` table lacks a uniqueness constraint on `(conversation_id, o
 
 ## Quick Checklist of Code Paths Affected
 - Append new events:
-  - `lib/db/events.ts` → `saveEvent`, `saveEvents`
+  - `@budchat/data` → `saveEvent`, `saveEvents`
   - `app/api/chat/route.ts` → `saveEvents`, continue flow last-key lookup
 - Conversation creation:
   - `app/api/conversations/route.ts` → seeds `'a0'`, then generates subsequent keys
@@ -80,4 +80,3 @@ Because the `events` table lacks a uniqueness constraint on `(conversation_id, o
 
 ## Bottom Line
 Fractional indexing depends on bytewise ordering. With `text` under a non-"C" collation, ordering around `aZ/aa` breaks. Enforce binary collation for `order_key` and add uniqueness on `(conversation_id, order_key)` to make key generation robust and failures visible.
-

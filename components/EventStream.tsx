@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { getDefaultModel } from '@budchat/models';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
-import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
+import { FrontendEventHandler } from '@budchat/streaming';
 
 interface EventStreamProps {
   // For local state (new conversations)

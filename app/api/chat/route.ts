@@ -24,9 +24,10 @@ import {
   generateConversationId,
   // generateEventId, // Not currently used
   ToolCallId
-} from '@/lib/types/branded';
+} from '@budchat/events';
 import { Bud, Database } from '@/lib/types';
 import { generateKeyBetween } from 'fractional-indexing';
+import { loadConversationEvents as repoLoadConversationEvents, saveEvents as repoSaveEvents, createConversation as repoCreateConversation, getPostgrestErrorCode as repoGetPostgrestErrorCode, updateToolSegmentTiming as repoUpdateToolSegmentTiming, getLastOrderKey as repoGetLastOrderKey } from '@budchat/data';
 import { generateConversationTitleInBackground } from '@/lib/chat/shared';
 
 // Request types
@@ -103,154 +104,16 @@ async function validateConversationAccess(
 }
 
 // Helper to load events from a conversation
-async function loadConversationEvents(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  conversationId: ConversationId
-): Promise<Event[]> {
-  const { data: events, error } = await supabase
-    .from('events')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .order('order_key', { ascending: true });
-
-  if (error) {
-    throw new AppError(
-      ErrorCode.DB_QUERY_ERROR,
-      'Failed to load conversation events',
-      { originalError: error }
-    );
-  }
-
-  return (events || []).map(e => ({
-    id: e.id,
-    role: e.role,
-    segments: e.segments,
-    ts: e.ts,
-    response_metadata: e.response_metadata
-  }));
-}
+const loadConversationEvents = repoLoadConversationEvents as (supabase: Awaited<ReturnType<typeof createClient>>, conversationId: ConversationId) => Promise<Event[]>;
 
 // Internal helper: safely extract Postgrest error code without using `any`.
-function getPostgrestErrorCode(err: unknown): string | undefined {
-  if (!err || typeof err !== 'object') return undefined;
-  const e = err as { code?: string; details?: unknown };
-  const details = (e.details as { code?: string } | null | undefined);
-  return e.code ?? details?.code ?? undefined;
-}
+const getPostgrestErrorCode = repoGetPostgrestErrorCode;
 
 // Helper to save events
-async function saveEvents(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  events: Event[],
-  conversationId: ConversationId,
-  previousOrderKey?: string | null
-): Promise<string | null> {
-  // Normalized last key
-  let orderKey: string | null | undefined = previousOrderKey ?? null;
-  const eventInserts: Omit<DatabaseEvent, 'created_at'>[] = [];
-
-  for (const event of events) {
-    orderKey = generateKeyBetween(orderKey, null);
-    eventInserts.push({
-      id: event.id,
-      conversation_id: conversationId,
-      role: event.role,
-      segments: event.segments,
-      ts: event.ts,
-      order_key: orderKey,
-      response_metadata: event.response_metadata
-    });
-  }
-
-  if (eventInserts.length > 0) {
-    const { error } = await supabase.from('events').insert(eventInserts);
-    // On unique violation (SQLSTATE 23505), fall back to sequential insert with retry
-    const code = getPostgrestErrorCode(error);
-    if (error && code !== '23505') {
-      throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save events', { originalError: error });
-    }
-    if (error && code === '23505') {
-      // Refetch the current last key and insert one by one
-      let currentLastKey: string | null = previousOrderKey ?? null;
-      for (const e of events) {
-        const key = generateKeyBetween(currentLastKey, null);
-        const row: Omit<DatabaseEvent, 'created_at'> = {
-          id: e.id,
-          conversation_id: conversationId,
-          role: e.role,
-          segments: e.segments,
-          ts: e.ts,
-          order_key: key,
-          response_metadata: e.response_metadata
-        };
-        let ins = await supabase.from('events').insert([row]).select('order_key').single();
-        let icode = getPostgrestErrorCode(ins.error);
-        if (ins.error && icode === '23505') {
-          // Race: refetch last and retry once
-          const { data: last } = await supabase
-            .from('events')
-            .select('order_key')
-            .eq('conversation_id', conversationId)
-            .order('order_key', { ascending: false })
-            .limit(1)
-            .single();
-          row.order_key = generateKeyBetween(last?.order_key || null, null);
-          ins = await supabase.from('events').insert([row]).select('order_key').single();
-          icode = getPostgrestErrorCode(ins.error);
-        }
-        if (ins.error) {
-          throw new AppError(ErrorCode.DB_QUERY_ERROR, 'Failed to save event during fallback', { originalError: ins.error });
-        }
-        currentLastKey = ins.data?.order_key || row.order_key;
-        orderKey = currentLastKey;
-      }
-    }
-  }
-
-  return orderKey ?? null;
-}
+const saveEvents = repoSaveEvents as (supabase: Awaited<ReturnType<typeof createClient>>, events: Event[], conversationId: ConversationId, previousOrderKey?: string | null) => Promise<string | null>;
 
 // Helper to create a new conversation
-async function createConversation(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  workspaceId: WorkspaceId,
-  budId?: BudId
-): Promise<{ conversationId: ConversationId; bud?: Bud }> {
-  // Fetch bud if provided
-  let bud: Bud | null = null;
-  if (budId) {
-    const { data, error } = await supabase
-      .from('buds')
-      .select('*')
-      .eq('id', budId)
-      .single();
-    
-    if (data && !error) {
-      bud = data as Bud;
-    }
-  }
-  
-  // Create conversation
-  const conversationId = generateConversationId();
-  const { error } = await supabase
-    .from('conversations')
-    .insert({
-      id: conversationId,
-      workspace_id: workspaceId,
-      source_bud_id: budId || null,
-      created_at: new Date().toISOString()
-    });
-
-  if (error) {
-    throw new AppError(
-      ErrorCode.DB_QUERY_ERROR,
-      'Failed to create conversation',
-      { originalError: error }
-    );
-  }
-
-  return { conversationId, bud: bud || undefined };
-}
+const createConversation = repoCreateConversation as (supabase: Awaited<ReturnType<typeof createClient>>, workspaceId: WorkspaceId, budId?: BudId) => Promise<{ conversationId: ConversationId; bud?: Bud }>;
 
 // Helper to get tools for a bud
 async function getToolsForBud(
@@ -528,16 +391,8 @@ export async function POST(request: NextRequest) {
       const existingEvents = await loadConversationEvents(supabase, conversationId);
       eventLog = new EventLog(existingEvents);
       
-      // Get the last order key from the database
-      const { data: lastEventData } = await supabase
-        .from('events')
-        .select('order_key')
-        .eq('conversation_id', conversationId)
-        .order('order_key', { ascending: false })
-        .limit(1)
-        .single();
-      
-      const lastOrderKey = lastEventData?.order_key || null;
+      // Get the last order key from the repository
+      const lastOrderKey = await repoGetLastOrderKey(supabase, conversationId);
       
       // Add new user message
       const userEvent = createTextEvent('user', continueBody.message);
@@ -593,23 +448,9 @@ export async function POST(request: NextRequest) {
                 eventId = containing?.id || undefined;
               }
               if (!eventId) return;
-
-              const { data: row } = await supabase
-                .from('events')
-                .select('segments')
-                .eq('id', eventId)
-                .single();
-              if (!row?.segments) return;
-              const segs = (row.segments as any[]).map(s => ({ ...s }));
-              const idx = segs.findIndex(s => s.type === 'tool_call' && s.id === toolId);
-              if (idx === -1) return;
               const nowTs = completedAt || Date.now();
-              const started_at = segs[idx].started_at || entry?.started_at || Date.now();
-              segs[idx] = { ...segs[idx], started_at, completed_at: nowTs };
-              await supabase
-                .from('events')
-                .update({ segments: segs })
-                .eq('id', eventId);
+              const startedAt = entry?.started_at;
+              await repoUpdateToolSegmentTiming(supabase, eventId, toolId, startedAt, nowTs);
             } catch (e) {
               console.warn('⚠️ [Chat API] Failed to persist tool timing:', { toolId, error: (e as Error)?.message });
             }
@@ -641,6 +482,7 @@ export async function POST(request: NextRequest) {
           
           while (iteration < maxIterations) {
             iteration++;
+            console.log('🔁 [Chat API] Iteration start', { iteration, maxIterations });
             try {
               const debugUnresolvedAtTop = eventLog.getUnresolvedToolCalls();
               console.log(`🔎 [Chat API] Iteration ${iteration}/${maxIterations} — unresolved tool calls at top:`, debugUnresolvedAtTop.map(c => c.id));
@@ -850,6 +692,9 @@ export async function POST(request: NextRequest) {
               // Cast to any to handle extended event types from OpenAI Responses API
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const extendedEvent = streamEvent as any;
+              // Lightweight debug for terminal and start events
+              if (extendedEvent?.type === 'event') console.log('🟢 [Chat API] event received from provider');
+              if (extendedEvent?.type === 'done') console.log('🛑 [Chat API] done received from provider');
               switch (extendedEvent.type) {
                 case 'event':
                   if (extendedEvent.data?.event) {
@@ -1133,6 +978,16 @@ export async function POST(request: NextRequest) {
                 case 'mcp_tool_complete':
                   // Handle MCP tool complete events
                   if (extendedEvent.data) {
+                    try {
+                      const { createToolResultEvent } = await import('@budchat/events');
+                      const trEvent = createToolResultEvent(
+                        extendedEvent.data.tool_id,
+                        extendedEvent.data.output || { content: '' }
+                      ) as Event;
+                      // Record in EventLog so unresolved detection closes
+                      eventLog.addEvent(trEvent);
+                      allNewEvents.push(trEvent);
+                    } catch {}
                     // First emit as tool_result for consistent frontend handling
                     send({
                       type: 'tool_result',
@@ -1269,6 +1124,25 @@ export async function POST(request: NextRequest) {
               if (breakProviderStreamForTools) {
                 break;
               }
+            }
+            // Fallback: if provider stream ended without emitting 'done' and we are not
+            // breaking for local tool execution, finalize the stream here to prevent
+            // repeated iterations and a hanging client.
+            if (!breakProviderStreamForTools) {
+              console.log('⚠️ [Chat API] Provider stream ended without done; fallback finalize', { hasCurrentEvent: !!currentEvent });
+              try {
+                if (currentEvent) {
+                  // Emit final event
+                  send({ type: 'message_final', event: currentEvent });
+                }
+                // Emit unified done and close
+                sendSSE(streamingFormat.formatSSE(streamingFormat.done()));
+                console.log('🔚 [Chat API] Provider stream ended without done — sent fallback complete');
+              } catch {}
+              controller.close();
+              isClosed = true;
+              iteration = maxIterations; // stop outer loop
+              return;
             }
           }
           

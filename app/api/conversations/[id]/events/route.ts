@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { getConversationEvents } from '@/lib/db/events';
+import { getConversationEvents as repoGetConversationEvents } from '@budchat/data';
 
 export async function GET(
   request: NextRequest,
@@ -40,7 +40,7 @@ export async function GET(
     }
 
     // Get events for this conversation
-    const events = await getConversationEvents(conversationId);
+    const events = await repoGetConversationEvents(supabase, conversationId);
 
     // Get bud configuration if available
     let budConfig = null;

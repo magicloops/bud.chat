@@ -127,8 +127,8 @@ export class NewChatAdapter {
 export class ExistingChatAdapter {
   static createConfig(conversationId: string): ChatEngineConfig {
     return {
-      eventLoader: async () => await getConversationEvents(conversationId),
-      eventSaver: async (event) => await saveEvent(event, { conversationId }),
+      eventLoader: async () => await getConversationEvents(supabase, conversationId),
+      eventSaver: async (event) => await saveEvent(supabase, event, { conversationId }),
       batchEventSaver: undefined, // No batch saving needed
       conversationCreator: undefined, // Conversation already exists
       titleGenerator: undefined, // No title generation needed

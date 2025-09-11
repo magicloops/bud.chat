@@ -117,7 +117,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
 
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
-      const inputItems = this.convertEventsToInputItems(request.events);
+      const inputItems = this.convertEventsToInputItems(request.events, request.mcpConfig);
       const params: ResponsesCreateParams = { model: this.getModelName(request.model), input: inputItems, max_output_tokens: request.maxTokens || 8000, include: ['reasoning.encrypted_content'] };
       const tools = this.buildToolsArray(request);
       if (tools.length > 0) params.tools = tools;
@@ -138,6 +138,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   
   async *stream(request: UnifiedChatRequest): AsyncGenerator<StreamEvent> {
     try {
+      const RESP_DEBUG = process.env.RESPONSES_DEBUG === 'true' || process.env.STREAM_DEBUG === 'true';
       const inputItems = this.convertEventsToInputItems(request.events);
       const params: ResponsesCreateParams & { stream: true } = { model: this.getModelName(request.model), input: inputItems, max_output_tokens: request.maxTokens || 8000, stream: true, include: ['reasoning.encrypted_content'] };
       const tools = this.buildToolsArray(request);
@@ -154,16 +155,22 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       let hasStarted = false; let currentMessageId: string | undefined; let streamCompleted = false;
       for await (const streamEvent of processedStream as AsyncGenerator<ExtendedStreamEvent>) {
         if (streamCompleted) continue;
-        if (!hasStarted) { yield { type: 'event', data: { event: currentEvent } } as any; hasStarted = true; }
+        if (!hasStarted) {
+          if (RESP_DEBUG) console.log('[Responses][provider] yield event', { eventId: currentEvent.id, model: request.model });
+          yield { type: 'event', data: { event: currentEvent } } as any;
+          hasStarted = true;
+        }
         switch (streamEvent.type) {
           case 'response.created':
           case 'response.in_progress':
             break;
           case 'response.completed':
+            if (RESP_DEBUG) console.log('[Responses][provider] response.completed → done');
             streamCompleted = true; yield { type: 'done' } as any; return;
           case 'message_start':
             currentMessageId = streamEvent.item_id as string; break;
           case 'text_start': {
+            if (RESP_DEBUG) console.log('[Responses][provider] text_start', { item_id: (streamEvent as any).item_id });
             const textSegmentWithId: Segment = { type: 'text', id: streamEvent.item_id as string, text: (streamEvent as any).content || '', sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index } as any;
             currentEvent.segments.push(textSegmentWithId);
             if ((streamEvent as any).content) yield { type: 'segment', data: { segment: { type: 'text', text: (streamEvent as any).content }, segmentIndex: currentEvent.segments.length - 1 } } as any;
@@ -177,6 +184,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             }
             break; }
           case 'reasoning_start': {
+            if (RESP_DEBUG) console.log('[Responses][provider] reasoning_start', { item_id: (streamEvent as any).item_id });
             const reasoningSegment = { type: 'reasoning', id: (streamEvent as any).item_id, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number, parts: [] as ReasoningPart[], streaming: true } as any;
             currentEvent.segments.unshift(reasoningSegment as any);
             break; }
@@ -197,6 +205,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             }
             break; }
           case 'mcp_tool_start': {
+            if (RESP_DEBUG) console.log('[Responses][provider] mcp_tool_start', { tool_id: (streamEvent as any).tool_id, name: (streamEvent as any).tool_name, server_label: (streamEvent as any).server_label });
             const segment: Segment = { type: 'tool_call', id: ((streamEvent as any).tool_id || generateToolCallId()) as ToolCallId, name: (streamEvent as any).tool_name || 'mcp_tool', args: (streamEvent as any).arguments || {}, server_type: 'remote_mcp', server_label: (streamEvent as any).server_label, display_name: (streamEvent as any).display_name, sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index } as any;
             currentEvent.segments.push(segment);
             yield { type: 'segment', data: { segment, segmentIndex: currentEvent.segments.length - 1 } } as any;
@@ -225,42 +234,91 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
             break;
         }
       }
+      if (!streamCompleted) {
+        if (RESP_DEBUG) console.log('[Responses][provider] stream ended without response.completed (no done emitted)');
+      }
     } catch (error) {
       throw this.handleProviderError(error);
     }
   }
   
-  private convertEventsToInputItems(events: Event[]): ResponsesInputItem[] {
+  private convertEventsToInputItems(events: Event[], mcpConfig?: { remote_servers?: Array<{ server_label: string }> }): ResponsesInputItem[] {
     const items: ResponsesInputItem[] = [];
+    const toolMeta: Record<string, { server_label?: string; name?: string }> = {};
     const storedReasoningSegments: Array<{ id: string }> = [];
+    const genMsgId = () => `msg_${crypto.randomUUID().replace(/-/g, '')}`;
     for (const event of events) {
       if (event.role === 'system') {
-        items.push({ id: crypto.randomUUID(), type: 'message', role: 'system', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
+        items.push({ id: genMsgId(), type: 'message', role: 'system', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
         continue;
       }
       if (event.role === 'user') {
-        items.push({ id: crypto.randomUUID(), type: 'message', role: 'user', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
+        items.push({ id: genMsgId(), type: 'message', role: 'user', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
         continue;
       }
       if (event.role === 'assistant') {
-        let messageId = (event.segments.find(s => (s as any).id) as any)?.id || crypto.randomUUID();
+        // Always use a proper message id for assistant text
+        const messageId = genMsgId();
         for (const segment of event.segments) {
           if (segment.type === 'reasoning') {
             storedReasoningSegments.push({ id: (segment as any).id });
-            items.push({ id: (segment as any).id, type: 'reasoning', summary: (segment as any).combined_text ? [{ type: 'text', text: (segment as any).combined_text }] : undefined });
+            let summary:
+              | Array<{ type: 'summary_text'; text: string }>
+              | undefined;
+            const combined = (segment as any).combined_text as string | undefined;
+            if (typeof combined === 'string' && combined.length > 0) {
+              summary = [{ type: 'summary_text', text: combined }];
+            } else if (Array.isArray((segment as any).parts) && (segment as any).parts.length > 0) {
+              summary = (segment as any).parts.map((p: any) => ({ type: 'summary_text' as const, text: String(p?.text || '') }));
+            }
+            items.push({ id: (segment as any).id, type: 'reasoning', summary });
           } else if (segment.type === 'text') {
             items.push({ id: messageId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: (segment as any).text }] });
           } else if (segment.type === 'tool_call') {
-            const mcpCall: any = { id: (segment as any).id, type: 'mcp_call', name: (segment as any).name, arguments: JSON.stringify((segment as any).args), server_label: (segment as any).server_label || 'default' };
+            // Ensure a valid server_label for remote MCP calls; default to first configured remote server if missing
+            const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
+              ? mcpConfig.remote_servers[0].server_label
+              : undefined;
+            const mcpCall: any = {
+              id: (segment as any).id,
+              type: 'mcp_call',
+              name: (segment as any).name || 'mcp_tool',
+              arguments: JSON.stringify((segment as any).args || {}),
+              server_label: (segment as any).server_label || defaultServer
+            };
+            // Store tool meta for later tool_result mapping
+            toolMeta[String((segment as any).id)] = { server_label: mcpCall.server_label, name: mcpCall.name };
             if ((segment as any).output !== undefined) mcpCall.output = typeof (segment as any).output === 'string' ? (segment as any).output : JSON.stringify((segment as any).output);
             if ((segment as any).error) mcpCall.error = (segment as any).error;
-            items.push(mcpCall);
+            if (mcpCall.server_label) {
+              items.push(mcpCall);
+            } else {
+              // Skip invalid MCP call without a resolvable server label
+              // This maintains compatibility when remote servers are not configured
+            }
           }
         }
       } else if (event.role === 'tool') {
         const toolResult = event.segments[0] as any;
         if (toolResult.type === 'tool_result') {
-          items.push({ id: toolResult.id, type: 'mcp_call', output: typeof toolResult.output === 'string' ? toolResult.output : JSON.stringify(toolResult.output), error: toolResult.error });
+          const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
+            ? mcpConfig.remote_servers[0].server_label
+            : undefined;
+          const meta = toolMeta[String(toolResult.id)] || {};
+          const server_label = meta.server_label || defaultServer;
+          if (server_label) {
+            const name = meta.name || 'mcp_tool';
+            items.push({
+              id: toolResult.id,
+              type: 'mcp_call',
+              name,
+              server_label,
+              output: typeof toolResult.output === 'string' ? toolResult.output : JSON.stringify(toolResult.output),
+              error: toolResult.error
+            } as any);
+          } else {
+            // Skip if we cannot resolve a valid server_label
+          }
         }
       }
     }

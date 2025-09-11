@@ -3,9 +3,8 @@ import { ReasoningData, Segment } from '@budchat/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
 import { ProgressState, ActivityType, ToolCallId } from '@budchat/events';
-import { EventBuilder } from './eventBuilder';
-import { setDraft, clearDraft, getDraft, renameDraft } from './eventBuilderRegistry';
-import { setOverlay, getOverlay } from './ephemeralOverlayRegistry';
+// Use package client subpath to avoid cycles
+import { EventBuilder, setDraft, clearDraft, getDraft, renameDraft, setOverlay, getOverlay } from '@budchat/streaming/client';
 // import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
@@ -310,62 +309,32 @@ export class FrontendEventHandler {
    * Process streaming response with unified logic for both local and store state
    */
   async processStreamingResponse(response: Response): Promise<void> {
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              const t = (data && data.type) || 'unknown';
-              if (
-                t === 'reasoning_start' ||
-                t === 'reasoning_summary_part_added' ||
-                t === 'reasoning_summary_text_delta' ||
-                t === 'reasoning_summary_delta' ||
-                t === 'reasoning_summary_part_done' ||
-                t === 'reasoning_complete'
-              ) {
-                this.dbgJson('sse_in_full', data);
-              } else if (t === 'segment') {
-                // Log reasoning segments that arrive via unified segment updates
-                try {
-                  const seg = (data as any).segment || (data as any).data?.segment;
-                  if (seg && seg.type === 'reasoning') {
-                    this.dbgJson('sse_in_reasoning_segment', data);
-                  }
-                } catch {}
-              } else if (t !== 'token') {
-                this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
-              }
-              await this.handleStreamEvent(data);
-            } catch (e) {
-              if (this.options.debug) {
-                console.error('Error parsing stream data:', e);
-              }
+    const streaming = await import('@budchat/streaming/client');
+    await streaming.processSSE(response, {
+      onAny: async (data: any) => {
+        const t = (data && (data as any).type) || 'unknown';
+        if (
+          t === 'reasoning_start' ||
+          t === 'reasoning_summary_part_added' ||
+          t === 'reasoning_summary_text_delta' ||
+          t === 'reasoning_summary_delta' ||
+          t === 'reasoning_summary_part_done' ||
+          t === 'reasoning_complete'
+        ) {
+          this.dbgJson('sse_in_full', data);
+        } else if (t === 'segment') {
+          try {
+            const seg = (data as any).segment || (data as any).data?.segment;
+            if (seg && seg.type === 'reasoning') {
+              this.dbgJson('sse_in_reasoning_segment', data);
             }
-          }
+          } catch {}
+        } else if (t !== 'token') {
+          this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        await this.handleStreamEvent(data as any);
+      },
+    });
   }
 
   /**
@@ -859,7 +828,30 @@ export class FrontendEventHandler {
    * Handle error events
    */
   private async handleErrorEvent(_data: StreamEvent): Promise<void> {
-    // Container handles error rollback
+    try {
+      // Clear overlay if present
+      const id = this.assistantPlaceholder?.id;
+      if (id) {
+        try { setOverlay(id, null); } catch {}
+        try { clearDraft(id); } catch {}
+      }
+      // Dispose builder and reset local placeholders
+      try { this.builder?.dispose?.(); } catch {}
+      this.builder = null;
+      this.assistantPlaceholder = null;
+      // Flip store streaming flags off to unblock UI
+      if (this.conversationId && this.storeInstance) {
+        const store = this.storeInstance.getState();
+        const conv = store.conversations[this.conversationId];
+        if (conv) {
+          store.setConversation(this.conversationId, {
+            ...conv,
+            isStreaming: false,
+            streamingEventId: undefined,
+          });
+        }
+      }
+    } catch {}
   }
 
   /**

@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { updateEventSegments } from '@/lib/db/events';
+import { updateEventSegments as repoUpdateEventSegments } from '@budchat/data';
 
 export async function PATCH(
   request: NextRequest,
@@ -68,7 +68,7 @@ export async function PATCH(
     ];
 
     // Update event segments in database
-    await updateEventSegments(eventId, updatedSegments);
+    await repoUpdateEventSegments(supabase, eventId, updatedSegments);
 
     // Return updated event
     const updatedEvent = {

@@ -48,7 +48,7 @@ OpenAI's new o-series models perform sophisticated internal reasoning before gen
 - Optimized with GIN and partial indexes for reasoning queries
 - Stores structured reasoning data with parts, combined text, and metadata
 
-**Enhanced**: `lib/db/events.ts`
+**Enhanced**: `@budchat/data`
 - All event saving functions now preserve reasoning data
 - Database persistence works across both new and existing chat routes
 
@@ -138,7 +138,7 @@ const shouldShowReasoning = isReasoningStreaming || showReasoning;
 - `lib/types/events.ts` - Type definitions for reasoning
 - `lib/streaming/eventBuilder.ts` - Event building with reasoning
 - `lib/streaming/frontendEventHandler.ts` - Frontend event processing
-- `lib/db/events.ts` - Database persistence
+- `@budchat/data` - Database persistence
 - `lib/modelMapping.ts` - Model configuration
 - `components/BudForm.tsx` - Reasoning effort UI
 - `components/settings-panel.tsx` - Settings integration

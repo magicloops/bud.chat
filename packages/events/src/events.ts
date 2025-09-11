@@ -30,12 +30,44 @@ export class EventLog {
     this.events.push(event);
   }
   updateEvent(event: Event): boolean { const i = this.events.findIndex(e => e.id === event.id); if (i >= 0) { this.events[i] = event; return true; } console.warn('⚠️ Event not found for update:', { id: event.id, role: event.role }); return false; }
-  getUnresolvedToolCalls(): ToolCall[] { const calls: Record<string, ToolCall> = {}; const resolved: Record<string, true> = {}; for (const e of this.getEvents()) { for (const s of e.segments) { if (s.type === 'tool_call') calls[(s as any).id] = { id: (s as any).id, name: (s as any).name, args: (s as any).args }; if (s.type === 'tool_result') resolved[(s as any).id] = true; } } return Object.values(calls).filter(c => !resolved[c.id]); }
+  getUnresolvedToolCalls(): ToolCall[] {
+    const calls: Record<string, ToolCall> = {};
+    const resolved: Record<string, true> = {};
+    for (const e of this.getEvents()) {
+      for (const s of e.segments) {
+        if ((s as any).type === 'tool_call') {
+          const id = String((s as any).id);
+          const serverType = (s as any).server_type as string | undefined;
+          // Ignore remote MCP calls for local execution accounting — handled by provider
+          if (serverType === 'remote_mcp') continue;
+          calls[id] = { id: id as any, name: (s as any).name, args: (s as any).args } as any;
+          if ((s as any).output !== undefined || (s as any).error !== undefined) {
+            resolved[id] = true;
+          }
+        }
+        if ((s as any).type === 'tool_result') {
+          resolved[String((s as any).id)] = true;
+        }
+      }
+    }
+    return Object.values(calls).filter(c => !resolved[c.id]);
+  }
   toProviderMessages(provider: 'openai' | 'anthropic'): unknown[] {
     if (provider === 'anthropic') {
-      const messages: Array<{ role: string; content: Array<any> | string }> = [];
+      const messages: Array<{ role: 'user' | 'assistant'; content: Array<any> }> = [];
       for (const event of this.getEvents()) {
         if (event.role === 'system') continue;
+        if (event.role === 'tool') {
+          // Anthropic does not accept role 'tool'. Map tool_result to user message with tool_result blocks.
+          const toolBlocks: any[] = [];
+          for (const segment of (event.segments || [])) {
+            if ((segment as any).type === 'tool_result') {
+              toolBlocks.push({ type: 'tool_result', tool_use_id: (segment as any).id, content: JSON.stringify((segment as any).output) });
+            }
+          }
+          if (toolBlocks.length > 0) messages.push({ role: 'user', content: toolBlocks });
+          continue;
+        }
         const blocks: any[] = [];
         for (const segment of (event.segments || [])) {
           switch ((segment as any).type) {
@@ -44,7 +76,8 @@ export class EventLog {
             case 'tool_result': blocks.push({ type: 'tool_result', tool_use_id: (segment as any).id, content: JSON.stringify((segment as any).output) }); break;
           }
         }
-        if (blocks.length > 0) messages.push({ role: event.role, content: blocks });
+        const role: 'user' | 'assistant' = event.role === 'assistant' ? 'assistant' : 'user';
+        if (blocks.length > 0) messages.push({ role, content: blocks });
       }
       return messages;
     }

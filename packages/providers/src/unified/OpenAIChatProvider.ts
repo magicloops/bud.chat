@@ -103,6 +103,12 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
           }
         }
       }
+      // Ensure the route sees a terminal signal and can persist
+      if (!hasStarted) {
+        // No deltas arrived (edge case). Still emit an empty assistant event for persistence.
+        yield { type: 'event', data: { event: currentEvent } } as any;
+      }
+      yield { type: 'done' } as any;
     } catch (error) {
       throw this.handleProviderError(error);
     }
@@ -128,4 +134,3 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
     return { id: generateEventId(), role: (message as any).role as any, segments, ts: Date.now() };
   }
 }
-

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import { EphemeralOverlayState, subscribeOverlay, getOverlay } from '@/lib/streaming/ephemeralOverlayRegistry';
+import { EphemeralOverlayState, subscribeOverlay, getOverlay } from '@budchat/streaming';
 
 interface EphemeralOverlayProps {
   eventId: string;

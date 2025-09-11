@@ -26,7 +26,7 @@ import {
   budManager
 } from '@/lib/budHelpers';
 import { Bud } from '@/lib/types';
-import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
+import { FrontendEventHandler } from '@budchat/streaming';
 
 interface ChatPageProps {
   params: Promise<{ conversationId: string }>
