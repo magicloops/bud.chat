@@ -428,6 +428,8 @@ export async function POST(request: NextRequest) {
         try {
           // Track closed state to avoid enqueueing after close
           let isClosed = false;
+          // Track last appended text sequence to avoid duplicate appends at same position
+          let lastTextSeq: number | null = null;
           // Track tool timing across local execution phases
           const toolStartTimes = new Map<string, { eventId: string; started_at: number }>();
           const recordToolStart = (toolId: string, eventId: string, startedAt?: number) => {
@@ -688,6 +690,30 @@ export async function POST(request: NextRequest) {
             const startedTools = new Set<string>(); // Track which tools we've already started
             let breakProviderStreamForTools = false; // When true, exit provider stream to execute tools
             
+            // Helpers to keep the server-side currentEvent in sync for message_final
+            const upsertReasoningPart = (ev: Event | null, itemId: string, partIndex: number, textDelta?: string, opts?: { sequence_number?: number; complete?: boolean }) => {
+              if (!ev || !itemId || partIndex === undefined || partIndex === null) return;
+              // find or create reasoning segment
+              let idx = ev.segments.findIndex(s => s.type === 'reasoning' && (s as any).id === itemId);
+              if (idx === -1) {
+                const seg: any = { type: 'reasoning', id: itemId, output_index: 0, sequence_number: opts?.sequence_number ?? 0, parts: [], streaming: true, started_at: Date.now() };
+                ev.segments.push(seg);
+                idx = ev.segments.length - 1;
+              }
+              const seg = ev.segments[idx] as any;
+              const parts: any[] = Array.isArray(seg.parts) ? seg.parts : (seg.parts = []);
+              const pIdx = parts.findIndex(p => p.summary_index === partIndex);
+              if (pIdx === -1) {
+                parts.push({ summary_index: partIndex, type: 'summary_text', text: textDelta || '', sequence_number: opts?.sequence_number ?? 0, is_complete: !!opts?.complete, created_at: Date.now() });
+              } else {
+                const prev = parts[pIdx];
+                const nextText = textDelta ? (prev.text || '') + textDelta : prev.text || '';
+                parts[pIdx] = { ...prev, text: nextText, is_complete: opts?.complete ?? prev.is_complete, sequence_number: opts?.sequence_number ?? prev.sequence_number };
+              }
+              // keep parts sorted
+              parts.sort((a, b) => a.summary_index - b.summary_index);
+            };
+
             for await (const streamEvent of provider.stream(chatRequest)) {
               // Cast to any to handle extended event types from OpenAI Responses API
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -711,6 +737,8 @@ export async function POST(request: NextRequest) {
                       }
                     }
                     currentEvent = extendedEvent.data.event;
+                    // Reset text sequence guard for new assistant event
+                    lastTextSeq = null;
                     if (currentEvent) {
                       eventLog.addEvent(currentEvent);
                       allNewEvents.push(currentEvent);
@@ -755,6 +783,18 @@ export async function POST(request: NextRequest) {
                     const segment = extendedEvent.data.segment;
                     
                     if (segment.type === 'text' && segment.text) {
+                      // Keep currentEvent text in sync for final commit, avoiding duplicate deltas
+                    if (currentEvent) {
+                      const seq = (extendedEvent.data?.segment?.sequence_number as number | undefined) ?? undefined;
+                      const delta = String(segment.text);
+                      const shouldAppend = (typeof seq === 'number') ? (lastTextSeq == null || seq > lastTextSeq) : true;
+                      if (shouldAppend) {
+                        const existing = currentEvent.segments.find(s => s.type === 'text') as any;
+                        if (existing) existing.text = (existing.text || '') + delta;
+                        else currentEvent.segments.push({ type: 'text', text: delta } as any);
+                        if (typeof seq === 'number') lastTextSeq = seq;
+                      }
+                    }
                       send({
                         type: 'token',
                         content: segment.text,
@@ -762,6 +802,12 @@ export async function POST(request: NextRequest) {
                       });
                       sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(segment, 0, currentEvent?.id)));
                     } else if (segment.type === 'tool_call') {
+                      // Upsert tool_call into currentEvent for final commit
+                      if (currentEvent) {
+                        const idx = currentEvent.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === (segment as any).id);
+                        if (idx === -1) currentEvent.segments.push(segment);
+                        else currentEvent.segments[idx] = { ...(currentEvent.segments[idx] as any), ...(segment as any) } as any;
+                      }
                       hasToolCalls = true;
                       // debug logs removed
                       
@@ -810,6 +856,8 @@ export async function POST(request: NextRequest) {
                         output_index: segment.output_index,
                         sequence_number: segment.sequence_number
                       });
+                      // Ensure currentEvent contains a reasoning segment
+                      upsertReasoningPart(currentEvent, (segment as any).id, (segment as any).parts?.[0]?.summary_index ?? 0, (segment as any).parts?.[0]?.text || '', { sequence_number: (segment as any).sequence_number });
 
                       // Emit standardized reasoning part events so the frontend can stream per-part
                       if (Array.isArray(segment.parts) && segment.parts.length > 0) {
@@ -837,105 +885,122 @@ export async function POST(request: NextRequest) {
                   }
                   break;
                   
-                case 'reasoning_summary_part_added':
-                  // Handle reasoning part added events
-                  if (extendedEvent.data) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_added]', JSON.stringify(extendedEvent.data, null, 2)); } catch {}
+                case 'reasoning_start': {
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
+                    send({
+                      type: 'reasoning_start',
+                      item_id: d.item_id,
+                      output_index: d.output_index,
+                      sequence_number: d.sequence_number,
+                    });
+                  }
+                  break; }
+                case 'reasoning_summary_part_added': {
+                  // Handle reasoning part added events (Responses utils emit fields at root)
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_added]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_part_added',
-                      item_id: extendedEvent.data.item_id,
-                      summary_index: extendedEvent.data.summary_index,
-                      part: extendedEvent.data.part,
-                      sequence_number: extendedEvent.data.sequence_number
+                      item_id: d.item_id,
+                      summary_index: d.summary_index,
+                      part: d.part,
+                      sequence_number: d.sequence_number
                     });
                     // Bridge: also emit a reasoning segment update to unify frontend handling
                     try {
                       const reasoningSeg = {
                         type: 'reasoning' as const,
-                        id: extendedEvent.data.item_id,
-                        output_index: extendedEvent.data.output_index ?? 0,
-                        sequence_number: extendedEvent.data.sequence_number ?? 0,
+                        id: d.item_id,
+                        output_index: d.output_index ?? 0,
+                        sequence_number: d.sequence_number ?? 0,
                         parts: [{
-                          summary_index: extendedEvent.data.summary_index,
+                          summary_index: d.summary_index,
                           type: 'summary_text' as const,
-                          text: (extendedEvent.data.part && extendedEvent.data.part.text) || '',
-                          sequence_number: extendedEvent.data.sequence_number ?? 0,
+                          text: (d.part && d.part.text) || '',
+                          sequence_number: d.sequence_number ?? 0,
                           is_complete: false,
                           created_at: Date.now()
                         }]
                       };
                       sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(reasoningSeg as any, 0, currentEvent?.id)));
                     } catch {}
+                    // Update currentEvent so final message contains reasoning
+                    if (currentEvent && typeof d.summary_index === 'number') {
+                      upsertReasoningPart(currentEvent, d.item_id as string, d.summary_index as number, (d.part && d.part.text) || '', { sequence_number: d.sequence_number });
+                    }
                   }
-                  break;
+                  break; }
                   
-                case 'reasoning_summary_text_delta':
-                  // Handle reasoning text delta events
-                  if (extendedEvent.data) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_text_delta]', JSON.stringify(extendedEvent.data, null, 2)); } catch {}
+                case 'reasoning_summary_text_delta': {
+                  // Handle reasoning text delta events (Responses utils emit fields at root)
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_text_delta]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_text_delta',
-                      item_id: extendedEvent.data.item_id,
-                      summary_index: extendedEvent.data.summary_index,
-                      delta: extendedEvent.data.delta,
-                      sequence_number: extendedEvent.data.sequence_number
+                      item_id: d.item_id,
+                      summary_index: d.summary_index,
+                      delta: d.delta,
+                      sequence_number: d.sequence_number
                     });
                     // Bridge: also emit a reasoning segment delta update for unified frontend handling
                     try {
                       const reasoningSeg = {
                         type: 'reasoning' as const,
-                        id: extendedEvent.data.item_id,
-                        output_index: extendedEvent.data.output_index ?? 0,
-                        sequence_number: extendedEvent.data.sequence_number ?? 0,
+                        id: d.item_id,
+                        output_index: d.output_index ?? 0,
+                        sequence_number: d.sequence_number ?? 0,
                         parts: [{
-                          summary_index: extendedEvent.data.summary_index,
+                          summary_index: d.summary_index,
                           type: 'summary_text' as const,
-                          text: typeof extendedEvent.data.delta === 'string' ? extendedEvent.data.delta : (extendedEvent.data.delta?.text || ''),
-                          sequence_number: extendedEvent.data.sequence_number ?? 0,
+                          text: typeof d.delta === 'string' ? d.delta : (d.delta?.text || ''),
+                          sequence_number: d.sequence_number ?? 0,
                           is_complete: false,
                           created_at: Date.now()
                         }]
                       };
                       sendSSE(streamingFormat.formatSSE(streamingFormat.segmentUpdate(reasoningSeg as any, 0, currentEvent?.id)));
                     } catch {}
+                    // Update currentEvent so final message contains up-to-date reasoning
+                    if (currentEvent && typeof d.summary_index === 'number') {
+                      const deltaText = typeof d.delta === 'string' ? d.delta : (d.delta?.text || '');
+                      upsertReasoningPart(currentEvent, d.item_id as string, d.summary_index as number, deltaText, { sequence_number: d.sequence_number });
+                    }
                   }
-                  break;
+                  break; }
                   
-                case 'reasoning_summary_part_done':
-                  // Handle reasoning part done events
-                  if (extendedEvent.data) {
-                    try {
-                      if (process.env.STREAM_DEBUG === 'true') {
-                        console.debug('[Chat API][reasoning_part_done]', JSON.stringify(extendedEvent.data, null, 2));
-                      }
-                    } catch {}
+                case 'reasoning_summary_part_done': {
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_done]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_part_done',
-                      item_id: extendedEvent.data.item_id,
-                      summary_index: extendedEvent.data.summary_index,
-                      sequence_number: extendedEvent.data.sequence_number
+                      item_id: d.item_id,
+                      summary_index: d.summary_index,
+                      sequence_number: d.sequence_number
                     });
+                    if (currentEvent && typeof d.summary_index === 'number') {
+                      upsertReasoningPart(currentEvent, d.item_id as string, d.summary_index as number, undefined, { sequence_number: d.sequence_number, complete: true });
+                    }
                   }
-                  break;
+                  break; }
                   
-                case 'reasoning_complete':
-                  // Handle reasoning complete events
-                  if (extendedEvent.data) {
-                    try {
-                      if (process.env.STREAM_DEBUG === 'true') {
-                        console.debug('[Chat API][reasoning_complete]', JSON.stringify(extendedEvent.data, null, 2));
-                      }
-                    } catch {}
+                case 'reasoning_complete': {
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
+                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_complete]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_complete',
-                      item_id: extendedEvent.data.item_id,
-                      parts: extendedEvent.data.parts,
-                      combined_text: extendedEvent.data.combined_text,
-                      output_index: extendedEvent.data.output_index,
-                      sequence_number: extendedEvent.data.sequence_number
+                      item_id: d.item_id,
+                      parts: d.parts,
+                      combined_text: d.combined_text,
+                      output_index: d.output_index,
+                      sequence_number: d.sequence_number
                     });
                   }
-                  break;
+                  break; }
                   
                 case 'mcp_tool_start':
                   // Handle MCP tool start events
@@ -976,72 +1041,65 @@ export async function POST(request: NextRequest) {
                   break;
                   
                 case 'mcp_tool_complete':
-                  // Handle MCP tool complete events
+                  // Handle MCP tool complete events (embed results into the existing tool_call segment)
                   if (extendedEvent.data) {
-                    try {
-                      const { createToolResultEvent } = await import('@budchat/events');
-                      const trEvent = createToolResultEvent(
-                        extendedEvent.data.tool_id,
-                        extendedEvent.data.output || { content: '' }
-                      ) as Event;
-                      // Record in EventLog so unresolved detection closes
-                      eventLog.addEvent(trEvent);
-                      allNewEvents.push(trEvent);
-                    } catch {}
-                    // First emit as tool_result for consistent frontend handling
-                    send({
-                      type: 'tool_result',
-                      tool_id: extendedEvent.data.tool_id,
-                      output: extendedEvent.data.output,
-                      error: extendedEvent.data.error
-                    });
-                    
-                    // Emit tool_complete to match the pattern used elsewhere
-                    send({
-                      type: 'tool_complete',
-                      tool_id: extendedEvent.data.tool_id,
-                      content: extendedEvent.data.error ? '❌ Tool failed' : '✅ Tool completed'
-                    });
-                    
-                    // Then emit the mcp_tool_complete event for any specific handling
-                    send({
-                      type: 'mcp_tool_complete',
-                      tool_id: extendedEvent.data.tool_id,
-                      output: extendedEvent.data.output,
-                      error: extendedEvent.data.error,
-                      sequence_number: extendedEvent.data.sequence_number,
-                      output_index: extendedEvent.data.output_index
-                    });
-                    // Persist timing by marking the originating assistant segment completed
-                    markToolCompletedInDB(String(extendedEvent.data.tool_id)).catch(() => {});
+                    const toolId = String(extendedEvent.data.tool_id);
+                    const out = extendedEvent.data.output;
+                    const err = extendedEvent.data.error;
+                    // Update the current assistant event's tool_call segment
+                    if (currentEvent) {
+                      try {
+                        const idx = currentEvent.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === toolId);
+                        if (idx >= 0) {
+                          const seg = currentEvent.segments[idx] as any;
+                          seg.output = out ?? seg.output ?? {};
+                          if (err != null) seg.error = String(err);
+                          seg.completed_at = seg.completed_at || Date.now();
+                          currentEvent.segments[idx] = seg;
+                        }
+                      } catch {}
+                    }
+                    // Emit tool_result + tool_complete for the front-end stream
+                    send({ type: 'tool_result', tool_id: toolId, output: out, error: err });
+                    send({ type: 'tool_complete', tool_id: toolId, content: err ? '❌ Tool failed' : '✅ Tool completed' });
+                    // Also forward the mcp_tool_complete event
+                    send({ type: 'mcp_tool_complete', tool_id: toolId, output: out, error: err, sequence_number: extendedEvent.data.sequence_number, output_index: extendedEvent.data.output_index });
+                    // Persist completion timing for analytics (best-effort)
+                    markToolCompletedInDB(toolId).catch(() => {});
                   }
                   break;
                   
-                case 'progress_update':
-                  // Handle progress update events
-                  if (extendedEvent.data) {
+                case 'progress_update': {
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
                     send({
                       type: 'progress_update',
-                      activity: extendedEvent.data.activity,
-                      server_label: extendedEvent.data.server_label,
-                      sequence_number: extendedEvent.data.sequence_number
+                      activity: d.activity,
+                      server_label: d.server_label,
+                      sequence_number: d.sequence_number
                     });
                   }
-                  break;
+                  break; }
                   
                 case 'web_search_call_in_progress':
                 case 'web_search_call_searching':
                 case 'web_search_call_completed':
                   
-                case 'progress_hide':
-                  // Handle progress hide events
-                  if (extendedEvent.data) {
+                case 'progress_hide': {
+                  const d = extendedEvent.data ?? extendedEvent;
+                  if (d) {
                     send({
                       type: 'progress_hide',
-                      sequence_number: extendedEvent.data.sequence_number
+                      sequence_number: d.sequence_number
                     });
                   }
-                  break;
+                  break; }
+
+                case 'mcp_list_tools': {
+                  // Forward MCP list tools info (optional informational UI)
+                  const d = extendedEvent.data ?? extendedEvent;
+                  send({ type: 'mcp_list_tools', tools: d.tools, server_label: d.server_label, sequence_number: d.sequence_number });
+                  break; }
                   
                 case 'error':
                   throw new Error(extendedEvent.data?.error || 'Stream error');
@@ -1051,11 +1109,34 @@ export async function POST(request: NextRequest) {
 
                   // 1) Persist any pending events first
                   if (currentEvent) {
+                    // Deduplicate tool_call segments by id while preserving first occurrence order
+                    try {
+                      const seen = new Map<string, number>();
+                      const merged: typeof currentEvent.segments = [];
+                      for (const seg of currentEvent.segments) {
+                        if ((seg as any).type === 'tool_call') {
+                          const id = String((seg as any).id);
+                          if (seen.has(id)) {
+                            const idx = seen.get(id)!;
+                            const prev: any = merged[idx];
+                            merged[idx] = { ...prev, ...(seg as any), args: ((): any => {
+                              const a = (seg as any).args ?? prev.args;
+                              if (typeof a === 'string') { try { return JSON.parse(a); } catch { return a; } }
+                              return a ?? {};
+                            })() } as any;
+                            continue;
+                          } else {
+                            seen.set(id, merged.length);
+                          }
+                        }
+                        merged.push(seg as any);
+                      }
+                      currentEvent.segments = merged;
+                    } catch {}
                     console.log('🔚 [Chat API] Saving events for existing conversation...');
                     const saveStartTime = Date.now();
                     try {
                       currentOrderKey = await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
-                      console.log('🔚 [Chat API] Existing conversation events saved in', Date.now() - saveStartTime, 'ms');
                       // For brand new conversations, kick off title generation after the first assistant event is saved
                       if (isNewConversation) {
                         generateConversationTitleInBackground(
@@ -1132,6 +1213,36 @@ export async function POST(request: NextRequest) {
               console.log('⚠️ [Chat API] Provider stream ended without done; fallback finalize', { hasCurrentEvent: !!currentEvent });
               try {
                 if (currentEvent) {
+                  // Deduplicate tool_call segments before fallback save
+                  try {
+                    const seen = new Map<string, number>();
+                    const merged: typeof currentEvent.segments = [];
+                    for (const seg of currentEvent.segments) {
+                      if ((seg as any).type === 'tool_call') {
+                        const id = String((seg as any).id);
+                        if (seen.has(id)) {
+                          const idx = seen.get(id)!;
+                          const prev: any = merged[idx];
+                          merged[idx] = { ...prev, ...(seg as any), args: ((): any => {
+                            const a = (seg as any).args ?? prev.args;
+                            if (typeof a === 'string') { try { return JSON.parse(a); } catch { return a; } }
+                            return a ?? {};
+                          })() } as any;
+                          continue;
+                        } else {
+                          seen.set(id, merged.length);
+                        }
+                      }
+                      merged.push(seg as any);
+                    }
+                    currentEvent.segments = merged;
+                  } catch {}
+                  // Persist the final assistant event before emitting to client
+                  try {
+                    currentOrderKey = await saveEvents(supabase, [currentEvent], conversationId, currentOrderKey);
+                  } catch (e) {
+                    console.warn('⚠️ [Chat API] Failed to save currentEvent in fallback finalize:', e);
+                  }
                   // Emit final event
                   send({ type: 'message_final', event: currentEvent });
                 }

@@ -7,24 +7,40 @@ export async function* sseIterator(response: Response): AsyncGenerator<any> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error('No response body');
   const decoder = new TextDecoder();
+  let buffer = '';
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.slice(6);
-          if (payload === '' || payload === '[DONE]') continue;
+      buffer += decoder.decode(value, { stream: true });
+      // Normalize newlines and split into lines
+      const parts = buffer.split(/\r?\n/);
+      // Keep the last partial line in the buffer (no trailing newline)
+      buffer = parts.pop() || '';
+      for (const line of parts) {
+        if (!line) continue;
+        if (line.startsWith('data:')) {
+          // Support both 'data: ' and 'data:' prefixes
+          const payload = line.startsWith('data: ')
+            ? line.slice(6)
+            : line.slice(5);
+          if (!payload || payload === '[DONE]') continue;
           try {
             const data = JSON.parse(payload);
             yield data;
           } catch {
-            // Skip malformed JSON lines but keep stream alive
-            continue;
+            // Ignore malformed JSON; next chunks may contain valid events
           }
         }
+      }
+    }
+    // Flush any final buffered complete line (unlikely, but safe)
+    if (buffer && buffer.startsWith('data:')) {
+      const payload = buffer.startsWith('data: ')
+        ? buffer.slice(6)
+        : buffer.slice(5);
+      if (payload && payload !== '[DONE]') {
+        try { yield JSON.parse(payload); } catch {}
       }
     }
   } finally {
@@ -47,27 +63,9 @@ export interface StreamHandlers {
  * and legacy 'done' events.
  */
 export async function processSSE(response: Response, handlers: StreamHandlers): Promise<void> {
-  const isDebug = (() => {
-    try {
-      // Prefer window flags in browser
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w: any = (typeof window !== 'undefined') ? window : undefined;
-      const winFlag = !!(w && (w.__STREAM_DEBUG || w.__RESPONSES_DEBUG));
-      const ls = typeof window !== 'undefined' ? (window.localStorage?.getItem('STREAM_DEBUG') === '1' || window.localStorage?.getItem('RESPONSES_DEBUG') === '1') : false;
-      const env = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') : false;
-      return winFlag || ls || env;
-    } catch { return false; }
-  })();
-
   for await (const data of sseIterator(response)) {
     try { await handlers.onAny?.(data); } catch {}
     const t = (data && data.type) || 'unknown';
-    if (isDebug) {
-      try {
-        // eslint-disable-next-line no-console
-        console.debug('[SSE][client] event', { type: t, keys: Object.keys(data || {}) });
-      } catch {}
-    }
     switch (t) {
       case 'event_start': {
         const ev = data?.data?.event ?? data.event;

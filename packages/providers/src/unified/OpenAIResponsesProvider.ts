@@ -13,7 +13,8 @@ import {
   Segment,
   generateEventId,
   ToolCallId,
-  generateToolCallId
+  generateToolCallId,
+  sortSegmentsBySequence
 } from '@budchat/events';
 import { processResponsesAPIStream } from './utils/openaiResponsesUtils';
 
@@ -165,28 +166,40 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'response.in_progress':
             break;
           case 'response.completed':
-            if (RESP_DEBUG) console.log('[Responses][provider] response.completed → done');
             streamCompleted = true; yield { type: 'done' } as any; return;
           case 'message_start':
             currentMessageId = streamEvent.item_id as string; break;
           case 'text_start': {
             if (RESP_DEBUG) console.log('[Responses][provider] text_start', { item_id: (streamEvent as any).item_id });
-            const textSegmentWithId: Segment = { type: 'text', id: streamEvent.item_id as string, text: (streamEvent as any).content || '', sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index } as any;
+            // Initialize a text segment for this message id but avoid emitting an initial text chunk.
+            // Some streams repeat the initial content as the first delta; emitting here can duplicate tokens.
+            const textSegmentWithId: Segment = { type: 'text', id: streamEvent.item_id as string, text: '', sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index } as any;
             currentEvent.segments.push(textSegmentWithId);
-            if ((streamEvent as any).content) yield { type: 'segment', data: { segment: { type: 'text', text: (streamEvent as any).content }, segmentIndex: currentEvent.segments.length - 1 } } as any;
             break; }
           case 'token': {
             if ((streamEvent as any).content && typeof (streamEvent as any).content === 'string') {
               let textSegment = currentEvent.segments.find(s => s.type === 'text') as any;
               if (!textSegment) { textSegment = { type: 'text', text: '', id: currentMessageId }; currentEvent.segments.push(textSegment); }
               textSegment.text += (streamEvent as any).content;
-              yield { type: 'segment', data: { segment: { type: 'text', text: (streamEvent as any).content }, segmentIndex: currentEvent.segments.indexOf(textSegment) } } as any;
+              yield { type: 'segment', data: { segment: { type: 'text', text: (streamEvent as any).content, sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index }, segmentIndex: currentEvent.segments.indexOf(textSegment) } } as any;
             }
             break; }
           case 'reasoning_start': {
             if (RESP_DEBUG) console.log('[Responses][provider] reasoning_start', { item_id: (streamEvent as any).item_id });
             const reasoningSegment = { type: 'reasoning', id: (streamEvent as any).item_id, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number, parts: [] as ReasoningPart[], streaming: true } as any;
             currentEvent.segments.unshift(reasoningSegment as any);
+            // Also yield a reasoning_start signal so API can forward to client
+            yield { type: 'reasoning_start', data: { item_id: (streamEvent as any).item_id, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number } } as any;
+            break; }
+          case 'reasoning_summary_part_added': {
+            // Pass through for API to bridge to segment + side-channel
+            yield { type: 'reasoning_summary_part_added', data: {
+              item_id: (streamEvent as any).item_id,
+              summary_index: (streamEvent as any).summary_index,
+              part: (streamEvent as any).part,
+              output_index: (streamEvent as any).output_index,
+              sequence_number: (streamEvent as any).sequence_number,
+            } } as any;
             break; }
           case 'reasoning_summary_text_delta': {
             const rs = currentEvent.segments.find(s => s.type === 'reasoning') as any;
@@ -195,6 +208,14 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               if (!rs.parts[partIndex]) rs.parts[partIndex] = { summary_index: partIndex, type: 'summary_text', text: '', sequence_number: (streamEvent as any).sequence_number, is_complete: false, created_at: Date.now() } as ReasoningPart;
               rs.parts[partIndex].text += ((streamEvent as any).delta?.text || (streamEvent as any).text || '');
             }
+            // Also yield a delta event so API can forward a reasoning segment update
+            yield { type: 'reasoning_summary_text_delta', data: {
+              item_id: (streamEvent as any).item_id,
+              summary_index: (streamEvent as any).summary_index ?? 0,
+              delta: (streamEvent as any).delta,
+              output_index: (streamEvent as any).output_index,
+              sequence_number: (streamEvent as any).sequence_number,
+            } } as any;
             break; }
           case 'reasoning_summary_text_done': {
             const rs = currentEvent.segments.find(s => s.type === 'reasoning') as any;
@@ -203,6 +224,13 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
               if (!rs.parts[partIndex]) rs.parts[partIndex] = { summary_index: partIndex, type: 'summary_text', text: '', sequence_number: (streamEvent as any).sequence_number, is_complete: true, created_at: Date.now() } as ReasoningPart;
               rs.parts[partIndex].is_complete = true;
             }
+            // Optional: surface done as part_done for UI completeness
+            yield { type: 'reasoning_summary_part_done', data: {
+              item_id: (streamEvent as any).item_id,
+              summary_index: (streamEvent as any).summary_index ?? 0,
+              output_index: (streamEvent as any).output_index,
+              sequence_number: (streamEvent as any).sequence_number,
+            } } as any;
             break; }
           case 'mcp_tool_start': {
             if (RESP_DEBUG) console.log('[Responses][provider] mcp_tool_start', { tool_id: (streamEvent as any).tool_id, name: (streamEvent as any).tool_name, server_label: (streamEvent as any).server_label });
@@ -224,10 +252,63 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
           case 'mcp_tool_finalized': {
             const toolId = (streamEvent as any).tool_id as string;
             const segIndex = currentEvent.segments.findIndex(s => s.type === 'tool_call' && (s as any).id === toolId);
-            if (segIndex >= 0) { const seg = currentEvent.segments[segIndex] as any; yield { type: 'segment', data: { segment: seg, segmentIndex: segIndex } } as any; }
+            if (segIndex >= 0) {
+              const seg = currentEvent.segments[segIndex] as any;
+              // If finalized carries arguments, parse and attach for correctness
+              if ((streamEvent as any).arguments) {
+                try { seg.args = JSON.parse(String((streamEvent as any).arguments)); } catch { seg.args = (streamEvent as any).arguments; }
+              }
+              yield { type: 'segment', data: { segment: seg, segmentIndex: segIndex } } as any;
+            }
             break; }
           case 'mcp_tool_complete': {
             // handled by server when tool result is returned; no-op here
+            break; }
+          case 'mcp_list_tools': {
+            // Forward tool listing to API; some Responses streams surface tools on output_item.done instead
+            yield { type: 'mcp_list_tools', data: { tools: (streamEvent as any).tools, server_label: (streamEvent as any).server_label, sequence_number: (streamEvent as any).sequence_number } } as any;
+            break; }
+          case 'progress_update': {
+            yield { type: 'progress_update', data: { activity: (streamEvent as any).activity, server_label: (streamEvent as any).server_label, sequence_number: (streamEvent as any).sequence_number } } as any;
+            break; }
+          case 'progress_hide': {
+            yield { type: 'progress_hide', data: { sequence_number: (streamEvent as any).sequence_number } } as any;
+            break; }
+          case 'response.output_item.added': {
+            // Start of an MCP call item → create tool_call segment and emit start
+            const item = (streamEvent as any).item;
+            if (item && item.type === 'mcp_call') {
+              const toolId = item.id as string;
+              const name = item.name as string | undefined;
+              const serverLabel = item.server_label as string | undefined;
+              const segment: Segment = { type: 'tool_call', id: (toolId || generateToolCallId()) as ToolCallId, name: name || 'mcp_tool', args: {}, server_type: 'remote_mcp', server_label: serverLabel, display_name: name, sequence_number: (streamEvent as any).sequence_number, output_index: (streamEvent as any).output_index } as any;
+              currentEvent.segments.push(segment);
+              yield { type: 'segment', data: { segment, segmentIndex: currentEvent.segments.length - 1 } } as any;
+            } else if (item && item.type === 'reasoning') {
+              // Ensure an empty reasoning segment is present even if summary is empty
+              const rsId = item.id as string;
+              const reasoningSegment: any = { type: 'reasoning', id: rsId, output_index: (streamEvent as any).output_index ?? 0, sequence_number: (streamEvent as any).sequence_number ?? 0, parts: [], streaming: true, started_at: Date.now() };
+              currentEvent.segments.push(reasoningSegment as any);
+              yield { type: 'segment', data: { segment: reasoningSegment, segmentIndex: currentEvent.segments.length - 1 } } as any;
+              yield { type: 'reasoning_start', data: { item_id: rsId, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number } } as any;
+            }
+            break; }
+          case 'response.output_item.done': {
+            // Output for an MCP call arrives here → emit completion with output
+            const item = (streamEvent as any).item;
+            if (item && item.type === 'mcp_list_tools') {
+              yield { type: 'mcp_list_tools', data: { tools: item.tools, server_label: item.server_label, sequence_number: (streamEvent as any).sequence_number } } as any;
+            } else if (item && item.type === 'mcp_call') {
+              const toolId = item.id as string;
+              const output = item.output;
+              yield { type: 'mcp_tool_complete', data: { tool_id: toolId, output, error: item.error, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number } } as any;
+            } else if (item && item.type === 'reasoning') {
+              const rsId = item.id as string;
+              const parts = Array.isArray(item.summary)
+                ? (item.summary as Array<{ type: string; text: string }>).map((p, idx) => ({ summary_index: idx, type: 'summary_text' as const, text: String(p?.text || ''), sequence_number: (streamEvent as any).sequence_number ?? 0, is_complete: true, created_at: Date.now() }))
+                : [];
+              yield { type: 'reasoning_complete', data: { item_id: rsId, parts, combined_text: undefined, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number } } as any;
+            }
             break; }
           default:
             // pass through unhandled items for debugging/logging upstream
@@ -244,84 +325,70 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   
   private convertEventsToInputItems(events: Event[], mcpConfig?: { remote_servers?: Array<{ server_label: string }> }): ResponsesInputItem[] {
     const items: ResponsesInputItem[] = [];
-    const toolMeta: Record<string, { server_label?: string; name?: string }> = {};
-    const storedReasoningSegments: Array<{ id: string }> = [];
-    const genMsgId = () => `msg_${crypto.randomUUID().replace(/-/g, '')}`;
+    let messageIndex = 0;
+    const genMsgId = () => `msg_${messageIndex++}`;
+    const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
+      ? mcpConfig.remote_servers[0].server_label
+      : undefined;
+
     for (const event of events) {
-      if (event.role === 'system') {
-        items.push({ id: genMsgId(), type: 'message', role: 'system', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
+      if (event.role === 'system' || event.role === 'user') {
+        const texts = (event.segments || []).filter(s => s.type === 'text') as Array<{ type: 'text'; text: string }>;
+        items.push({
+          id: genMsgId(),
+          type: 'message',
+          role: event.role,
+          content: texts.map(t => ({ type: 'input_text', text: t.text || '' }))
+        });
         continue;
       }
-      if (event.role === 'user') {
-        items.push({ id: genMsgId(), type: 'message', role: 'user', content: [{ type: 'input_text', text: (event.segments.find(s => s.type === 'text') as any)?.text || '' }] });
-        continue;
-      }
+
       if (event.role === 'assistant') {
-        // Always use a proper message id for assistant text
-        const messageId = genMsgId();
-        for (const segment of event.segments) {
+        // Flatten assistant segments in original order — preserve reasoning → tool → text
+        for (const segment of event.segments || []) {
           if (segment.type === 'reasoning') {
-            storedReasoningSegments.push({ id: (segment as any).id });
-            let summary:
-              | Array<{ type: 'summary_text'; text: string }>
-              | undefined;
-            const combined = (segment as any).combined_text as string | undefined;
-            if (typeof combined === 'string' && combined.length > 0) {
-              summary = [{ type: 'summary_text', text: combined }];
-            } else if (Array.isArray((segment as any).parts) && (segment as any).parts.length > 0) {
-              summary = (segment as any).parts.map((p: any) => ({ type: 'summary_text' as const, text: String(p?.text || '') }));
-            }
+            const parts = (segment as any).parts as Array<{ type: 'summary_text'; text: string }> | undefined;
+            const summary = Array.isArray(parts)
+              ? parts.map(p => ({ type: 'summary_text' as const, text: String(p?.text || '') }))
+              : [];
             items.push({ id: (segment as any).id, type: 'reasoning', summary });
           } else if (segment.type === 'text') {
-            items.push({ id: messageId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: (segment as any).text }] });
+            const msgId = (segment as any).id || genMsgId();
+            items.push({ id: msgId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: (segment as any).text || '' }] });
           } else if (segment.type === 'tool_call') {
-            // Ensure a valid server_label for remote MCP calls; default to first configured remote server if missing
-            const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
-              ? mcpConfig.remote_servers[0].server_label
-              : undefined;
             const mcpCall: any = {
               id: (segment as any).id,
               type: 'mcp_call',
-              name: (segment as any).name || 'mcp_tool',
+              name: (segment as any).name,
               arguments: JSON.stringify((segment as any).args || {}),
               server_label: (segment as any).server_label || defaultServer
             };
-            // Store tool meta for later tool_result mapping
-            toolMeta[String((segment as any).id)] = { server_label: mcpCall.server_label, name: mcpCall.name };
-            if ((segment as any).output !== undefined) mcpCall.output = typeof (segment as any).output === 'string' ? (segment as any).output : JSON.stringify((segment as any).output);
-            if ((segment as any).error) mcpCall.error = (segment as any).error;
-            if (mcpCall.server_label) {
-              items.push(mcpCall);
-            } else {
-              // Skip invalid MCP call without a resolvable server label
-              // This maintains compatibility when remote servers are not configured
+            if ((segment as any).output !== undefined) {
+              mcpCall.output = typeof (segment as any).output === 'string' ? (segment as any).output : JSON.stringify((segment as any).output);
             }
+            if ((segment as any).error) {
+              mcpCall.error = (segment as any).error;
+            }
+            items.push(mcpCall);
           }
         }
-      } else if (event.role === 'tool') {
-        const toolResult = event.segments[0] as any;
-        if (toolResult.type === 'tool_result') {
-          const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
-            ? mcpConfig.remote_servers[0].server_label
-            : undefined;
-          const meta = toolMeta[String(toolResult.id)] || {};
-          const server_label = meta.server_label || defaultServer;
-          if (server_label) {
-            const name = meta.name || 'mcp_tool';
-            items.push({
-              id: toolResult.id,
-              type: 'mcp_call',
-              name,
-              server_label,
-              output: typeof toolResult.output === 'string' ? toolResult.output : JSON.stringify(toolResult.output),
-              error: toolResult.error
-            } as any);
-          } else {
-            // Skip if we cannot resolve a valid server_label
-          }
+        continue;
+      }
+
+      if (event.role === 'tool') {
+        const seg = event.segments?.[0] as any;
+        if (seg && seg.type === 'tool_result') {
+          items.push({
+            id: seg.id,
+            type: 'mcp_call',
+            output: typeof seg.output === 'string' ? seg.output : JSON.stringify(seg.output || {}),
+            error: seg.error
+          } as any);
         }
+        continue;
       }
     }
+
     return items;
   }
   

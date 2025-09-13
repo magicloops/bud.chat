@@ -60,6 +60,10 @@ Keep path aliases in app pointing to packages (or use relative imports initially
   - Implemented `@budchat/providers` with unified provider implementations (OpenAI Chat, OpenAI Responses, Anthropic, Base, Factory).
   - Migrated Responses utils into the package and removed legacy copy; legacy provider now imports from the package.
   - Updated API routes to use `@budchat/providers`.
+  - Stabilized Responses streaming and reconstruction:
+    - Preserve reasoning segments (including empty summaries) and embed remote MCP tool outputs into the originating `tool_call` segment.
+    - Normalize MCP event IDs and start/finalize/complete mapping; eliminate duplicate `tool_start` events.
+    - Restore faithful event→input conversion (flattened order) with gated adjacency validation/logging for follow‑ups.
 
 ## Package Responsibilities and APIs
 
@@ -199,11 +203,21 @@ This plan modularizes along natural boundaries already present in the repo, keep
   - Implemented `@budchat/data` with conversation/event repository helpers:
     - `loadConversationEvents`, `saveEvents`, `createConversation`, `getPostgrestErrorCode`.
   - Updated `app/api/chat/route.ts` to import and use these helpers; removed inline implementations.
+  - Added save‑time ordering diagnostics and fallback persistence to avoid dropped events when provider omits terminal signals.
   - Next: move additional DB helpers (latest event, update segments, tool timing persistence) and update other routes accordingly.
 
 - Phase 5 — Streaming: IN PROGRESS
   - Implemented `@budchat/streaming` and moved streaming primitives:
     - `eventBuilderRegistry`, `ephemeralOverlayRegistry`, `rendering`, and `EventBuilder`.
-  - Added `sseIterator` (Response → SSE JSON) to decouple parsing from app.
+  - Added `sseIterator/processSSE` (Response → SSE JSON) and hardened line buffering.
   - Updated UI imports to use `@budchat/streaming`.
-  - FrontendEventHandler remains in app for now (store-coupled), now delegates parsing to `sseIterator` and uses package `EventBuilder`.
+  - FrontendEventHandler remains in app for now (store‑coupled); delegates parsing to `processSSE` and uses package `EventBuilder`.
+  - Reduced client log noise; added throttled, gated debug logs for reasoning/tool segments.
+
+- Phase 6 — MCP: PENDING
+  - Extract MCP client/config + execution into `@budchat/mcp` (single `executeToolCalls()` surface).
+  - Route will depend on package; providers continue to emit normalized MCP events.
+
+- Phase 7 — Cleanups: PENDING
+  - Remove remaining legacy lib re‑exports once all imports point to packages.
+  - Add package READMEs and minimal usage examples.

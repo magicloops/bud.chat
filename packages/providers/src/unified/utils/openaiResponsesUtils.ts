@@ -78,27 +78,29 @@ export function transformOpenAIReasoningEvent(openaiEvent: unknown): any | any[]
     case 'response.mcp_list_tools.failed':
       return { type: 'error', error: String((event as {error?: unknown}).error || 'MCP list tools failed') };
     case 'response.mcp_call.in_progress':
+      // Informational; do not emit tool_start here to avoid duplicates. Route will emit start when tool_call segment arrives.
       return { type: 'mcp_call_in_progress', item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.mcp_call.completed':
-      return { type: 'mcp_call_completed', item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      // Normalize to mcp_tool_complete; output (if any) is provided in output_item.done
+      return { type: 'mcp_tool_complete', tool_id: (event as any).item_id, item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.mcp_call.failed':
       return { type: 'mcp_call_failed', item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.mcp_call_arguments.delta':
-      return { type: 'mcp_tool_arguments_delta', tool_id: event.tool_id as string, arguments: event.delta as string, item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'mcp_tool_arguments_delta', tool_id: (event as any).tool_id || (event as any).item_id, arguments: (event as any).delta as string, item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.mcp_call_arguments.done':
-      return { type: 'mcp_tool_finalized', tool_id: event.tool_id as string, arguments: event.arguments as string, item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'mcp_tool_finalized', tool_id: (event as any).tool_id || (event as any).item_id, arguments: (event as any).arguments as string, item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.reasoning_summary_part.added':
-      return { type: 'reasoning_summary_part_added', item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number, part: (event as any).part };
+      return { type: 'reasoning_summary_part_added', item_id: event.item_id as string, output_index: event.output_index as number, summary_index: (event as any).summary_index as number, sequence_number: event.sequence_number as number, part: (event as any).part };
     case 'response.reasoning_summary_part.done':
-      return { type: 'reasoning_summary_part_done', item_id: event.item_id as string, output_index: event.output_index as number, sequence_number: event.sequence_number as number, part: (event as any).part };
+      return { type: 'reasoning_summary_part_done', item_id: event.item_id as string, output_index: event.output_index as number, summary_index: (event as any).summary_index as number, sequence_number: event.sequence_number as number, part: (event as any).part };
     case 'response.reasoning_summary_text.delta':
-      return { type: 'reasoning_summary_text_delta', item_id: event.item_id as string, delta: (event as any).delta, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'reasoning_summary_text_delta', item_id: event.item_id as string, summary_index: (event as any).summary_index as number, delta: (event as any).delta, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.reasoning_summary_text.done':
-      return { type: 'reasoning_summary_text_done', item_id: event.item_id as string, text: (event as any).text, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'reasoning_summary_text_done', item_id: event.item_id as string, summary_index: (event as any).summary_index as number, text: (event as any).text, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.reasoning_summary.delta':
-      return { type: 'reasoning_summary_delta', item_id: event.item_id as string, delta: (event as any).delta, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'reasoning_summary_delta', item_id: event.item_id as string, summary_index: (event as any).summary_index as number, delta: (event as any).delta, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.reasoning_summary.done':
-      return { type: 'reasoning_summary_done', item_id: event.item_id as string, summary: (event as any).summary, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
+      return { type: 'reasoning_summary_done', item_id: event.item_id as string, summary_index: (event as any).summary_index as number, summary: (event as any).summary, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.output_item.added':
       return { type: 'response.output_item.added', item: (event as any).item, output_index: event.output_index as number, sequence_number: event.sequence_number as number };
     case 'response.output_item.done':
