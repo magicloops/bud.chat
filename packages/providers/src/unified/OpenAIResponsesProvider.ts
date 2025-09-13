@@ -308,6 +308,29 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
                 ? (item.summary as Array<{ type: string; text: string }>).map((p, idx) => ({ summary_index: idx, type: 'summary_text' as const, text: String(p?.text || ''), sequence_number: (streamEvent as any).sequence_number ?? 0, is_complete: true, created_at: Date.now() }))
                 : [];
               yield { type: 'reasoning_complete', data: { item_id: rsId, parts, combined_text: undefined, output_index: (streamEvent as any).output_index, sequence_number: (streamEvent as any).sequence_number } } as any;
+            } else if (item && item.type === 'message') {
+              // Finalized assistant message with complete text content. Overwrite the text segment
+              // to ensure persistence uses the authoritative final text from the provider.
+              try {
+                const msgId = String(item.id || '');
+                const parts = Array.isArray(item.content) ? item.content : [];
+                const finalText = parts
+                  .filter((p: any) => p && p.type === 'output_text' && typeof p.text === 'string')
+                  .map((p: any) => p.text as string)
+                  .join('');
+                if (finalText && typeof finalText === 'string') {
+                  let textSeg = currentEvent.segments.find(s => s.type === 'text') as any;
+                  if (!textSeg) {
+                    textSeg = { type: 'text', id: msgId, text: '' } as any;
+                    currentEvent.segments.push(textSeg);
+                  }
+                  const beforeLen = (textSeg.text || '').length;
+                  textSeg.text = finalText;
+                  if (process.env.RESPONSES_DEBUG === 'true' || process.env.STREAM_DEBUG === 'true') {
+                    try { console.debug('[Responses][provider] overwrite_final_text', { beforeLen, afterLen: finalText.length }); } catch {}
+                  }
+                }
+              } catch {}
             }
             break; }
           default:

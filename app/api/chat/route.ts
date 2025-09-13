@@ -419,6 +419,9 @@ export async function POST(request: NextRequest) {
     
     // Create provider and streaming format
     const provider = ProviderFactory.create(model);
+    // Identify if we're using the OpenAI Responses provider to avoid double-assembling text
+    // The Responses provider already mutates currentEvent with token deltas internally.
+    const isResponsesProvider = (provider as any)?.name === 'openai-responses';
     const streamingFormat = new StreamingFormat();
     
     // Create streaming response
@@ -430,6 +433,12 @@ export async function POST(request: NextRequest) {
           let isClosed = false;
           // Track last appended text sequence to avoid duplicate appends at same position
           let lastTextSeq: number | null = null;
+          // Debug: gated logging helpers and counters for assistant text assembly
+          const isTextDbg = () => process.env.STREAM_DEBUG === 'true' || process.env.RESPONSES_DEBUG === 'true';
+          const dbgText = (...args: unknown[]) => { if (isTextDbg()) { try { console.debug('[Chat API][text]', ...args); } catch {} } };
+          let textRecvBySeq: Map<number, number> = new Map();
+          let textRecvTotal = 0;
+          let textAppendsMade = 0;
           // Track tool timing across local execution phases
           const toolStartTimes = new Map<string, { eventId: string; started_at: number }>();
           const recordToolStart = (toolId: string, eventId: string, startedAt?: number) => {
@@ -737,8 +746,16 @@ export async function POST(request: NextRequest) {
                       }
                     }
                     currentEvent = extendedEvent.data.event;
-                    // Reset text sequence guard for new assistant event
+                    // Reset text sequence guard and counters for new assistant event
                     lastTextSeq = null;
+                    textRecvBySeq = new Map();
+                    textRecvTotal = 0;
+                    textAppendsMade = 0;
+                    try {
+                      const existing = currentEvent?.segments?.find((s: any) => s.type === 'text') as any;
+                      const existingLen = existing ? (existing.text || '').length : 0;
+                      dbgText('start_turn', { eventId: currentEvent?.id, existingLen });
+                    } catch {}
                     if (currentEvent) {
                       eventLog.addEvent(currentEvent);
                       allNewEvents.push(currentEvent);
@@ -783,18 +800,40 @@ export async function POST(request: NextRequest) {
                     const segment = extendedEvent.data.segment;
                     
                     if (segment.type === 'text' && segment.text) {
-                      // Keep currentEvent text in sync for final commit, avoiding duplicate deltas
-                    if (currentEvent) {
-                      const seq = (extendedEvent.data?.segment?.sequence_number as number | undefined) ?? undefined;
-                      const delta = String(segment.text);
-                      const shouldAppend = (typeof seq === 'number') ? (lastTextSeq == null || seq > lastTextSeq) : true;
-                      if (shouldAppend) {
+                      // Log receipt before any append decision
+                      try {
+                        const seq0 = (extendedEvent.data?.segment?.sequence_number as number | undefined);
+                        const existing0 = currentEvent?.segments?.find((s: any) => s.type === 'text') as any;
+                        const existingLen0 = existing0 ? (existing0.text || '').length : 0;
+                        if (typeof seq0 === 'number') {
+                          const prev = textRecvBySeq.get(seq0) || 0;
+                          textRecvBySeq.set(seq0, prev + 1);
+                          if (prev >= 1) dbgText('dup_recv', { seq: seq0 });
+                        }
+                        textRecvTotal += 1;
+                        dbgText('recv', { seq: seq0, deltaLen: String(segment.text).length, existingLen: existingLen0 });
+                      } catch {}
+                      // Keep currentEvent text in sync only for providers that don't self-assemble
+                      // OpenAI Responses provider already mutates currentEvent with token deltas.
+                      if (!isResponsesProvider && currentEvent) {
+                        const seq = (extendedEvent.data?.segment?.sequence_number as number | undefined) ?? undefined;
+                        const delta = String(segment.text);
+                        const shouldAppend = (typeof seq === 'number') ? (lastTextSeq == null || seq > lastTextSeq) : true;
                         const existing = currentEvent.segments.find(s => s.type === 'text') as any;
-                        if (existing) existing.text = (existing.text || '') + delta;
-                        else currentEvent.segments.push({ type: 'text', text: delta } as any);
-                        if (typeof seq === 'number') lastTextSeq = seq;
+                        const beforeLen = existing ? (existing.text || '').length : 0;
+                        if (shouldAppend) {
+                          if (existing) existing.text = (existing.text || '') + delta;
+                          else currentEvent.segments.push({ type: 'text', text: delta } as any);
+                          if (typeof seq === 'number') lastTextSeq = seq;
+                          textAppendsMade += 1;
+                          const afterLen = existing ? (existing.text || '').length : ((currentEvent.segments.find(s => s.type === 'text') as any)?.text || '').length;
+                          // Debug append action
+                          dbgText('append', { seq, deltaLen: delta.length, beforeLen, afterLen });
+                        } else {
+                          // Debug skip action
+                          dbgText('skip_duplicate', { seq, deltaLen: delta.length, lastTextSeq });
+                        }
                       }
-                    }
                       send({
                         type: 'token',
                         content: segment.text,
@@ -1109,6 +1148,10 @@ export async function POST(request: NextRequest) {
 
                   // 1) Persist any pending events first
                   if (currentEvent) {
+                    try {
+                      const txt = (currentEvent.segments.find(s => s.type === 'text') as any)?.text || '';
+                      dbgText('summary_done', { recv: textRecvTotal, uniqueSeqs: textRecvBySeq.size, appends: textAppendsMade, finalLen: txt.length });
+                    } catch {}
                     // Deduplicate tool_call segments by id while preserving first occurrence order
                     try {
                       const seen = new Map<string, number>();
