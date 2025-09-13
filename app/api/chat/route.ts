@@ -27,7 +27,7 @@ import {
 } from '@budchat/events';
 import { Bud, Database } from '@/lib/types';
 import { generateKeyBetween } from 'fractional-indexing';
-import { loadConversationEvents as repoLoadConversationEvents, saveEvents as repoSaveEvents, createConversation as repoCreateConversation, getPostgrestErrorCode as repoGetPostgrestErrorCode, updateToolSegmentTiming as repoUpdateToolSegmentTiming, getLastOrderKey as repoGetLastOrderKey } from '@budchat/data';
+import { loadConversationEvents as repoLoadConversationEvents, saveEvents as repoSaveEvents, createConversation as repoCreateConversation, getPostgrestErrorCode as repoGetPostgrestErrorCode, updateToolSegmentTiming as repoUpdateToolSegmentTiming, updateReasoningSegmentTiming as repoUpdateReasoningSegmentTiming, getLastOrderKey as repoGetLastOrderKey } from '@budchat/data';
 import { generateConversationTitleInBackground } from '@/lib/chat/shared';
 
 // Request types
@@ -464,6 +464,14 @@ export async function POST(request: NextRequest) {
               await repoUpdateToolSegmentTiming(supabase, eventId, toolId, startedAt, nowTs);
             } catch (e) {
               console.warn('⚠️ [Chat API] Failed to persist tool timing:', { toolId, error: (e as Error)?.message });
+            }
+          };
+          const markReasoningCompletedInDB = async (eventId: string, reasoningId: string, startedAt?: number, completedAt?: number) => {
+            try {
+              const nowTs = completedAt || Date.now();
+              await repoUpdateReasoningSegmentTiming(supabase, eventId, reasoningId, startedAt, nowTs);
+            } catch (e) {
+              console.warn('⚠️ [Chat API] Failed to persist reasoning timing:', { eventId, reasoningId, error: (e as Error)?.message });
             }
           };
           const send = (obj: unknown) => {
@@ -1038,6 +1046,18 @@ export async function POST(request: NextRequest) {
                       output_index: d.output_index,
                       sequence_number: d.sequence_number
                     });
+                    // Mark reasoning segment completed for latency tracking
+                    try {
+                      if (currentEvent) {
+                        const seg = currentEvent.segments.find(s => s.type === 'reasoning' && (s as any).id === d.item_id) as any;
+                        if (seg) {
+                          const startedAt = seg.started_at || Date.now();
+                          seg.completed_at = seg.completed_at || Date.now();
+                          // Best-effort persistence
+                          markReasoningCompletedInDB(currentEvent.id, String(d.item_id), startedAt, seg.completed_at).catch(() => {});
+                        }
+                      }
+                    } catch {}
                   }
                   break; }
                   

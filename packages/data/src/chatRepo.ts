@@ -277,6 +277,28 @@ export async function updateToolSegmentTiming(
   await supabase.from('events').update({ segments: segs }).eq('id', eventId);
 }
 
+export async function updateReasoningSegmentTiming(
+  supabase: any,
+  eventId: string,
+  reasoningId: string,
+  started_at?: number,
+  completed_at?: number
+): Promise<void> {
+  const { data: row } = await supabase
+    .from('events')
+    .select('segments')
+    .eq('id', eventId)
+    .single();
+  if (!row?.segments) return;
+  const segs = (row.segments as any[]).map(s => ({ ...s }));
+  const idx = segs.findIndex(s => s.type === 'reasoning' && s.id === reasoningId);
+  if (idx === -1) return;
+  const nowTs = completed_at || Date.now();
+  const startTs = segs[idx].started_at || started_at || Date.now();
+  segs[idx] = { ...segs[idx], started_at: startTs, completed_at: nowTs };
+  await supabase.from('events').update({ segments: segs }).eq('id', eventId);
+}
+
 export async function createConversation(
   supabase: any,
   workspaceId: WorkspaceId,
