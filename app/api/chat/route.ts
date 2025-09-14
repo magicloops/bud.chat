@@ -419,9 +419,10 @@ export async function POST(request: NextRequest) {
     
     // Create provider and streaming format
     const provider = ProviderFactory.create(model);
-    // Identify if we're using the OpenAI Responses provider to avoid double-assembling text
-    // The Responses provider already mutates currentEvent with token deltas internally.
-    const isResponsesProvider = (provider as any)?.name === 'openai-responses';
+    // Identify providers that self-assemble text into currentEvent during streaming
+    // to avoid double-assembling in the route.
+    const providerName = (provider as any)?.name as string | undefined;
+    const isSelfAssemblingProvider = providerName === 'openai-responses' || providerName === 'openai-chat';
     const streamingFormat = new StreamingFormat();
     
     // Create streaming response
@@ -434,8 +435,9 @@ export async function POST(request: NextRequest) {
           // Track last appended text sequence to avoid duplicate appends at same position
           let lastTextSeq: number | null = null;
           // Debug: gated logging helpers and counters for assistant text assembly
-          const isTextDbg = () => process.env.STREAM_DEBUG === 'true' || process.env.RESPONSES_DEBUG === 'true';
-          const dbgText = (...args: unknown[]) => { if (isTextDbg()) { try { console.debug('[Chat API][text]', ...args); } catch {} } };
+          // Silence verbose token assembly logs in production
+          const isTextDbg = () => false;
+          const dbgText = (..._args: unknown[]) => {};
           let textRecvBySeq: Map<number, number> = new Map();
           let textRecvTotal = 0;
           let textAppendsMade = 0;
@@ -823,7 +825,7 @@ export async function POST(request: NextRequest) {
                       } catch {}
                       // Keep currentEvent text in sync only for providers that don't self-assemble
                       // OpenAI Responses provider already mutates currentEvent with token deltas.
-                      if (!isResponsesProvider && currentEvent) {
+                      if (!isSelfAssemblingProvider && currentEvent) {
                         const seq = (extendedEvent.data?.segment?.sequence_number as number | undefined) ?? undefined;
                         const delta = String(segment.text);
                         const shouldAppend = (typeof seq === 'number') ? (lastTextSeq == null || seq > lastTextSeq) : true;
