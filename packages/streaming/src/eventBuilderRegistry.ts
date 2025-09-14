@@ -22,12 +22,6 @@ export function renameDraft(oldId: string, newId: string) {
   if (d) {
     drafts.delete(oldId);
     drafts.set(newId, { ...d, id: toEventId(newId) });
-    try {
-      if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
-        // eslint-disable-next-line no-console
-        console.debug('[STREAM][Draft] renameDraft', { from: oldId, to: newId });
-      }
-    } catch {}
   }
   const m = streamingMeta.get(oldId);
   if (m) {
@@ -43,4 +37,3 @@ export function setStreamingMeta(eventId: string, meta: { hasTextContent: boolea
 export function getStreamingMeta(eventId: string): { hasTextContent: boolean; preText: Event['segments']; postText: Event['segments'] } | undefined {
   return streamingMeta.get(eventId);
 }
-

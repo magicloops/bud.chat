@@ -50,14 +50,7 @@ export function StreamingReasoningSegment({ eventId, isStreaming }: StreamingRea
   }, [parts]);
   const hasContent = !!latestPart && (latestPart.text || '').trim().length > 0;
 
-  const dbg = (msg: string, obj: any) => {
-    if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][Reasoning]', msg, obj);
-    }
-  };
-
-  dbg('reasoning_overlay', { where: 'reasoning_overlay', eventId, hasAnyPart, latestLen: latestPart ? (latestPart.text || '').length : 0 });
+  // Debug logs removed
 
   // no debug logs
   // Only show when we actually have an active, in-progress part

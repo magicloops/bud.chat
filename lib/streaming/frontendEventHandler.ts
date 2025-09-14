@@ -114,37 +114,16 @@ export class FrontendEventHandler {
   };
 
   private isDbg(): boolean {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w: any = typeof window !== 'undefined' ? window : undefined;
-      const flag = !!(w && (w.__STREAM_DEBUG || w.__RESPONSES_DEBUG));
-      const ls = typeof window !== 'undefined' ? (window.localStorage?.getItem('STREAM_DEBUG') === '1' || window.localStorage?.getItem('RESPONSES_DEBUG') === '1') : false;
-      // Allow build-time env flags (Next.js inlines NEXT_PUBLIC_* vars)
-      const env = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') : false;
-      return !!this.options.debug || flag || ls || env;
-    } catch {
-      // Fallback to constructor option only
-      return !!this.options.debug;
-    }
+    // Front-end logs cleaned: only log when the handler is explicitly constructed with debug: true
+    return !!this.options.debug;
   }
 
-  private dbg(...args: any[]) {
-    if (this.isDbg()) {
-      // eslint-disable-next-line no-console
-      console.log('[STREAM][FE]', ...args);
-    }
+  private dbg(..._args: any[]) {
+    // No-op by default; enable by constructing FrontendEventHandler with debug: true
   }
 
-  private dbgJson(label: string, obj: unknown) {
-    if (!this.isDbg()) return;
-    try {
-      const rendered = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][FE]', label, rendered);
-    } catch {
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][FE]', label, obj);
-    }
+  private dbgJson(_label: string, _obj: unknown) {
+    // No-op by default; enable by constructing FrontendEventHandler with debug: true
   }
 
   private normalizeOutput(raw: unknown): object | undefined {
