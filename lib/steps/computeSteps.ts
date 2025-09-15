@@ -1,4 +1,4 @@
-import { Event, Segment } from '@/lib/types/events';
+import { Event, Segment } from '@budchat/events';
 import { Step, ReasoningPartStep, WebSearchStep, CodeInterpreterStep, MCPCallStep } from './types';
 
 function safeSeq(n: number | undefined): number {

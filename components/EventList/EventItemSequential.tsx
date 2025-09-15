@@ -4,14 +4,14 @@ import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Event, Conversation } from '@/state/eventChatStore';
-import { ToolCallId } from '@/lib/types/branded';
+import { ToolCallId } from '@budchat/events';
 import { useBud } from '@/state/budStore';
 import { cn } from '@/lib/utils';
 import { SequentialSegmentRenderer } from './SequentialSegmentRenderer';
-import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
+import { getDraft } from '@budchat/streaming';
 import StreamingTextSegment from './StreamingTextSegment';
 import EphemeralOverlay from './EphemeralOverlay';
-import { deriveSteps } from '@/lib/streaming/rendering';
+import { deriveSteps } from '@budchat/streaming';
 import {
   Copy,
   Edit,

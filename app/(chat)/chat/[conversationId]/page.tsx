@@ -26,7 +26,7 @@ import {
   budManager
 } from '@/lib/budHelpers';
 import { Bud } from '@/lib/types';
-import { FrontendEventHandler } from '@/lib/streaming/frontendEventHandler';
+import { FrontendEventHandler } from '@budchat/streaming';
 
 interface ChatPageProps {
   params: Promise<{ conversationId: string }>
@@ -333,14 +333,6 @@ export default function ChatPage({ params }: ChatPageProps) {
           onMessageFinal: (finalEvent) => {
             // Guard: ensure assistant role on finalize (streaming is always assistant)
             const safeFinal = finalEvent.role === 'assistant' ? finalEvent : { ...finalEvent, role: 'assistant' as const };
-            if (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') {
-              // eslint-disable-next-line no-console
-              console.debug('[STREAM][onMessageFinal][new]', {
-                role: safeFinal.role,
-                id: safeFinal.id,
-                segTypes: safeFinal.segments.map(s => (s as any).type),
-              });
-            }
             // Insert canonical final event by id and remove placeholder to avoid duplicates
             const store = useEventChatStore.getState();
             const tempConv = store.conversations[tempConversationId];

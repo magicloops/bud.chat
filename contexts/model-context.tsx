@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { getDefaultModel } from '@/lib/modelMapping';
+import { getDefaultModel } from '@budchat/models';
 
 interface ModelContextType {
   selectedModel: string

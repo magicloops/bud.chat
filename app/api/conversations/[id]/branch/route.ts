@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { getConversationEvents, saveEvent } from '@/lib/db/events';
-import { generateEventId } from '@/lib/types/branded';
+import { getConversationEvents as repoGetConversationEvents, saveEvent as repoSaveEvent } from '@budchat/data';
+import { generateEventId } from '@budchat/events';
 
 export async function POST(
   request: NextRequest,
@@ -120,7 +120,7 @@ export async function POST(
 
     // Get all events for the conversation (already sorted by order_key)
     console.log('🌿 Fetching events...');
-    const allEvents = await getConversationEvents(originalConversationId);
+    const allEvents = await repoGetConversationEvents(supabase, originalConversationId);
     
     console.log('🌿 Events fetched:', allEvents?.length || 0);
 
@@ -192,7 +192,7 @@ export async function POST(
             segments: event.segments,
             ts: event.ts
           };
-          const savedEvent = await saveEvent(eventToSave, {
+          const savedEvent = await repoSaveEvent(supabase, eventToSave, {
             conversationId: newConversation.id,
             orderKey: event.order_key
           });

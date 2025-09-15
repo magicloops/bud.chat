@@ -1,12 +1,10 @@
 import { Event, useEventChatStore } from '@/state/eventChatStore';
-import { ReasoningData, Segment } from '@/lib/types/events';
+import { ReasoningData, Segment } from '@budchat/events';
 // EventConversation, ReasoningPart currently unused
 import { ReasoningEventLogger } from '@/lib/reasoning/eventLogger';
-import { ProgressState, ActivityType } from '@/lib/types/progress';
-import { ToolCallId } from '@/lib/types/branded';
-import { EventBuilder } from './eventBuilder';
-import { setDraft, clearDraft, getDraft, renameDraft } from './eventBuilderRegistry';
-import { setOverlay, getOverlay } from './ephemeralOverlayRegistry';
+import { ProgressState, ActivityType, ToolCallId } from '@budchat/events';
+// Use package client subpath to avoid cycles
+import { EventBuilder, setDraft, clearDraft, getDraft, renameDraft, setOverlay, getOverlay } from '@budchat/streaming/client';
 // import { getActivityFromEvent, shouldHideProgress, getServerLabelFromEvent } from '@/lib/types/progress'; // Not currently used
 
 export interface StreamEvent {
@@ -116,37 +114,16 @@ export class FrontendEventHandler {
   };
 
   private isDbg(): boolean {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w: any = typeof window !== 'undefined' ? window : undefined;
-      const flag = !!(w && (w.__STREAM_DEBUG || w.__RESPONSES_DEBUG));
-      const ls = typeof window !== 'undefined' ? (window.localStorage?.getItem('STREAM_DEBUG') === '1' || window.localStorage?.getItem('RESPONSES_DEBUG') === '1') : false;
-      // Allow build-time env flags (Next.js inlines NEXT_PUBLIC_* vars)
-      const env = typeof process !== 'undefined' ? (process.env.NEXT_PUBLIC_STREAM_DEBUG === 'true' || process.env.NEXT_PUBLIC_RESPONSES_DEBUG === 'true') : false;
-      return !!this.options.debug || flag || ls || env;
-    } catch {
-      // Fallback to constructor option only
-      return !!this.options.debug;
-    }
+    // Front-end logs cleaned: only log when the handler is explicitly constructed with debug: true
+    return !!this.options.debug;
   }
 
-  private dbg(...args: any[]) {
-    if (this.isDbg()) {
-      // eslint-disable-next-line no-console
-      console.log('[STREAM][FE]', ...args);
-    }
+  private dbg(..._args: any[]) {
+    // No-op by default; enable by constructing FrontendEventHandler with debug: true
   }
 
-  private dbgJson(label: string, obj: unknown) {
-    if (!this.isDbg()) return;
-    try {
-      const rendered = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][FE]', label, rendered);
-    } catch {
-      // eslint-disable-next-line no-console
-      console.debug('[STREAM][FE]', label, obj);
-    }
+  private dbgJson(_label: string, _obj: unknown) {
+    // No-op by default; enable by constructing FrontendEventHandler with debug: true
   }
 
   private normalizeOutput(raw: unknown): object | undefined {
@@ -311,62 +288,32 @@ export class FrontendEventHandler {
    * Process streaming response with unified logic for both local and store state
    */
   async processStreamingResponse(response: Response): Promise<void> {
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              const t = (data && data.type) || 'unknown';
-              if (
-                t === 'reasoning_start' ||
-                t === 'reasoning_summary_part_added' ||
-                t === 'reasoning_summary_text_delta' ||
-                t === 'reasoning_summary_delta' ||
-                t === 'reasoning_summary_part_done' ||
-                t === 'reasoning_complete'
-              ) {
-                this.dbgJson('sse_in_full', data);
-              } else if (t === 'segment') {
-                // Log reasoning segments that arrive via unified segment updates
-                try {
-                  const seg = (data as any).segment || (data as any).data?.segment;
-                  if (seg && seg.type === 'reasoning') {
-                    this.dbgJson('sse_in_reasoning_segment', data);
-                  }
-                } catch {}
-              } else if (t !== 'token') {
-                this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
-              }
-              await this.handleStreamEvent(data);
-            } catch (e) {
-              if (this.options.debug) {
-                console.error('Error parsing stream data:', e);
-              }
+    const streaming = await import('@budchat/streaming/client');
+    await streaming.processSSE(response, {
+      onAny: async (data: any) => {
+        const t = (data && (data as any).type) || 'unknown';
+        if (
+          t === 'reasoning_start' ||
+          t === 'reasoning_summary_part_added' ||
+          t === 'reasoning_summary_text_delta' ||
+          t === 'reasoning_summary_delta' ||
+          t === 'reasoning_summary_part_done' ||
+          t === 'reasoning_complete'
+        ) {
+          this.dbgJson('sse_in_full', data);
+        } else if (t === 'segment') {
+          try {
+            const seg = (data as any).segment || (data as any).data?.segment;
+            if (seg && seg.type === 'reasoning') {
+              this.dbgJson('sse_in_reasoning_segment', data);
             }
-          }
+          } catch {}
+        } else if (t !== 'token') {
+          this.dbg('sse_in', { type: t, keys: Object.keys(data || {}) });
         }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+        await this.handleStreamEvent(data as any);
+      },
+    });
   }
 
   /**
@@ -860,7 +807,30 @@ export class FrontendEventHandler {
    * Handle error events
    */
   private async handleErrorEvent(_data: StreamEvent): Promise<void> {
-    // Container handles error rollback
+    try {
+      // Clear overlay if present
+      const id = this.assistantPlaceholder?.id;
+      if (id) {
+        try { setOverlay(id, null); } catch {}
+        try { clearDraft(id); } catch {}
+      }
+      // Dispose builder and reset local placeholders
+      try { this.builder?.dispose?.(); } catch {}
+      this.builder = null;
+      this.assistantPlaceholder = null;
+      // Flip store streaming flags off to unblock UI
+      if (this.conversationId && this.storeInstance) {
+        const store = this.storeInstance.getState();
+        const conv = store.conversations[this.conversationId];
+        if (conv) {
+          store.setConversation(this.conversationId, {
+            ...conv,
+            isStreaming: false,
+            streamingEventId: undefined,
+          });
+        }
+      }
+    } catch {}
   }
 
   /**

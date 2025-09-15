@@ -30,7 +30,7 @@ import {
   getAvailableReasoningEfforts,
   getAvailableReasoningSummaryTypes,
   getAvailableVerbosityLevels
-} from '@/lib/modelMapping';
+} from '@budchat/models';
 import { MCPConfigurationPanel } from '@/components/MCP/MCPConfigurationPanel';
 import type { MCPConfiguration } from '@/components/MCP/MCPConfigurationPanel';
 

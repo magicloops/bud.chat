@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest } from 'next/server';
-import { getConversationEvents } from '@/lib/db/events';
+import { getConversationEvents as repoGetConversationEvents, deleteConversationWithEvents as repoDeleteConversationWithEvents } from '@budchat/data';
 import { Database } from '@/lib/types/database';
 import { BudConfig } from '@/lib/types';
 
@@ -118,7 +118,7 @@ export async function GET(
     // If events are requested, fetch them too
     if (includeEvents) {
       try {
-        const events = await getConversationEvents(conversationId);
+        const events = await repoGetConversationEvents(supabase, conversationId);
         
         // Events are already sorted by order_key
         return Response.json({
@@ -253,26 +253,13 @@ export async function DELETE(
       return new Response('Access denied', { status: 403 });
     }
 
-    // Delete events first, then conversation (no cascade delete configured)
-    const { error: eventsDeleteError } = await supabase
-      .from('events')
-      .delete()
-      .eq('conversation_id', conversationId);
-
-    if (eventsDeleteError) {
-      console.error('Error deleting events:', eventsDeleteError);
-      return new Response(`Error deleting events: ${eventsDeleteError.message}`, { status: 500 });
-    }
-
-    // Now delete the conversation
-    const { error: deleteError } = await supabase
-      .from('conversations')
-      .delete()
-      .eq('id', conversationId);
-
-    if (deleteError) {
-      console.error('Delete conversation error details:', deleteError);
-      return new Response(`Error deleting conversation: ${deleteError.message}`, { status: 500 });
+    // Delete via repository helper
+    try {
+      await repoDeleteConversationWithEvents(supabase, conversationId);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Unknown delete error';
+      console.error('Delete conversation error:', msg);
+      return new Response(`Error deleting conversation: ${msg}`, { status: 500 });
     }
 
     return new Response('Conversation deleted successfully', { status: 200 });

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownRenderer from '@/components/markdown-renderer';
-import { getDraft } from '@/lib/streaming/eventBuilderRegistry';
+import { getDraft } from '@budchat/streaming';
 
 interface StreamingTextSegmentProps {
   eventId: string;

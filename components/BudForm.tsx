@@ -26,7 +26,7 @@ import {
   getAvailableReasoningEfforts,
   getAvailableReasoningSummaryTypes,
   getAvailableVerbosityLevels
-} from '@/lib/modelMapping';
+} from '@budchat/models';
 import { Checkbox } from '@/components/ui/checkbox';
 
 interface BudFormProps {

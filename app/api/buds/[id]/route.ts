@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
-import { BudId, toBudId } from '@/lib/types/branded';
+import { BudId, toBudId } from '@budchat/events';
 import { BudConfig, Bud, BuiltInToolsConfig } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 

@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AppError, ErrorCode, handleApiError } from '@/lib/errors';
-import { WorkspaceId, toWorkspaceId, generateBudId } from '@/lib/types/branded';
+import { WorkspaceId, toWorkspaceId, generateBudId } from '@budchat/events';
 // import { BudId } from '@/lib/types/branded'; // Type not currently used
 import { BudConfig, BuiltInToolsConfig } from '@/lib/types';
 

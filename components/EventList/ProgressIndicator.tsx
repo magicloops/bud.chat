@@ -1,7 +1,7 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ActivityType } from '@/lib/types/progress';
+import { ActivityType } from '@budchat/events';
 
 interface ProgressIndicatorProps {
   /** Current background activity type */

@@ -13,7 +13,7 @@ import {
   XCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Segment } from '@/lib/types/events';
+import { Segment } from '@budchat/events';
 import MarkdownRenderer from '@/components/markdown-renderer';
 
 interface BuiltInToolSegmentProps {

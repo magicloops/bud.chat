@@ -18,7 +18,7 @@
     - De‑duplicate existing `(conversation_id, order_key)` collisions by appending one or more `'0'` characters to later duplicates.
     - Add `UNIQUE (conversation_id, order_key)` constraint.
 - Server code
-  - `lib/db/events.ts`:
+  - `@budchat/data`:
     - `saveEvent` and `saveEvents`: Detect unique-violation (SQLSTATE `23505`). On conflict, refetch latest `order_key`, regenerate with `generateKeyBetween(last, null)`, and retry once. Batch insert falls back to per-item with retry.
     - Normalize missing left bound to `null` when generating keys.
   - `app/api/chat/route.ts`:
@@ -47,7 +47,7 @@
 
 ## Files Touched
 - `supabase/migrations/202508280001_adjust_events_order_key_collation.sql` (new)
-- `lib/db/events.ts`
+- `@budchat/data`
 - `app/api/chat/route.ts`
 - `app/api/conversations/route.ts`
 - `debug/fractional-indexing-order-key.md` (new)

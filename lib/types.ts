@@ -1,10 +1,10 @@
 import { Database } from './types/database';
-import { ConversationId, WorkspaceId } from './types/branded';
-// import { BudId, UserId } from './types/branded'; // Not currently used
+import { ConversationId, WorkspaceId } from '@budchat/events';
+// import { BudId, UserId } from '@budchat/events'; // Not currently used
 
 // Re-export branded types for convenience
-export type { ConversationId, WorkspaceId } from './types/branded';
-export type { BudId, UserId } from './types/branded';
+export type { ConversationId, WorkspaceId } from '@budchat/events';
+export type { BudId, UserId } from '@budchat/events';
 
 // Re-export Database type
 export type { Database } from './types/database';

@@ -153,11 +153,13 @@ SELECT
    export function openaiResponseToEvents(response: OpenAIResponse): Event[]
    ```
 
-3. **Update Database Layer** (`/lib/db/events.ts`)
+3. **Update Database Layer** (`@budchat/data`)
    ```typescript
-   export async function saveEvent(conversationId: string, event: Event): Promise<void>
-   export async function getConversationEvents(conversationId: string): Promise<Event[]>
-   export async function updateEventSegments(eventId: string, segments: Segment[]): Promise<void>
+   // Repository-style helpers accept a Supabase client
+   export async function saveEvent(supabase, event: Event, opts: { conversationId: string; orderKey?: string | null }): Promise<DatabaseEvent>
+   export async function getConversationEvents(supabase, conversationId: string): Promise<DatabaseEvent[]>
+   export async function loadConversationEvents(supabase, conversationId: ConversationId): Promise<Event[]>
+   export async function updateEventSegments(supabase, eventId: string, segments: Segment[]): Promise<void>
    ```
 
 ### Phase 2: Streaming Integration

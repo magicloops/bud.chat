@@ -2,9 +2,9 @@ import { createClient } from '@/lib/supabase/client';
 import { Bud, BudConfig, BuiltInToolsConfig } from '@/lib/types';
 import { Database } from '@/lib/types/database';
 import { Event } from '@/state/eventChatStore';
-import { createTextEvent } from '@/lib/types/events';
+import { createTextEvent } from '@budchat/events';
 // import { generateKeyBetween } from 'fractional-indexing'; // Currently unused
-import { getDefaultModel } from './modelMapping';
+import { getDefaultModel } from '@budchat/models';
 
 export interface CreateBudArgs {
   name: string

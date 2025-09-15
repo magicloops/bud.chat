@@ -11,6 +11,21 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.56.0
         version: 0.56.0
+      '@budchat/data':
+        specifier: workspace:*
+        version: link:packages/data
+      '@budchat/events':
+        specifier: workspace:*
+        version: link:packages/events
+      '@budchat/models':
+        specifier: workspace:*
+        version: link:packages/models
+      '@budchat/providers':
+        specifier: workspace:*
+        version: link:packages/providers
+      '@budchat/streaming':
+        specifier: workspace:*
+        version: link:packages/streaming
       '@hookform/resolvers':
         specifier: ^3.9.1
         version: 3.10.0(react-hook-form@7.56.4(react@19.1.0))
@@ -252,6 +267,16 @@ importers:
       typescript:
         specifier: ^5
         version: 5.8.3
+
+  packages/data: {}
+
+  packages/events: {}
+
+  packages/models: {}
+
+  packages/providers: {}
+
+  packages/streaming: {}
 
 packages:
 
