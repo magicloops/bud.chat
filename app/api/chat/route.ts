@@ -949,7 +949,6 @@ export async function POST(request: NextRequest) {
                   // Handle reasoning part added events (Responses utils emit fields at root)
                   const d = extendedEvent.data ?? extendedEvent;
                   if (d) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_added]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_part_added',
                       item_id: d.item_id,
@@ -986,7 +985,6 @@ export async function POST(request: NextRequest) {
                   // Handle reasoning text delta events (Responses utils emit fields at root)
                   const d = extendedEvent.data ?? extendedEvent;
                   if (d) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_text_delta]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_text_delta',
                       item_id: d.item_id,
@@ -1023,7 +1021,6 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_summary_part_done': {
                   const d = extendedEvent.data ?? extendedEvent;
                   if (d) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_part_done]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_summary_part_done',
                       item_id: d.item_id,
@@ -1039,7 +1036,6 @@ export async function POST(request: NextRequest) {
                 case 'reasoning_complete': {
                   const d = extendedEvent.data ?? extendedEvent;
                   if (d) {
-                    try { if (process.env.STREAM_DEBUG === 'true') console.debug('[Chat API][reasoning_complete]', JSON.stringify(d, null, 2)); } catch {}
                     send({
                       type: 'reasoning_complete',
                       item_id: d.item_id,

@@ -64,6 +64,22 @@ Keep path aliases in app pointing to packages (or use relative imports initially
     - Preserve reasoning segments (including empty summaries) and embed remote MCP tool outputs into the originating `tool_call` segment.
     - Normalize MCP event IDs and start/finalize/complete mapping; eliminate duplicate `tool_start` events.
     - Restore faithful event→input conversion (flattened order) with gated adjacency validation/logging for follow‑ups.
+  - Duplicate‑text fixes (post‑refactor):
+    - Responses (o‑series): Skip route‑side text assembly; overwrite final text from `response.output_item.done` so DB uses authoritative provider text.
+    - Chat Completions: Skip route‑side text assembly for `openai-chat`; provider remains the single source of truth for text.
+    - Result: FE streaming remains correct; persisted assistant text no longer duplicates tokens.
+
+- Phase 4 — Data: IN PROGRESS
+  - Implemented `@budchat/data` with conversation/event repository helpers:
+    - `loadConversationEvents`, `saveEvents`, `createConversation`, `getPostgrestErrorCode`.
+  - Added timing helpers for analytics:
+    - `updateToolSegmentTiming` (existing) and `updateReasoningSegmentTiming` (new).
+  - API routes now depend on `@budchat/data` for DB I/O.
+
+- Phase 5 — Streaming: IN PROGRESS
+  - Implemented `@budchat/streaming` primitives: `EventBuilder`, registries, rendering, and `processSSE` (hardened line buffering).
+  - UI uses `@budchat/streaming` + `FrontendEventHandler` (still app‑scoped due to store coupling).
+  - Reduced client log noise and removed noisy `[STREAM][FE]…` logs; cleaned server‑side reasoning logs.
 
 ## Package Responsibilities and APIs
 
@@ -175,6 +191,16 @@ Phase 7: Cleanups and deprecations
 
 Keep tests co‑located in each package; ensure packages compile independently.
 
+## Recent Updates (Sep 2025)
+
+- Fixed assistant text duplication across providers:
+  - Responses: overwrite final text from `output_item.done`; skip route assembly.
+  - Chat Completions: skip route assembly; provider self‑assembles text.
+- Embedded remote MCP tool results into the same `tool_call` segment for Responses.
+- Persisted reasoning timing (started_at/completed_at); tool timing persisted as before.
+- Dedupe tool_call segments before save to avoid duplicate entries from mixed streams.
+- Cleaned front‑end `[STREAM][FE]…` logs and backend reasoning debug logs; left minimal, purposeful logs only.
+
 ## Backwards Compatibility and Risk Mitigation
 - Preserve all function names and TypeScript shapes exported today.
 - Maintain same SSE envelope (`StreamingFormat`) and frontend consumption via `FrontendEventHandler`.
@@ -197,6 +223,14 @@ Keep tests co‑located in each package; ensure packages compile independently.
 - Phase 2 (models) and Phase 3 (providers) extractions; run app, validate streaming + tools.
 - Phase 4–6 extractions; iterate with thin re‑exports to minimize churn.
 - Document package READMEs with public APIs and examples.
+
+### Near‑Term Iterations
+- Streaming robustness: add SSE iterator tests (CR/LF edges, dedupe, partial chunks); provider‑agnostic stream fixtures.
+- Save‑time normalization: ensure at most one text segment per assistant event; merge if needed (cheap guard).
+- MCP extraction: create `@budchat/mcp` for tool execution (local/remote), unify normalization and headers.
+- Finalize `@budchat/streaming` API/docs; expose clear client/server entrypoints; reduce app‑level glue.
+- Metrics: optional backfill of reasoning timing for recent rows; lightweight aggregation queries.
+- Logging policy: keep error + turn summary behind env flag; drop info logs by default.
 
 This plan modularizes along natural boundaries already present in the repo, keeps the streaming UX intact, and makes provider, event, MCP, and data logic independently testable and evolvable.
 - Phase 4 — Data: IN PROGRESS
