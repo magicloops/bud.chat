@@ -25,6 +25,8 @@ export interface ConversationSummary {
   title?: string
   created_at: string
   workspace_id: string
+  assistant_name?: string
+  assistant_avatar?: string
 }
 
 // Event-based conversation types (complete data for chat display)
@@ -130,7 +132,9 @@ export const useEventChatStore = create<EventChatStore>()(
             id: conversation.id,
             title: conversation.meta.title,
             created_at: conversation.meta.created_at,
-            workspace_id: conversation.meta.workspace_id
+            workspace_id: conversation.meta.workspace_id,
+            assistant_name: conversation.meta.assistant_name,
+            assistant_avatar: conversation.meta.assistant_avatar
           };
           state.conversationSummaries[id] = summary;
         }),
@@ -149,7 +153,9 @@ export const useEventChatStore = create<EventChatStore>()(
                 id: conversation.id,
                 title: conversation.meta.title,
                 created_at: conversation.meta.created_at,
-                workspace_id: conversation.meta.workspace_id
+                workspace_id: conversation.meta.workspace_id,
+                assistant_name: conversation.meta.assistant_name,
+                assistant_avatar: conversation.meta.assistant_avatar
               };
               state.conversationSummaries[id] = summary;
             }
@@ -315,7 +321,9 @@ export const useEventChatStore = create<EventChatStore>()(
                         id: updatedConversationObj.id,
                         title: updatedConversationObj.meta.title,
                         created_at: updatedConversationObj.meta.created_at,
-                        workspace_id: updatedConversationObj.meta.workspace_id
+                        workspace_id: updatedConversationObj.meta.workspace_id,
+                        assistant_name: updatedConversationObj.meta.assistant_name,
+                        assistant_avatar: updatedConversationObj.meta.assistant_avatar
                       };
                       state.conversationSummaries[conversationId] = summary;
                       
@@ -344,7 +352,9 @@ export const useEventChatStore = create<EventChatStore>()(
                               id: retryUpdatedConversation.id,
                               title: retryUpdatedConversation.meta.title,
                               created_at: retryUpdatedConversation.meta.created_at,
-                              workspace_id: retryUpdatedConversation.meta.workspace_id
+                              workspace_id: retryUpdatedConversation.meta.workspace_id,
+                              assistant_name: retryUpdatedConversation.meta.assistant_name,
+                              assistant_avatar: retryUpdatedConversation.meta.assistant_avatar
                             };
                             retryState.conversationSummaries[conversationId] = retrySummary;
                             

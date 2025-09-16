@@ -2,7 +2,7 @@
 
 import React, { memo, useState, useCallback, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Event, Conversation } from '@/state/eventChatStore';
 import { ToolCallId } from '@budchat/events';
 import { useBud } from '@/state/budStore';
@@ -28,6 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useAuth } from '@/lib/auth/auth-provider';
 
 interface EventItemProps {
   event: Event
@@ -54,6 +55,7 @@ export const EventItemSequential = memo(function EventItemSequential({
   allEvents,
   previousEvent,
 }: EventItemProps) {
+  const { user } = useAuth();
   const isSystem = event.role === 'system';
   const isUser = event.role === 'user';
   const isAssistant = event.role === 'assistant';
@@ -150,6 +152,15 @@ export const EventItemSequential = memo(function EventItemSequential({
   const assistantAvatar = conversation?.meta?.assistant_avatar || 
                          (budConfig && typeof budConfig === 'object' && 'avatar' in budConfig ? budConfig.avatar as string : null) || 
                          '🤖';
+
+  const userMetadata = user?.user_metadata as { avatar_url?: string; picture?: string; full_name?: string } | undefined;
+  const userAvatarUrl = userMetadata?.avatar_url || userMetadata?.picture || null;
+  const userInitial = (() => {
+    const fullName = typeof userMetadata?.full_name === 'string' ? userMetadata.full_name.trim() : '';
+    if (fullName) return fullName.charAt(0).toUpperCase();
+    const emailInitial = user?.email ? user.email.charAt(0).toUpperCase() : '';
+    return emailInitial || 'U';
+  })();
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(textContent);
@@ -336,13 +347,12 @@ export const EventItemSequential = memo(function EventItemSequential({
       <div className="flex items-start gap-3">
         {/* Avatar - only show for non-continuation or hide with opacity for spacing */}
         <Avatar className={cn('h-8 w-8', shouldShowAsContinuation && 'opacity-0')}>
-          {isUser ? (
-            <AvatarFallback>U</AvatarFallback>
-          ) : (
-            <AvatarFallback>
-              <span className="text-lg">{assistantAvatar}</span>
-            </AvatarFallback>
-          )}
+          {isUser && userAvatarUrl ? (
+            <AvatarImage src={userAvatarUrl} alt="You" />
+          ) : null}
+          <AvatarFallback>
+            {isUser ? userInitial : <span className="text-lg">{assistantAvatar}</span>}
+          </AvatarFallback>
         </Avatar>
 
         <div className="flex-1 min-w-0">
