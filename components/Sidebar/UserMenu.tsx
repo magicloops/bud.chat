@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,11 +27,13 @@ import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { useConversation, useSelectedWorkspace } from '@/state/eventChatStore';
 import { useBud } from '@/state/budStore';
+import { useAuth } from '@/lib/auth/auth-provider';
 
 export function UserMenu() {
   const router = useRouter();
   const pathname = usePathname();
   const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
   const { toggleTheme, isDarkMode, mounted } = useThemeToggle();
   
   // Extract conversation ID from pathname and get conversation/bud data
@@ -69,6 +72,13 @@ export function UserMenu() {
   };
 
   const selectedWorkspaceId = useSelectedWorkspace();
+
+  const userMetadata = user?.user_metadata as { avatar_url?: string; picture?: string; full_name?: string } | undefined;
+  const userAvatarUrl = userMetadata?.avatar_url || userMetadata?.picture || null;
+  const userDisplayName = (typeof userMetadata?.full_name === 'string' && userMetadata.full_name.trim().length > 0)
+    ? userMetadata.full_name.trim()
+    : user?.email || 'User';
+  const userInitial = userDisplayName.trim().charAt(0).toUpperCase() || 'U';
   
   const handleManageBuds = () => {
     if (selectedWorkspaceId) {
@@ -87,10 +97,15 @@ export function UserMenu() {
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="w-full justify-between p-2">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-primary rounded-full flex items-center justify-center">
-              <User className="h-3 w-3 text-primary-foreground" />
-            </div>
-            <span className="text-sm">User</span>
+            <Avatar className="h-6 w-6">
+              {userAvatarUrl ? (
+                <AvatarImage src={userAvatarUrl} alt={userDisplayName} />
+              ) : null}
+              <AvatarFallback>
+                {userInitial}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-sm truncate max-w-[120px]" title={userDisplayName}>{userDisplayName}</span>
           </div>
           <ChevronUp className="h-4 w-4" />
         </Button>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { 
   useConversations,
   useEventChatStore,
@@ -124,11 +125,15 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
           const conversationIds: string[] = [];
           
           items.forEach((conv: DBConversation) => {
+            const effectiveAssistantName = (conv as any).effective_assistant_name || conv.assistant_name || undefined;
+            const effectiveAssistantAvatar = (conv as any).effective_assistant_avatar || conv.assistant_avatar || undefined;
             const summary: ConversationSummary = {
               id: conv.id,
               title: conv.title || undefined, // Don't set default title
               workspace_id: conv.workspace_id,
-              created_at: (conv.created_at as string | null) ?? new Date().toISOString()
+              created_at: (conv.created_at as string | null) ?? new Date().toISOString(),
+              assistant_name: effectiveAssistantName,
+              assistant_avatar: effectiveAssistantAvatar
             };
             summaries.push(summary);
             conversationIds.push(conv.id);
@@ -185,11 +190,15 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
       // Upsert summaries and append to workspace list
       const newIds: string[] = [];
       items.forEach((conv: DBConversation) => {
+        const effectiveAssistantName = (conv as any).effective_assistant_name || conv.assistant_name || undefined;
+        const effectiveAssistantAvatar = (conv as any).effective_assistant_avatar || conv.assistant_avatar || undefined;
         const summary: ConversationSummary = {
           id: conv.id,
           title: conv.title || undefined,
           workspace_id: conv.workspace_id,
           created_at: (conv.created_at as string | null) ?? new Date().toISOString(),
+          assistant_name: effectiveAssistantName,
+          assistant_avatar: effectiveAssistantAvatar,
         };
         setConversationSummary(conv.id, summary);
         newIds.push(conv.id);
@@ -363,64 +372,76 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         const isSelected = currentConversationId === conversationMeta.id;
         const createdAt = new Date(conversationMeta.created_at);
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true });
-        
-        
+        const assistantName = conversationMeta.assistant_name || 'Assistant';
+        const assistantAvatar = conversationMeta.assistant_avatar || '🤖';
+        const assistantAvatarIsImage = typeof assistantAvatar === 'string'
+          && (assistantAvatar.startsWith('http') || assistantAvatar.startsWith('data:') || assistantAvatar.startsWith('/'));
+        const assistantInitial = assistantName.trim().charAt(0).toUpperCase() || 'A';
         // Get title from conversation title field or use default
         const getConversationTitle = () => {
           return conversationMeta.title || 'Untitled';
         };
         
         return (
-          <Link
+          <div
             key={conversationMeta.id}
-            href={`/chat/${conversationMeta.id}`}
-            prefetch={true}
-            onMouseEnter={() => handleConversationHover(conversationMeta.id as ConversationId)}
-            onClick={(e) => handleConversationClick(conversationMeta.id as ConversationId, e)}
             className={cn(
-              'group flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors hover:bg-muted/50 w-full max-w-full overflow-hidden block',
+              'group relative flex items-center pr-3 pl-0 rounded-lg transition-colors hover:bg-muted/50',
               isSelected && 'bg-muted'
             )}
           >
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium truncate flex-1 min-w-0">
+            <Link
+              href={`/chat/${conversationMeta.id}`}
+              prefetch={true}
+              onMouseEnter={() => handleConversationHover(conversationMeta.id as ConversationId)}
+              onClick={(e) => handleConversationClick(conversationMeta.id as ConversationId, e)}
+              className="flex flex-1 items-center gap-2 py-3 pr-3 pl-0 min-w-0"
+            >
+              <Avatar className="h-8 w-8 flex-shrink-0">
+                {assistantAvatarIsImage ? (
+                  <AvatarImage src={assistantAvatar} alt={assistantName} />
+                ) : null}
+                <AvatarFallback>
+                  {assistantAvatarIsImage
+                    ? assistantInitial
+                    : <span className="text-lg">{assistantAvatar}</span>}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col gap-0.5 min-w-0 flex-1 transition-[padding] group-hover:pr-7 group-focus-within:pr-7">
+                <p className="text-sm font-medium truncate">
                   {getConversationTitle()}
                 </p>
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreHorizontal className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={(e) => handleConversationBranch(conversationMeta.id as ConversationId, e)}>
-                        <GitBranch className="h-3 w-3 mr-2" />
-                        Branch
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem 
-                        onClick={(e) => handleConversationDelete(conversationMeta.id as ConversationId, e)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="h-3 w-3 mr-2" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                <span className="text-xs text-muted-foreground truncate">
+                  {timeAgo}
+                </span>
               </div>
-              <p className="text-xs text-muted-foreground">
-                {timeAgo}
-              </p>
-            </div>
-          </Link>
+            </Link>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 p-0 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto data-[state=open]:opacity-100 data-[state=open]:pointer-events-auto"
+                >
+                  <MoreHorizontal className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={(e) => handleConversationBranch(conversationMeta.id as ConversationId, e)}>
+                  <GitBranch className="h-3 w-3 mr-2" />
+                  Branch
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={(e) => handleConversationDelete(conversationMeta.id as ConversationId, e)}
+                  className="text-destructive"
+                >
+                  <Trash2 className="h-3 w-3 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         );
       })}
       {/* Footer: loader / all-caught-up */}
