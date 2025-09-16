@@ -24,7 +24,7 @@ import { WorkspaceId, ConversationId } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { 
   MessageSquare, 
-  MoreHorizontal, 
+  MoreVertical, 
   Trash2, 
   GitBranch
 } from 'lucide-react';
@@ -381,6 +381,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
         const getConversationTitle = () => {
           return conversationMeta.title || 'Untitled';
         };
+
+        let triggerButton: HTMLButtonElement | null = null;
         
         return (
           <div
@@ -416,14 +418,23 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
                 </span>
               </div>
             </Link>
-            <DropdownMenu>
+            <DropdownMenu
+              onOpenChange={(open) => {
+                if (!open && triggerButton) {
+                  triggerButton.blur();
+                }
+              }}
+            >
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 p-0 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto data-[state=open]:opacity-100 data-[state=open]:pointer-events-auto"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 p-0 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto data-[state=open]:opacity-100 data-[state=open]:pointer-events-auto"
+                  ref={(node) => {
+                    triggerButton = node;
+                  }}
                 >
-                  <MoreHorizontal className="h-3 w-3" />
+                  <MoreVertical className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
