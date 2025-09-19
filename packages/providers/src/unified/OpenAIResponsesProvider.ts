@@ -14,7 +14,9 @@ import {
   generateEventId,
   ToolCallId,
   generateToolCallId,
-  sortSegmentsBySequence
+  sortSegmentsBySequence,
+  eventsToResponsesInputItems,
+  responsesPayloadToEvent,
 } from '@budchat/events';
 import { processResponsesAPIStream } from './utils/openaiResponsesUtils';
 
@@ -41,17 +43,7 @@ interface ResponsesCreateParams {
   tools?: (ResponsesMCPTool | ResponsesBuiltInTool)[];
 }
 
-interface ResponsesInputItem {
-  id?: string;
-  type: 'message' | 'text' | 'mcp_call' | 'reasoning';
-  role?: 'user' | 'assistant' | 'system';
-  content?: string | Array<{ type: string; text: string }>;
-  text?: string;
-  name?: string;
-  output?: string;
-  error?: string;
-  summary?: Array<{ type: string; text: string }>;
-}
+type ResponsesInputItem = ReturnType<typeof eventsToResponsesInputItems>[number];
 
 interface ResponsesMCPTool {
   type: 'mcp';
@@ -118,7 +110,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
 
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
-      const inputItems = this.convertEventsToInputItems(request.events, request.mcpConfig);
+      const inputItems = eventsToResponsesInputItems(request.events, { remoteServers: request.mcpConfig?.remote_servers });
       const params: ResponsesCreateParams = { model: this.getModelName(request.model), input: inputItems, max_output_tokens: request.maxTokens || 8000, include: ['reasoning.encrypted_content'] };
       const tools = this.buildToolsArray(request);
       if (tools.length > 0) params.tools = tools;
@@ -129,7 +121,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
       params.reasoning = { effort: reasoningEffort as any, summary: request.reasoningConfig?.summary || summaryDefault };
       if (request.textGenerationConfig?.verbosity) params.text = { verbosity: request.textGenerationConfig.verbosity } as any;
       const response = await this.client.responses.create(params as any);
-      const event = this.convertResponseToEvent(response);
+      const event = responsesPayloadToEvent(response);
       const usage = 'usage' in response && (response as any).usage ? { promptTokens: (response as any).usage.input_tokens, completionTokens: (response as any).usage.output_tokens, totalTokens: (response as any).usage.total_tokens } : undefined;
       return { event, usage };
     } catch (error) {
@@ -140,7 +132,7 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
   async *stream(request: UnifiedChatRequest): AsyncGenerator<StreamEvent> {
     try {
       const RESP_DEBUG = process.env.RESPONSES_DEBUG === 'true' || process.env.STREAM_DEBUG === 'true';
-      const inputItems = this.convertEventsToInputItems(request.events);
+      const inputItems = eventsToResponsesInputItems(request.events, { remoteServers: request.mcpConfig?.remote_servers });
       const params: ResponsesCreateParams & { stream: true } = { model: this.getModelName(request.model), input: inputItems, max_output_tokens: request.maxTokens || 8000, stream: true, include: ['reasoning.encrypted_content'] };
       const tools = this.buildToolsArray(request);
       if (tools.length > 0) params.tools = tools;
@@ -346,89 +338,4 @@ export class OpenAIResponsesProvider extends OpenAIBaseProvider {
     }
   }
   
-  private convertEventsToInputItems(events: Event[], mcpConfig?: { remote_servers?: Array<{ server_label: string }> }): ResponsesInputItem[] {
-    const items: ResponsesInputItem[] = [];
-    let messageIndex = 0;
-    const genMsgId = () => `msg_${messageIndex++}`;
-    const defaultServer = mcpConfig?.remote_servers && mcpConfig.remote_servers.length > 0
-      ? mcpConfig.remote_servers[0].server_label
-      : undefined;
-
-    for (const event of events) {
-      if (event.role === 'system' || event.role === 'user') {
-        const texts = (event.segments || []).filter(s => s.type === 'text') as Array<{ type: 'text'; text: string }>;
-        items.push({
-          id: genMsgId(),
-          type: 'message',
-          role: event.role,
-          content: texts.map(t => ({ type: 'input_text', text: t.text || '' }))
-        });
-        continue;
-      }
-
-      if (event.role === 'assistant') {
-        // Flatten assistant segments in original order — preserve reasoning → tool → text
-        for (const segment of event.segments || []) {
-          if (segment.type === 'reasoning') {
-            const parts = (segment as any).parts as Array<{ type: 'summary_text'; text: string }> | undefined;
-            const summary = Array.isArray(parts)
-              ? parts.map(p => ({ type: 'summary_text' as const, text: String(p?.text || '') }))
-              : [];
-            items.push({ id: (segment as any).id, type: 'reasoning', summary });
-          } else if (segment.type === 'text') {
-            const msgId = (segment as any).id || genMsgId();
-            items.push({ id: msgId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: (segment as any).text || '' }] });
-          } else if (segment.type === 'tool_call') {
-            const mcpCall: any = {
-              id: (segment as any).id,
-              type: 'mcp_call',
-              name: (segment as any).name,
-              arguments: JSON.stringify((segment as any).args || {}),
-              server_label: (segment as any).server_label || defaultServer
-            };
-            if ((segment as any).output !== undefined) {
-              mcpCall.output = typeof (segment as any).output === 'string' ? (segment as any).output : JSON.stringify((segment as any).output);
-            }
-            if ((segment as any).error) {
-              mcpCall.error = (segment as any).error;
-            }
-            items.push(mcpCall);
-          }
-        }
-        continue;
-      }
-
-      if (event.role === 'tool') {
-        const seg = event.segments?.[0] as any;
-        if (seg && seg.type === 'tool_result') {
-          items.push({
-            id: seg.id,
-            type: 'mcp_call',
-            output: typeof seg.output === 'string' ? seg.output : JSON.stringify(seg.output || {}),
-            error: seg.error
-          } as any);
-        }
-        continue;
-      }
-    }
-
-    return items;
-  }
-  
-  private convertResponseToEvent(response: any): Event {
-    const segments: Event['segments'] = [];
-    if (response.output) {
-      for (const output of response.output) {
-        if (output.type === 'text' && output.content) {
-          segments.push({ type: 'text', text: output.content } as any);
-        } else if (output.type === 'mcp_call') {
-          segments.push({ type: 'tool_call', id: (output.id || crypto.randomUUID()) as ToolCallId, name: output.name, args: output.arguments ? JSON.parse(output.arguments) : {}, server_label: output.server_label } as any);
-        }
-      }
-    }
-    if (response.reasoning_content) {
-      segments.unshift({ type: 'reasoning', id: response.id, output_index: 0, sequence_number: 0, parts: [{ summary_index: 0, type: 'summary_text', text: response.reasoning_content, sequence_number: 0, is_complete: true, created_at: Date.now() }] } as any);
-    }
-    return { id: response.id, role: 'assistant', segments, ts: Date.now() } as any;
-  }
 }
