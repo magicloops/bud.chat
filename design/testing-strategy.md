@@ -61,11 +61,11 @@
 ---
 
 **Implementation Steps**
-1. Scaffold Jest in `packages/events` with initial snapshot tests for `openaiChat`, `openaiResponses`, `anthropic` transforms (install dev deps via `pnpm add -D jest ts-jest @types/jest`).
-2. Add fixtures capturing representative conversations; assert shared transforms match expected provider payloads.
-3. Update transcript builder tests to reuse fixtures, ensuring reconstructed request/responses align with snapshots.
-4. Create app-level integration test exercising JSON mode generation using fixtures (mock providers; ensure generated code references correct payloads).
-5. Document testing commands in README, include CI workflow to run package + app tests.
+1. ✅ Scaffold Jest in `packages/events` with initial unit tests for `openaiChat`, `openaiResponses`, `anthropic` transforms (`pnpm test:events`).
+2. ✅ Add fixtures capturing representative conversations; transforms assert provider payload parity (fixtures shared via `packages/events/test-utils`).
+3. ✅ Update transcript builder tests (`lib/exports/__tests__/providerTranscripts.test.ts`) to reuse fixtures, ensuring reconstructed request/responses align with shared helpers (`pnpm test:exports`).
+4. ⏳ Create app-level integration test exercising JSON mode generation using fixtures (mock providers; ensure generated code references correct payloads).
+5. ⏳ Document testing commands in README, include CI workflow to run package + app tests.
 
 ---
 

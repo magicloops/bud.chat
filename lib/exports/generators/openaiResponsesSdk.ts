@@ -1,13 +1,63 @@
 import type { ProviderTranscript, GeneratorOptions, GeneratorResult } from '../types';
+import { formatJson, prependIndent, mergeWarnings } from './utils';
+
+const RESPONSES_COMMENT = '// For streaming responses, consider using client.responses.stream(...)';
 
 export function generateOpenAIResponsesSdk(
-  _transcript: ProviderTranscript,
+  transcript: ProviderTranscript,
   _options?: GeneratorOptions,
 ): GeneratorResult {
+  const warnings: string[] = [];
+
+  if (transcript.provider !== 'openai-responses') {
+    warnings.push(`Expected OpenAI Responses transcript, received ${transcript.provider}.`);
+  }
+
+  const lines: string[] = [];
+  lines.push("import OpenAI from 'openai';");
+  lines.push('');
+  lines.push('const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });');
+  lines.push('');
+  lines.push('async function run() {');
+
+  transcript.steps.forEach((step, index) => {
+    const stepNumber = index + 1;
+    lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
+    lines.push(
+      prependIndent(
+        `const response${stepNumber} = await client.responses.create(${formatJson(step.request, 2)});`,
+        1,
+      ),
+    );
+    lines.push(`  console.log('assistant ${stepNumber} output:', response${stepNumber}.output);`);
+    if (step.streamPreview && step.streamPreview.length > 0) {
+      lines.push(`  ${RESPONSES_COMMENT}`);
+    }
+    if (step.warnings && step.warnings.length > 0) {
+      step.warnings.forEach((warning) => warnings.push(`[Step ${stepNumber}] ${warning}`));
+    }
+    if (index < transcript.steps.length - 1) {
+      lines.push('');
+    }
+  });
+
+  if (transcript.steps.length === 0) {
+    lines.push('  // No assistant turns found in the transcript.');
+  }
+
+  lines.push('}');
+  lines.push('');
+  lines.push('run().catch((error) => {');
+  lines.push('  console.error(error);');
+  lines.push('  process.exit(1);');
+  lines.push('});');
+
+  const combinedWarnings = mergeWarnings(transcript.warnings, warnings);
+
   return {
     label: 'OpenAI Responses (TypeScript SDK)',
     language: 'typescript',
-    code: `// TODO: Implement OpenAI Responses SDK generator\n`,
-    warnings: ['OpenAI Responses SDK generator is not implemented yet.'],
+    code: lines.join('\n'),
+    warnings: combinedWarnings,
   };
 }

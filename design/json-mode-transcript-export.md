@@ -166,8 +166,8 @@
 ---
 
 **Next Steps (Helpers & Generators)**
-1. Implement helper scaffolding + types.
-2. Port provider-specific build functions (starting with OpenAI Chat, then Responses, then Anthropic).
-3. Add transcript fixtures + unit tests ensuring deterministic output.
-4. Layer generator templates atop the transcript helpers and backfill tests.
-5. Only after helpers/generators stabilize, wire JSON mode UI to consume them.
+1. ✅ Implement helper scaffolding + types (shared provider transforms extracted to `packages/events/src/transforms/*`).
+2. ✅ Port provider-specific build functions (OpenAI Chat/Responses + Anthropic now in shared module; providers consume them).
+3. ✅ Add transcript fixtures + unit tests ensuring deterministic output (`packages/events/__tests__/transforms/*`, `lib/exports/__tests__/providerTranscripts.test.ts`).
+4. ⏳ Layer generator templates atop the transcript helpers and backfill snapshot/code-output tests.
+5. ⏳ After helpers/generators stabilize, wire JSON mode UI to consume them.

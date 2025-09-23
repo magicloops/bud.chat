@@ -1,4 +1,5 @@
 import type { ProviderTranscript, GeneratorOptions, GeneratorResult, JsonValue } from '../types';
+import { formatJson, prependIndent, mergeWarnings } from './utils';
 
 export function generateOpenAIChatSdk(
   transcript: ProviderTranscript,
@@ -21,7 +22,13 @@ export function generateOpenAIChatSdk(
     const stepNumber = index + 1;
     lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
     lines.push(
-      `  const response${stepNumber} = await client.chat.completions.create(${renderJson(step.request, 2)});`,
+      prependIndent(
+        `const response${stepNumber} = await client.chat.completions.create(${formatJson(
+          step.request,
+          2,
+        )});`,
+        1,
+      ),
     );
     lines.push(`  console.log('assistant ${stepNumber}:', response${stepNumber}.choices[0].message);`);
 
@@ -57,53 +64,12 @@ export function generateOpenAIChatSdk(
   lines.push('  process.exit(1);');
   lines.push('});');
 
+  const combinedWarnings = mergeWarnings(transcript.warnings, warnings);
+
   return {
     label: 'OpenAI Chat (TypeScript SDK)',
     language: 'typescript',
     code: lines.join('\n'),
-    warnings: warnings.length > 0 ? warnings : undefined,
+    warnings: combinedWarnings,
   };
-}
-
-function renderJson(value: JsonValue, indentLevel = 0): string {
-  const indent = '  '.repeat(indentLevel);
-
-  if (value === null) {
-    return 'null';
-  }
-
-  const valueType = typeof value;
-  if (valueType === 'string') {
-    return `'${escapeString(value as string)}'`;
-  }
-  if (valueType === 'number' || valueType === 'boolean') {
-    return String(value);
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]';
-    const childIndent = '  '.repeat(indentLevel + 1);
-    const parts = value.map((item) => `${childIndent}${renderJson(item, indentLevel + 1)}`);
-    return `[
-${parts.join('\n')}
-${indent}]`;
-  }
-
-  const entries = Object.entries(value as Record<string, JsonValue>);
-  if (entries.length === 0) return '{}';
-
-  const childIndent = '  '.repeat(indentLevel + 1);
-  const props: string[] = [];
-  for (const [key, val] of entries) {
-    if (val === undefined) continue;
-    props.push(`${childIndent}${JSON.stringify(key)}: ${renderJson(val, indentLevel + 1)}`);
-  }
-
-  return `{
-${props.join('\n')}
-${indent}}`;
-}
-
-function escapeString(value: string): string {
-  return value.replace(/\\/g, '\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
 }
