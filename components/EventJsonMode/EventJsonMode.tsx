@@ -17,7 +17,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { eventsToOpenAIChatMessages, eventsToResponsesInputItems, eventsToAnthropicMessages, type AnthropicMessage } from '@budchat/events';
+import { eventsToOpenAIChatMessages, eventsToResponsesInputItems, eventsToAnthropicMessages } from '@budchat/events';
 import { cn } from '@/lib/utils';
 
 interface EventJsonModeProps {
@@ -80,7 +80,7 @@ export function EventJsonMode({ conversation, model, targetProvider }: EventJson
       case 'anthropic-messages':
         return {
           model,
-          messages: dedupeAnthropicMessages(eventsToAnthropicMessages(conversation.events)),
+          messages: eventsToAnthropicMessages(conversation.events),
         };
       default:
         return conversation.events as unknown as JsonValue;
@@ -113,10 +113,12 @@ export function EventJsonMode({ conversation, model, targetProvider }: EventJson
                 <div className="mt-3 max-h-[420px] overflow-y-auto pr-1 space-y-4">
                   {generatorResults.map(({ descriptor, result }) => (
                     <TabsContent key={descriptor.id} value={descriptor.id} className="space-y-3">
-                      <CodeBlock language={result.language} value={result.code} />
-                  </TabsContent>
-                ))}
-              </div>
+                      <div className="w-full overflow-x-auto rounded-md border bg-muted/20">
+                        <CodeBlock language={result.language} value={result.code} />
+                      </div>
+                    </TabsContent>
+                  ))}
+                </div>
             </Tabs>
           )}
           </DialogContent>
@@ -129,20 +131,4 @@ export function EventJsonMode({ conversation, model, targetProvider }: EventJson
       </div>
     </div>
   );
-}
-
-function dedupeAnthropicMessages(messages: AnthropicMessage[]): AnthropicMessage[] {
-  return messages.map((message) => {
-    const dedupedContent = (message.content || []).reduce<AnthropicMessage['content']>((acc, block) => {
-      if (block.type === 'text') {
-        const last = acc[acc.length - 1];
-        if (last && last.type === 'text' && last.text === block.text) {
-          return acc;
-        }
-      }
-      acc.push(block);
-      return acc;
-    }, []);
-    return { ...message, content: dedupedContent };
-  });
 }

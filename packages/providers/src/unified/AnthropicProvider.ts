@@ -107,7 +107,7 @@ export class AnthropicProvider extends BaseProvider {
         }
         if (chunk.type === 'content_block_stop') {
           if (currentEvent && chunk.index !== undefined) {
-            if (currentText) { currentEvent.segments.push({ type: 'text', text: currentText } as any); currentText = ''; }
+            currentText = '';
             const lastToolCall = currentToolCalls[currentToolCalls.length - 1];
             if (lastToolCall && lastToolCall.input) {
               try {
