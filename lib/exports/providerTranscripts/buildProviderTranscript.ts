@@ -449,7 +449,6 @@ function deriveAnthropicToolDefinitions(
     return { warnings };
   }
 
-  warnings.push('Anthropic tool schemas inferred from recorded calls; adjust as needed.');
   return { tools: Array.from(seen.values()), warnings };
 }
 
@@ -704,7 +703,6 @@ function buildAnthropicResponsePayload(
 
   if (toolResults.length > 0) {
     response.tool_results = asJsonValue(toolResults);
-    warnings.push('Tool results follow the assistant message; send them back to Anthropic as user tool_result blocks when replaying.');
   }
 
   return { response, warnings };

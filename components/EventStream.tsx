@@ -10,6 +10,11 @@ import { getDefaultModel } from '@budchat/models';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@budchat/streaming';
+import { useJsonMode } from '@/hooks/useJsonMode';
+import { EventJsonMode } from '@/components/EventJsonMode';
+import { Button } from '@/components/ui/button';
+import { getModelProvider, isReasoningModel } from '@budchat/models';
+import type { TargetProvider } from '@/lib/exports';
 
 interface EventStreamProps {
   // For local state (new conversations)
@@ -189,6 +194,18 @@ const EventStreamComponent = function EventStream({
                 // For existing conversations, use current bud data from store
                 (currentBudData?.default_json && typeof currentBudData.default_json === 'object' && 'model' in currentBudData.default_json ? (currentBudData.default_json as { model?: string }).model : null) ||
                 getDefaultModel();
+
+  const [jsonMode, setJsonMode] = useJsonMode();
+
+  const resolvedConversation = events ? localConversation : conversation;
+  const provider = getModelProvider(model);
+  const targetProvider: TargetProvider = provider === 'anthropic'
+    ? 'anthropic-messages'
+    : isReasoningModel(model)
+      ? 'openai-responses'
+      : 'openai-chat';
+
+  const showJsonMode = jsonMode && !!resolvedConversation;
   
   return (
     <div className={cn('flex flex-col h-full', className)}>
@@ -205,7 +222,15 @@ const EventStreamComponent = function EventStream({
           </div>
           
           {/* Status indicators and space for settings toggle */}
-          <div className="flex items-center gap-2 text-xs text-muted-foreground w-12 justify-end">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-[120px] justify-end">
+            <Button
+              variant={jsonMode ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={() => setJsonMode(!jsonMode)}
+              disabled={!resolvedConversation}
+            >
+              JSON
+            </Button>
             {(isStreaming || isLocalStreaming) && (
               <div className="flex items-center gap-1">
                 <div className="h-1.5 w-1.5 bg-green-500 rounded-full animate-pulse" />
@@ -218,9 +243,14 @@ const EventStreamComponent = function EventStream({
 
       {/* Events */}
       <div className="flex-1 min-h-0 h-full overflow-hidden">
-        {events ? (
-          // Local state - render events directly (new conversations)
-          <EventList 
+        {showJsonMode ? (
+          <EventJsonMode
+            conversation={resolvedConversation!}
+            model={model}
+            targetProvider={targetProvider}
+          />
+        ) : events ? (
+          <EventList
             events={events}
             conversation={localConversation}
             autoScroll={true}
@@ -228,14 +258,12 @@ const EventStreamComponent = function EventStream({
             isStreaming={isStreaming}
           />
         ) : conversationId ? (
-          // Server state - fetch from store (existing conversations not streaming)
-          <EventList 
+          <EventList
             conversationId={conversationId}
             autoScroll={true}
             className="h-full"
           />
         ) : (
-          // Welcome state
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center text-muted-foreground max-w-md">
               <h2 className="text-xl font-semibold mb-2">Welcome to bud.chat</h2>
