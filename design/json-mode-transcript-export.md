@@ -158,6 +158,7 @@
   - SDK generators output idiomatic client construction, loop through transcript steps, and interpolate request JSON via `JSON.stringify(step.request, null, 2)` with proper indentation.
   - HTTP generators show `fetch` / `requests` POST examples and SSE handlers seeded with `step.streamPreview` when available (fallback to simple `.text()` parsing if not).
   - Comments explain where to plug secrets, workspace IDs, tool registration, etc.
+  - Current coverage: OpenAI (Chat + Responses) TypeScript/Python SDK + HTTP, Anthropic Python SDK/HTTP. Still pending: Anthropic TypeScript SDK counterpart.
 - **Cross-provider support:**
   - UI can pass any `TargetProvider`; generators do not validate against the conversation’s original provider.
   - When transcript helpers emit warnings (e.g., feature unsupported on target provider), generators echo them as inline comments (`// TODO: Review tool output ...`).
@@ -169,5 +170,19 @@
 1. ✅ Implement helper scaffolding + types (shared provider transforms extracted to `packages/events/src/transforms/*`).
 2. ✅ Port provider-specific build functions (OpenAI Chat/Responses + Anthropic now in shared module; providers consume them).
 3. ✅ Add transcript fixtures + unit tests ensuring deterministic output (`packages/events/__tests__/transforms/*`, `lib/exports/__tests__/providerTranscripts.test.ts`).
-4. ⏳ Layer generator templates atop the transcript helpers and backfill snapshot/code-output tests.
-5. ⏳ After helpers/generators stabilize, wire JSON mode UI to consume them.
+4. ✅ Layer generator templates atop the transcript helpers and backfill snapshot/code-output tests.
+5. ✅ Wire JSON mode UI to consume them and expose export modal.
+6. ⏳ Add remaining generator variant:
+   - Anthropic TypeScript SDK (messages client).
+7. ⏳ Expand tests/fixtures to cover new language/provider combinations.
+
+---
+
+**Outstanding Libraries / SDK Targets**
+
+| Provider | HTTP | TypeScript SDK | Python SDK |
+|----------|------|----------------|------------|
+| OpenAI (Chat/Responses) | ✅ Implemented | ✅ Implemented | ✅ Implemented |
+| Anthropic Messages | ✅ Implemented | ⏳ Todo | ✅ Implemented |
+
+Action: scope generator templates + helpers for the remaining Anthropic TypeScript SDK cell, mirroring the structure of existing implementations and reusing transcript data.

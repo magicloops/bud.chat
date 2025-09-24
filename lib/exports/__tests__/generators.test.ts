@@ -4,7 +4,9 @@ import { generateOpenAIChatHttp } from '../generators/openaiChatHttp';
 import { generateOpenAIResponsesSdk } from '../generators/openaiResponsesSdk';
 import { generateOpenAIResponsesHttp } from '../generators/openaiResponsesHttp';
 import { generateAnthropicSdk } from '../generators/anthropicSdk';
+import { generateAnthropicSdkTs } from '../generators/anthropicSdkTs';
 import { generateAnthropicHttp } from '../generators/anthropicHttp';
+import { generateOpenAIPythonSdk } from '../generators/openaiSdkPy';
 import { openAIChatConversation, openAIResponsesConversation, anthropicConversation } from '../test-utils/conversations';
 import type { TranscriptContext } from '../types';
 
@@ -66,6 +68,20 @@ describe('generator templates', () => {
     expect(result.code).not.toContain('assistant 1');
   });
 
+  test('OpenAI Chat Python SDK generator emits create call', () => {
+    const result = generateOpenAIPythonSdk(chatTranscript);
+    expect(result.code).toContain('from openai import OpenAI');
+    expect(result.code).toContain('client.chat.completions.create');
+    expect(result.code).toContain('json.dumps(response_1.model_dump(), indent=2)');
+  });
+
+  test('OpenAI Chat Python SDK single-turn omits numbering', () => {
+    const result = generateOpenAIPythonSdk(singleTurnChatTranscript);
+    expect(result.code).toContain('response = client.chat.completions.create');
+    expect(result.code).not.toContain('assistant 1');
+    expect(result.code).not.toContain('response_1');
+  });
+
   test('OpenAI Responses SDK generator emits responses.create call', () => {
     const result = generateOpenAIResponsesSdk(responsesTranscript);
     expect(result.code).toContain('client.responses.create');
@@ -91,6 +107,19 @@ describe('generator templates', () => {
     expect(result.code).toContain('const body =');
     expect(result.code).toContain('console.log(JSON.stringify(json, null, 2));');
     expect(result.code).not.toContain('assistant 1');
+  });
+
+  test('OpenAI Responses Python SDK generator emits responses.create call', () => {
+    const result = generateOpenAIPythonSdk(responsesTranscript);
+    expect(result.code).toContain('client.responses.create');
+    expect(result.code).toContain('json.dumps(response.model_dump(), indent=2)');
+  });
+
+  test('OpenAI Responses Python SDK single-turn omits numbering', () => {
+    const result = generateOpenAIPythonSdk(singleTurnResponsesTranscript);
+    expect(result.code).toContain('response = client.responses.create');
+    expect(result.code).not.toContain('assistant 1');
+    expect(result.code).not.toContain('response_1');
   });
 
   test('Anthropic SDK generator emits python messages call', () => {
@@ -122,5 +151,29 @@ describe('generator templates', () => {
     const result = generateAnthropicHttp(anthropicTranscript);
     expect(result.code).toContain('requests.post');
     expect(result.code).toContain('body = {');
+  });
+
+  test('Anthropic TypeScript SDK generator emits messages.create call', () => {
+    const result = generateAnthropicSdkTs(anthropicTranscript);
+    expect(result.code).toContain("import Anthropic from '@anthropic-ai/sdk'");
+    expect(result.code).toContain('client.messages.create');
+    expect(result.code).toContain('JSON.stringify(response');
+  });
+
+  test('Anthropic TypeScript SDK single-turn output omits numbering', () => {
+    const singleTurnTranscript = buildProviderTranscript({
+      targetProvider: 'anthropic-messages',
+      context: {
+        model: 'claude-3-5-sonnet-20241022',
+        events: anthropicConversation.slice(0, 3),
+        ...baseContext,
+      },
+    });
+
+    const result = generateAnthropicSdkTs(singleTurnTranscript);
+    expect(result.code).toContain('const response = await client.messages.create');
+    expect(result.code).toContain('console.log(JSON.stringify(response, null, 2));');
+    expect(result.code).not.toContain('assistant 1');
+    expect(result.code).not.toContain('response1');
   });
 });
