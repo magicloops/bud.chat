@@ -10,6 +10,7 @@ import type {
 type ToolChoiceValue = 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
 
 const asJsonValue = (value: unknown): JsonValue => value as JsonValue;
+const DEFAULT_ANTHROPIC_MAX_TOKENS = 4096;
 
 export function buildProviderTranscript(options: BuildTranscriptOptions): ProviderTranscript {
   const { targetProvider, context } = options;
@@ -208,7 +209,14 @@ function buildOpenAIResponsesRequestPayload(
   tools: JsonValue[] | undefined,
 ): { request: JsonValue; warnings: string[] } {
   const warnings: string[] = [];
-  const inputItems = eventsToResponsesInputItems(turn.history, { remoteServers: context.mcpConfig?.remote_servers });
+  const conversationEvents = [
+    ...turn.history,
+    turn.assistantEvent,
+    ...turn.trailingToolEvents,
+  ];
+  const inputItems = eventsToResponsesInputItems(conversationEvents, {
+    remoteServers: context.mcpConfig?.remote_servers,
+  });
 
   const payload: Record<string, JsonValue> = {
     model: context.model,
@@ -653,9 +661,8 @@ function buildAnthropicRequestPayload(
   if (typeof context.temperature === 'number') {
     payload.temperature = context.temperature;
   }
-  if (typeof context.maxTokens === 'number') {
-    payload.max_tokens = context.maxTokens;
-  }
+  const maxTokens = typeof context.maxTokens === 'number' ? context.maxTokens : DEFAULT_ANTHROPIC_MAX_TOKENS;
+  payload.max_tokens = maxTokens;
 
   const toolDefs = deriveAnthropicToolDefinitions(context);
   if (toolDefs.tools && toolDefs.tools.length > 0) {

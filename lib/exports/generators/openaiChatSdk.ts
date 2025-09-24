@@ -18,19 +18,28 @@ export function generateOpenAIChatSdk(
   lines.push('');
   lines.push('async function run() {');
 
+  const singleStep = transcript.steps.length === 1;
+
   transcript.steps.forEach((step, index) => {
     const stepNumber = index + 1;
-    lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
-    lines.push(
-      prependIndent(
-        `const response${stepNumber} = await client.chat.completions.create(${formatJson(
-          step.request,
-          2,
-        )});`,
-        1,
-      ),
-    );
-    lines.push(`  console.log('assistant ${stepNumber}:', response${stepNumber}.choices[0].message);`);
+    const responseVar = singleStep ? 'response' : `response${stepNumber}`;
+
+    if (singleStep) {
+      lines.push('  // Replay the recorded assistant turn');
+    } else {
+      lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
+    }
+
+    lines.push('  {');
+    lines.push(prependIndent(`const ${responseVar} = await client.chat.completions.create(`, 2));
+    const requestJson = formatJson(step.request, 2).split('\n');
+    requestJson.forEach((line) => lines.push(prependIndent(line, 3)));
+    lines.push(prependIndent(');', 2));
+
+    if (!singleStep) {
+      lines.push(`    console.log('assistant turn ${stepNumber}');`);
+    }
+    lines.push(`    console.log(JSON.stringify(${responseVar}, null, 2));`);
 
     const responseObject = (step.response as Record<string, unknown>) ?? null;
     const choices = (responseObject?.choices as Array<Record<string, unknown>>) ?? [];
@@ -40,7 +49,7 @@ export function generateOpenAIChatSdk(
 
     if (toolCalls.length > 0) {
       lines.push(
-        `  // TODO: Handle tool calls from response${stepNumber}.choices[0].message.tool_calls before sending new tool results.`,
+        `    // TODO: Handle tool calls from ${responseVar}.choices[0].message.tool_calls before sending new tool results.`,
       );
     }
 
@@ -48,6 +57,7 @@ export function generateOpenAIChatSdk(
       step.warnings.forEach((warning) => warnings.push(`[Step ${stepNumber}] ${warning}`));
     }
 
+    lines.push('  }');
     if (index < transcript.steps.length - 1) {
       lines.push('');
     }

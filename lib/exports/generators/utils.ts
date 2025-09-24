@@ -3,58 +3,102 @@ import type { JsonValue } from '../types';
 const TS_INDENT = '  ';
 const PY_INDENT = '    ';
 
-export function formatJson(value: JsonValue, indentLevel = 0, indent: string = TS_INDENT): string {
-  const pad = (level: number) => indent.repeat(level);
+const padTs = (level: number, indent: string) => indent.repeat(level);
+const padPy = (level: number) => PY_INDENT.repeat(level);
 
-  if (value === null) return 'null';
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+export function formatJson(value: JsonValue, indentLevel = 0, indent: string = TS_INDENT): string {
+  const json = JSON.stringify(value, null, indent) ?? 'null';
+  if (indentLevel <= 0) return json;
+  const prefix = padTs(indentLevel, indent);
+  return json
+    .split('\n')
+    .map((line) => (line.length > 0 ? `${prefix}${line}` : prefix))
+    .join('\n');
+}
+
+function formatPythonValueLines(value: JsonValue, indentLevel: number): string[] {
+  if (value === null) return [`${padPy(indentLevel)}None`];
+  if (typeof value === 'string') return [`${padPy(indentLevel)}${JSON.stringify(value)}`];
+  if (typeof value === 'number') return [`${padPy(indentLevel)}${String(value)}`];
+  if (typeof value === 'boolean') return [`${padPy(indentLevel)}${value ? 'True' : 'False'}`];
 
   if (Array.isArray(value)) {
-    if (value.length === 0) return '[]';
-    const items = value.map((item) => `${pad(indentLevel + 1)}${formatJson(item, indentLevel + 1, indent)}`);
-    return `[
-${items.join('\n')}
-${pad(indentLevel)}]`;
+    if (value.length === 0) return [`${padPy(indentLevel)}[]`];
+    const lines: string[] = [`${padPy(indentLevel)}[`];
+    value.forEach((item, index) => {
+      const itemLines = formatPythonValueLines(item, indentLevel + 1);
+      if (itemLines.length === 0) return;
+      const last = itemLines.length - 1;
+      itemLines[last] = `${itemLines[last]}${index < value.length - 1 ? ',' : ''}`;
+      lines.push(...itemLines);
+    });
+    lines.push(`${padPy(indentLevel)}]`);
+    return lines;
   }
 
-  const entries = Object.entries(value as Record<string, JsonValue>);
-  if (entries.length === 0) return '{}';
-  const lines: string[] = [];
-  for (const [key, val] of entries) {
-    if (val === undefined) continue;
-    lines.push(`${pad(indentLevel + 1)}${JSON.stringify(key)}: ${formatJson(val, indentLevel + 1, indent)}`);
-  }
-  return `{
-${lines.join('\n')}
-${pad(indentLevel)}}`;
+  const entries = Object.entries(value as Record<string, JsonValue>).filter(([, val]) => val !== undefined);
+  if (entries.length === 0) return [`${padPy(indentLevel)}{}`];
+
+  const lines: string[] = [`${padPy(indentLevel)}{`];
+  entries.forEach(([key, val], index) => {
+    const valueLines = formatPythonValueLines(val, indentLevel + 1);
+    if (valueLines.length === 0) return;
+    const needsComma = index < entries.length - 1;
+    const [firstLine, ...rest] = valueLines;
+    const firstValue = firstLine.trimStart();
+
+    if (rest.length === 0) {
+      lines.push(`${padPy(indentLevel + 1)}${JSON.stringify(key)}: ${firstValue}${needsComma ? ',' : ''}`);
+    } else {
+      lines.push(`${padPy(indentLevel + 1)}${JSON.stringify(key)}: ${firstValue}`);
+      rest.forEach((line, idx) => {
+        if (idx === rest.length - 1) {
+          lines.push(`${line}${needsComma ? ',' : ''}`);
+        } else {
+          lines.push(line);
+        }
+      });
+    }
+  });
+  lines.push(`${padPy(indentLevel)}}`);
+  return lines;
 }
 
 export function formatJsonPython(value: JsonValue, indentLevel = 0): string {
-  if (value === null) return 'None';
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return formatPythonValueLines(value, indentLevel).join('\n');
+}
 
-  const pad = (level: number) => PY_INDENT.repeat(level);
+export function formatPythonCallArguments(payload: Record<string, JsonValue>, indentLevel = 0): string[] {
+  const entries = Object.entries(payload ?? {});
+  if (entries.length === 0) return [];
 
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]';
-    const items = value.map((item) => `${pad(indentLevel + 1)}${formatJsonPython(item, indentLevel + 1)}`);
-    return `[
-${items.join('\n')}
-${pad(indentLevel)}]`;
-  }
-
-  const entries = Object.entries(value as Record<string, JsonValue>);
-  if (entries.length === 0) return '{}';
   const lines: string[] = [];
-  for (const [key, val] of entries) {
-    if (val === undefined) continue;
-    lines.push(`${pad(indentLevel + 1)}${JSON.stringify(key)}: ${formatJsonPython(val, indentLevel + 1)}`);
+  entries.forEach(([key, val]) => {
+    const valueLines = formatPythonValueLines(val, indentLevel);
+    if (valueLines.length === 0) return;
+    const [firstLine, ...rest] = valueLines;
+    if (rest.length === 0) {
+      lines.push(`${padPy(indentLevel)}${key}=${firstLine.trimStart()},`);
+    } else {
+      lines.push(`${padPy(indentLevel)}${key}=${firstLine.trimStart()}`);
+      rest.slice(0, -1).forEach((line) => lines.push(line));
+      lines.push(`${rest[rest.length - 1]},`);
+    }
+  });
+  return lines;
+}
+
+export function formatPythonAssignment(varName: string, value: JsonValue, indentLevel = 0): string[] {
+  const valueLines = formatPythonValueLines(value, indentLevel);
+  if (valueLines.length === 0) {
+    return [`${padPy(indentLevel)}${varName} = None`];
   }
-  return `{
-${lines.join('\n')}
-${pad(indentLevel)}}`;
+  const [firstLine, ...rest] = valueLines;
+  const lines: string[] = [`${padPy(indentLevel)}${varName} = ${firstLine.trimStart()}`];
+  if (rest.length > 0) {
+    lines.push(...rest);
+  }
+  return lines;
 }
 
 export function prependIndent(code: string, indentLevel: number, indent: string = TS_INDENT): string {

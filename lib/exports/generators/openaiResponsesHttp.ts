@@ -26,9 +26,15 @@ export function generateOpenAIResponsesHttp(
   lines.push(`  const endpoint = '${RESPONSES_ENDPOINT}';`);
   lines.push('');
 
+  const singleStep = transcript.steps.length === 1;
+
   transcript.steps.forEach((step, index) => {
     const stepNumber = index + 1;
-    lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
+    if (singleStep) {
+      lines.push('  // Replay the recorded assistant turn');
+    } else {
+      lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
+    }
     lines.push('  {');
     lines.push(prependIndent('const body = ' + formatJson(step.request, 3) + ';', 2));
     lines.push('    const response = await fetch(endpoint, {');
@@ -37,7 +43,13 @@ export function generateOpenAIResponsesHttp(
     lines.push('      body: JSON.stringify(body),');
     lines.push('    });');
     lines.push('    const json = await response.json();');
-    lines.push('    console.log(`assistant ${stepNumber} output:`, json.output);');
+    lines.push('    if (!response.ok) {');
+    lines.push('      throw new Error(`Request failed: ${response.status} ${response.statusText}`);');
+    lines.push('    }');
+    if (!singleStep) {
+      lines.push(`    console.log('assistant turn ${stepNumber}');`);
+    }
+    lines.push('    console.log(JSON.stringify(json, null, 2));');
     if (step.streamPreview && step.streamPreview.length > 0) {
       lines.push('    // TODO: Stream handling required for Responses API.');
     }

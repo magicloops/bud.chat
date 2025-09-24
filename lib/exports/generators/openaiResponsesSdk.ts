@@ -20,22 +20,35 @@ export function generateOpenAIResponsesSdk(
   lines.push('');
   lines.push('async function run() {');
 
+  const singleStep = transcript.steps.length === 1;
+
   transcript.steps.forEach((step, index) => {
     const stepNumber = index + 1;
-    lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
-    lines.push(
-      prependIndent(
-        `const response${stepNumber} = await client.responses.create(${formatJson(step.request, 2)});`,
-        1,
-      ),
-    );
-    lines.push(`  console.log('assistant ${stepNumber} output:', response${stepNumber}.output);`);
+    const responseVar = singleStep ? 'response' : `response${stepNumber}`;
+
+    if (singleStep) {
+      lines.push('  // Replay the recorded assistant turn');
+    } else {
+      lines.push(`  // Step ${stepNumber}: Recreate assistant turn ${step.assistantEventId}`);
+    }
+
+    lines.push('  {');
+    lines.push(prependIndent(`const ${responseVar} = await client.responses.create(`, 2));
+    const payloadLines = formatJson(step.request, 2).split('\n');
+    payloadLines.forEach((line) => lines.push(prependIndent(line, 3)));
+    lines.push(prependIndent(');', 2));
+
+    if (!singleStep) {
+      lines.push(`    console.log('assistant turn ${stepNumber}');`);
+    }
+    lines.push(`    console.log(JSON.stringify(${responseVar}, null, 2));`);
     if (step.streamPreview && step.streamPreview.length > 0) {
-      lines.push(`  ${RESPONSES_COMMENT}`);
+      lines.push(`    ${RESPONSES_COMMENT}`);
     }
     if (step.warnings && step.warnings.length > 0) {
       step.warnings.forEach((warning) => warnings.push(`[Step ${stepNumber}] ${warning}`));
     }
+    lines.push('  }');
     if (index < transcript.steps.length - 1) {
       lines.push('');
     }
