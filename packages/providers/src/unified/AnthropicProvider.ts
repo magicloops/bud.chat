@@ -2,7 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { BaseProvider } from './BaseProvider';
 import { UnifiedChatRequest, UnifiedChatResponse, StreamEvent, ValidationResult, ProviderFeature } from './types';
-import { Event, EventLog, generateEventId, ToolCallId } from '@budchat/events';
+import { Event, EventLog, generateEventId, ToolCallId, Segment, eventsToAnthropicMessages, anthropicResponseToEvent } from '@budchat/events';
 import { getApiModelName } from '@budchat/models';
 
 interface AnthropicInputSchema { type: 'object'; properties: Record<string, unknown>; required?: string[]; additionalProperties?: boolean; [key: string]: unknown }
@@ -27,7 +27,7 @@ export class AnthropicProvider extends BaseProvider {
 
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     const eventLog = new EventLog(request.events);
-    const messages = eventLog.toProviderMessages('anthropic') as Anthropic.MessageParam[];
+    const messages = eventsToAnthropicMessages(request.events) as Anthropic.MessageParam[];
     const systemMessage = eventLog.getSystemMessage();
     try {
       const anthropicRequest: Anthropic.MessageCreateParams = {
@@ -49,15 +49,7 @@ export class AnthropicProvider extends BaseProvider {
         }
       }
       const response = await this.client.messages.create(anthropicRequest);
-      const segments: Event['segments'] = [];
-      const content = (response as any)?.content;
-      if (Array.isArray(content)) {
-        for (const c of content) {
-          if (c?.type === 'text' && typeof c?.text === 'string') segments.push({ type: 'text', text: c.text } as any);
-          if (c?.type === 'tool_use') segments.push({ type: 'tool_call', id: c.id as ToolCallId, name: c.name, args: c.input as any } as any);
-        }
-      }
-      const event: Event = { id: generateEventId(), role: 'assistant', segments, ts: Date.now() };
+      const event = anthropicResponseToEvent(response as any);
       return { event, usage: (response as any).usage ? { promptTokens: (response as any).usage.input_tokens, completionTokens: (response as any).usage.output_tokens, totalTokens: ((response as any).usage.input_tokens || 0) + ((response as any).usage.output_tokens || 0) } : undefined };
     } catch (error) {
       throw this.handleProviderError(error);
@@ -66,7 +58,7 @@ export class AnthropicProvider extends BaseProvider {
 
   async *stream(request: UnifiedChatRequest): AsyncGenerator<StreamEvent> {
     const eventLog = new EventLog(request.events);
-    const messages = eventLog.toProviderMessages('anthropic') as Anthropic.MessageParam[];
+    const messages = eventsToAnthropicMessages(request.events) as Anthropic.MessageParam[];
     const systemMessage = eventLog.getSystemMessage();
     try {
       const anthropicRequest: Anthropic.MessageCreateParams = {
@@ -115,7 +107,7 @@ export class AnthropicProvider extends BaseProvider {
         }
         if (chunk.type === 'content_block_stop') {
           if (currentEvent && chunk.index !== undefined) {
-            if (currentText) { currentEvent.segments.push({ type: 'text', text: currentText } as any); currentText = ''; }
+            currentText = '';
             const lastToolCall = currentToolCalls[currentToolCalls.length - 1];
             if (lastToolCall && lastToolCall.input) {
               try {

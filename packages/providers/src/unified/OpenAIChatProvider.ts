@@ -2,7 +2,7 @@
 import OpenAI from 'openai';
 import { OpenAIBaseProvider } from './OpenAIBaseProvider';
 import { UnifiedChatRequest, UnifiedChatResponse, StreamEvent, ProviderFeature, UnifiedTool, ValidationResult } from './types';
-import { Event, EventLog, ToolCall, Segment } from '@budchat/events';
+import { Event, ToolCall, Segment, eventsToOpenAIChatMessages, openAIChatMessageToEvent } from '@budchat/events';
 import { generateToolCallId, generateEventId, ToolCallId } from '@budchat/events';
 
 export class OpenAIChatProvider extends OpenAIBaseProvider {
@@ -24,7 +24,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
   
   async chat(request: UnifiedChatRequest): Promise<UnifiedChatResponse> {
     try {
-      const messages = this.convertEventsToMessages(request.events);
+      const messages = eventsToOpenAIChatMessages(request.events) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
       const completion = await this.client.chat.completions.create({
         model: this.getModelName(request.model),
         messages,
@@ -35,7 +35,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
       });
       const choice = completion.choices[0];
       if (!choice.message) throw new Error('No message in response');
-      const event = this.convertMessageToEvent(choice.message);
+      const event = openAIChatMessageToEvent(choice.message as any);
       return { event, usage: completion.usage ? { promptTokens: completion.usage.prompt_tokens, completionTokens: completion.usage.completion_tokens, totalTokens: completion.usage.total_tokens } : undefined };
     } catch (error) {
       throw this.handleProviderError(error);
@@ -44,7 +44,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
   
   async *stream(request: UnifiedChatRequest): AsyncGenerator<StreamEvent> {
     try {
-      const messages = this.convertEventsToMessages(request.events);
+      const messages = eventsToOpenAIChatMessages(request.events) as OpenAI.Chat.Completions.ChatCompletionMessageParam[];
       const stream = await this.client.chat.completions.create({
         model: this.getModelName(request.model),
         messages,
@@ -114,23 +114,7 @@ export class OpenAIChatProvider extends OpenAIBaseProvider {
     }
   }
 
-  private convertEventsToMessages(events: Event[]): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-    const eventLog = new EventLog(events);
-    return eventLog.toProviderMessages('openai') as any;
-  }
-
   private convertTools(tools: UnifiedTool[]): OpenAI.Chat.Completions.ChatCompletionTool[] {
     return tools.map(tool => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters || tool.inputSchema || {} } }));
-  }
-
-  private convertMessageToEvent(message: OpenAI.Chat.Completions.ChatCompletionMessage): Event {
-    const segments: Segment[] = [];
-    if (typeof (message as any).content === 'string') segments.push({ type: 'text', text: (message as any).content } as any);
-    if ((message as any).tool_calls) {
-      for (const toolCall of (message as any).tool_calls as any[]) {
-        segments.push({ type: 'tool_call', id: toolCall.id as ToolCallId, name: toolCall.function.name, args: JSON.parse(toolCall.function.arguments) } as any);
-      }
-    }
-    return { id: generateEventId(), role: (message as any).role as any, segments, ts: Date.now() };
   }
 }
