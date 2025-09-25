@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { EventList } from '@/components/EventList';
 import { EventComposer } from '@/components/EventComposer';
 import { Event, useConversation, useEventChatStore, Conversation } from '@/state/eventChatStore';
@@ -195,6 +195,10 @@ const EventStreamComponent = function EventStream({
                 getDefaultModel();
 
   const [jsonMode, setJsonMode] = useState(false);
+
+  useEffect(() => {
+    setJsonMode(false);
+  }, [conversationId]);
 
   const resolvedConversation = events ? localConversation : conversation;
   const provider = getModelProvider(model);
