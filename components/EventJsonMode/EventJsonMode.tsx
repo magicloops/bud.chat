@@ -110,10 +110,14 @@ export function EventJsonMode({ conversation, model, targetProvider }: EventJson
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                <div className="mt-3 max-h-[420px] overflow-y-auto pr-1 space-y-4">
+                <div className="mt-3 max-h-[420px] overflow-y-auto pr-1 space-y-4 max-w-full">
                   {generatorResults.map(({ descriptor, result }) => (
-                    <TabsContent key={descriptor.id} value={descriptor.id} className="space-y-3">
-                      <div className="w-full overflow-x-auto rounded-md border bg-muted/20">
+                    <TabsContent
+                      key={descriptor.id}
+                      value={descriptor.id}
+                      className="space-y-3 max-w-full"
+                    >
+                      <div className="w-full max-w-full overflow-x-auto rounded-md border bg-muted/20">
                         <CodeBlock language={result.language} value={result.code} />
                       </div>
                     </TabsContent>

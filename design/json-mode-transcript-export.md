@@ -172,9 +172,8 @@
 3. ✅ Add transcript fixtures + unit tests ensuring deterministic output (`packages/events/__tests__/transforms/*`, `lib/exports/__tests__/providerTranscripts.test.ts`).
 4. ✅ Layer generator templates atop the transcript helpers and backfill snapshot/code-output tests.
 5. ✅ Wire JSON mode UI to consume them and expose export modal.
-6. ⏳ Add remaining generator variant:
-   - Anthropic TypeScript SDK (messages client).
-7. ⏳ Expand tests/fixtures to cover new language/provider combinations.
+6. ✅ Add remaining generator variant (Anthropic TypeScript SDK).
+7. ✅ Expand tests/fixtures to cover new language/provider combinations.
 
 ---
 
@@ -183,6 +182,6 @@
 | Provider | HTTP | TypeScript SDK | Python SDK |
 |----------|------|----------------|------------|
 | OpenAI (Chat/Responses) | ✅ Implemented | ✅ Implemented | ✅ Implemented |
-| Anthropic Messages | ✅ Implemented | ⏳ Todo | ✅ Implemented |
+| Anthropic Messages | ✅ Implemented | ✅ Implemented | ✅ Implemented |
 
 Action: scope generator templates + helpers for the remaining Anthropic TypeScript SDK cell, mirroring the structure of existing implementations and reusing transcript data.

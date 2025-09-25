@@ -84,7 +84,10 @@ export const CodeBlock: FC<Props> = memo(({ language, value }) => {
   };
 
   return (
-    <div className="codeblock relative font-sans text-[16px] w-full max-w-full" style={{ borderRadius: '0.375rem', overflow: 'hidden' }}>
+    <div
+      className="codeblock relative font-sans text-[16px] w-full max-w-full"
+      style={{ borderRadius: '0.375rem', overflow: 'hidden' }}
+    >
       <div className="flex items-center justify-between py-1.5 px-4 bg-[#282c34]">
         <span className="text-xs lowercase text-white">{language}</span>
 
@@ -122,6 +125,8 @@ export const CodeBlock: FC<Props> = memo(({ language, value }) => {
           maxWidth: '100%',
           overflowX: 'auto',
           boxSizing: 'border-box',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
         codeTagProps={{
           style: {
@@ -129,6 +134,8 @@ export const CodeBlock: FC<Props> = memo(({ language, value }) => {
             width: '100%',
             maxWidth: '100%',
             boxSizing: 'border-box',
+            wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
           },
         }}
       >

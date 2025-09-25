@@ -10,7 +10,6 @@ import { getDefaultModel } from '@budchat/models';
 import { createUserEvent, createAssistantPlaceholder } from '@/lib/eventMessageHelpers';
 import { useBud } from '@/state/budStore';
 import { FrontendEventHandler } from '@budchat/streaming';
-import { useJsonMode } from '@/hooks/useJsonMode';
 import { EventJsonMode } from '@/components/EventJsonMode';
 import { Button } from '@/components/ui/button';
 import { getModelProvider, isReasoningModel } from '@budchat/models';
@@ -195,7 +194,7 @@ const EventStreamComponent = function EventStream({
                 (currentBudData?.default_json && typeof currentBudData.default_json === 'object' && 'model' in currentBudData.default_json ? (currentBudData.default_json as { model?: string }).model : null) ||
                 getDefaultModel();
 
-  const [jsonMode, setJsonMode] = useJsonMode();
+  const [jsonMode, setJsonMode] = useState(false);
 
   const resolvedConversation = events ? localConversation : conversation;
   const provider = getModelProvider(model);
