@@ -380,9 +380,6 @@ export default function ChatPage({ params }: ChatPageProps) {
               
               if (data.type === 'conversationCreated') {
                 realConversationId = data.conversationId;
-                if (selectedWorkspace && realConversationId) {
-                  addConversationToWorkspace(selectedWorkspace, realConversationId);
-                }
                 // debug logs removed
               } else if (data.type === 'message_final') {
                 // debug log intentionally removed
@@ -425,17 +422,24 @@ export default function ChatPage({ params }: ChatPageProps) {
                     // debug logs removed
                     // Set real conversation first so EventStream can immediately render it
                     latestStore.setConversation(realConversationId, realConv);
-                    // Clear of legacy streaming buffers not needed
-                    
-                    // Defer removal of the temp conversation until after route swap
-                    // to avoid a brief empty render between temp -> real
-                    setTimeout(() => {
-                      const s = useEventChatStore.getState();
-                      s.removeConversation(tempConversationId);
-                      if (selectedWorkspace) {
-                        s.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
-                      }
-                    }, 0);
+
+                    if (selectedWorkspace) {
+                      const storeState = useEventChatStore.getState();
+                      const currentIds = storeState.workspaceConversations[selectedWorkspace] || [];
+                      const updatedIds = currentIds.map((id) => (id === tempConversationId ? realConversationId : id));
+                      storeState.setWorkspaceConversations(selectedWorkspace, Array.from(new Set(updatedIds)));
+                    }
+
+                    const summary = latestStore.conversationSummaries[tempConversationId];
+                    if (summary) {
+                      latestStore.setConversationSummary(realConversationId, {
+                        ...summary,
+                        id: realConversationId,
+                        workspace_id: summary.workspace_id,
+                      });
+                    }
+                    latestStore.removeConversationSummary(tempConversationId);
+                    latestStore.removeConversation(tempConversationId);
 
                     // Update URL using Next.js router - this will trigger pathname updates
                     // debug logs removed
