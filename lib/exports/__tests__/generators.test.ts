@@ -38,7 +38,7 @@ describe('generator templates', () => {
 
   const anthropicTranscript = buildProviderTranscript({
     targetProvider: 'anthropic-messages',
-    context: { model: 'claude-3-5-sonnet-20241022', events: anthropicConversation, ...baseContext },
+    context: { model: 'claude-sonnet-4-20250514', events: anthropicConversation, ...baseContext },
   });
 
   test('OpenAI Chat SDK generator emits usable snippet', () => {
@@ -134,7 +134,7 @@ describe('generator templates', () => {
     const singleTurnTranscript = buildProviderTranscript({
       targetProvider: 'anthropic-messages',
       context: {
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-20250514',
         events: anthropicConversation.slice(0, 3),
         ...baseContext,
       },
@@ -164,7 +164,7 @@ describe('generator templates', () => {
     const singleTurnTranscript = buildProviderTranscript({
       targetProvider: 'anthropic-messages',
       context: {
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-20250514',
         events: anthropicConversation.slice(0, 3),
         ...baseContext,
       },
