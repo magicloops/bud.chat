@@ -23,7 +23,8 @@ import {
 } from '@/lib/eventMessageHelpers';
 import { 
   createBudInitialEvents,
-  budManager
+  budManager,
+  getBudConfig
 } from '@/lib/budHelpers';
 import { Bud } from '@/lib/types';
 import { FrontendEventHandler } from '@budchat/streaming';
@@ -213,7 +214,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         setBud(loadedBud);
         
         const budEvents = createBudInitialEvents(loadedBud);
-        const budConfig = loadedBud.default_json;
+        const budConfig = getBudConfig(loadedBud);
         
         const budConversation = {
           id: tempConversationId,
@@ -224,7 +225,8 @@ export default function ChatPage({ params }: ChatPageProps) {
             title: 'New Chat',
             workspace_id: selectedWorkspace || '',
             source_bud_id: loadedBud.id,
-            // Don't set assistant name/avatar - let the UI derive from bud config
+            assistant_name: budConfig.name || loadedBud.name || 'Assistant',
+            assistant_avatar: budConfig.avatar || '🤖',
             created_at: new Date().toISOString()
           }
         };
