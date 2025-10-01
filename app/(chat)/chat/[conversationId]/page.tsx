@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { 
   useConversation, 
   useSetConversation, 
+  useSetSelectedConversation,
   useSelectedWorkspace,
   useSetSelectedWorkspace,
   useAddConversationToWorkspace,
@@ -87,7 +88,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const conversationId = currentConversationId;
   const isNewConversation = conversationId === 'new';
   const isTempConversation = conversationId.startsWith('temp-branch-');
-  
+
   // State for new conversations only
   const budId = searchParams.get('bud');
   const [bud, setBud] = useState<Bud | null>(null);
@@ -102,8 +103,14 @@ export default function ChatPage({ params }: ChatPageProps) {
   const selectedWorkspace = useSelectedWorkspace();
   const setSelectedWorkspace = useSetSelectedWorkspace();
   const setConversation = useSetConversation();
+  const setSelectedConversation = useSetSelectedConversation();
   const addConversationToWorkspace = useAddConversationToWorkspace();
   
+  useEffect(() => {
+    if (isNewConversation || isTempConversation) return;
+    setSelectedConversation(conversationId);
+  }, [conversationId, isNewConversation, isTempConversation, setSelectedConversation]);
+
   // Use temp ID for new conversations, real ID for existing
   const workingConversationId = isNewConversation ? tempConversationId : conversationId;
   
@@ -202,6 +209,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         };
         
         setConversation(tempConversationId, defaultConversation);
+        setSelectedConversation(tempConversationId);
         setBudLoading(false);
         return;
       }
@@ -232,6 +240,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         };
         
         setConversation(tempConversationId, budConversation);
+        setSelectedConversation(tempConversationId);
         
         // Apply theme
         if (budConfig?.customTheme) {
@@ -263,13 +272,14 @@ export default function ChatPage({ params }: ChatPageProps) {
         };
         
         setConversation(tempConversationId, fallbackConversation);
+        setSelectedConversation(tempConversationId);
       } finally {
         setBudLoading(false);
       }
     };
 
     loadBud();
-  }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation]);
+  }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation, setSelectedConversation]);
   
   // Local streaming flag for new conversations (leaf components handle rendering)
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
@@ -301,6 +311,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (selectedWorkspace) {
       addConversationToWorkspace(selectedWorkspace, tempConversationId);
     }
+    setSelectedConversation(tempConversationId);
 
     try {
       const response = await fetch('/api/chat', {
@@ -447,7 +458,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
-                    
+                    setSelectedConversation(realConversationId);
+
                     // Clear local streaming state since store now has the data
                     setIsLocalStreaming(false);
                   } else {
@@ -469,7 +481,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       console.error('Failed to start streaming:', error);
       setIsLocalStreaming(false);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router, setSelectedConversation]);
 
   // No periodic flush; leaf components subscribe to streaming bus
 

@@ -71,6 +71,7 @@ interface EventChatStore {
   // UI state
   ui: {
     selectedWorkspace: string | null
+    selectedConversationId: string | null
   }
   
   // Conversation actions
@@ -100,6 +101,7 @@ interface EventChatStore {
   
   // UI actions
   setSelectedWorkspace: (workspaceId: string | null) => void
+  setSelectedConversation: (conversationId: string | null) => void
   
   // Realtime actions
   subscribeToWorkspace: (workspaceId: string) => void
@@ -120,6 +122,7 @@ export const useEventChatStore = create<EventChatStore>()(
         activeTempConversation: undefined,
         ui: {
           selectedWorkspace: null,
+          selectedConversationId: null,
         },
         
         // Conversation actions
@@ -166,6 +169,9 @@ export const useEventChatStore = create<EventChatStore>()(
           delete state.conversations[id];
           // Auto-sync: also remove the summary
           delete state.conversationSummaries[id];
+          if (state.ui.selectedConversationId === id) {
+            state.ui.selectedConversationId = null;
+          }
         }),
         
         // Conversation summary actions
@@ -271,6 +277,11 @@ export const useEventChatStore = create<EventChatStore>()(
         // UI actions
         setSelectedWorkspace: (workspaceId) => set((state) => {
           state.ui.selectedWorkspace = workspaceId;
+          state.ui.selectedConversationId = null;
+        }),
+
+        setSelectedConversation: (conversationId) => set((state) => {
+          state.ui.selectedConversationId = conversationId;
         }),
 
         // Realtime actions
@@ -603,6 +614,9 @@ export const useEventIsStreaming = (conversationId: string) =>
 export const useEventSelectedWorkspace = () =>
   useEventChatStore((state) => state.ui.selectedWorkspace);
 
+export const useEventSelectedConversation = () =>
+  useEventChatStore((state) => state.ui.selectedConversationId);
+
 // Action hooks
 export const useEventSetConversation = () => useEventChatStore((state) => state.setConversation);
 export const useEventAddEvent = () => useEventChatStore((state) => state.addEvent);
@@ -610,6 +624,7 @@ export const useEventStartStreaming = () => useEventChatStore((state) => state.s
 export const useEventUpdateStreamingEvent = () => useEventChatStore((state) => state.updateStreamingEvent);
 export const useEventFinishStreaming = () => useEventChatStore((state) => state.finishStreaming);
 export const useEventSetSelectedWorkspace = () => useEventChatStore((state) => state.setSelectedWorkspace);
+export const useEventSetSelectedConversation = () => useEventChatStore((state) => state.setSelectedConversation);
 
 // Workspace conversation management hooks
 export const useEventWorkspaceConversations = (workspaceId: string) => 
@@ -654,6 +669,8 @@ export const useEventCleanup = () =>
 // Legacy-compatible exports to match the original store naming
 export const useSelectedWorkspace = useEventSelectedWorkspace;
 export const useSetSelectedWorkspace = useEventSetSelectedWorkspace;
+export const useSelectedConversation = useEventSelectedConversation;
+export const useSetSelectedConversation = useEventSetSelectedConversation;
 export const useConversations = useEventConversations;
 export const useConversation = useEventConversation;
 export const useSetConversation = useEventSetConversation;
