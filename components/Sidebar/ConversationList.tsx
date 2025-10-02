@@ -15,6 +15,8 @@ import {
   useRemoveConversationFromWorkspace,
   useSetWorkspaceConversations,
   useSelectedWorkspace,
+  useSelectedConversation,
+  useSetSelectedConversation,
   ConversationSummary,
   Conversation,
   ConversationMeta
@@ -62,6 +64,8 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   const removeConversationFromWorkspace = useRemoveConversationFromWorkspace();
   const setWorkspaceConversations = useSetWorkspaceConversations();
   const _selectedWorkspace = useSelectedWorkspace();
+  const selectedConversationIdOverride = useSelectedConversation();
+  const setSelectedConversation = useSetSelectedConversation();
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -93,6 +97,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     const conversationId = match ? match[1] : '';
     return conversationId;
   }, [pathname]);
+  const effectiveSelectedConversationId = selectedConversationIdOverride || currentConversationId;
 
   // Load conversations for the workspace and add them to ChatStore (first page)
   useEffect(() => {
@@ -329,6 +334,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   // Track conversation clicks and use instant state switching
   const handleConversationClick = useCallback((conversationId: ConversationId, e: React.MouseEvent) => {
     e.preventDefault(); // Prevent default Link navigation
+    setSelectedConversation(conversationId);
     
     // Direct state switching via custom event for instant navigation
     const switchEvent = new CustomEvent('switchConversation', { 
@@ -338,7 +344,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
     
     // Update URL for browser history
     router.replace(`/chat/${conversationId}`, { scroll: false });
-  }, [fullConversations, router]);
+  }, [router, setSelectedConversation]);
 
   if (isLoading) {
     return (
@@ -369,7 +375,7 @@ export function ConversationList({ workspaceId }: ConversationListProps) {
   return (
     <div ref={containerRef} className="p-2 space-y-1 min-h-0 w-full max-w-full">
       {workspaceConversations.map((conversationMeta) => {
-        const isSelected = currentConversationId === conversationMeta.id;
+        const isSelected = effectiveSelectedConversationId === conversationMeta.id;
         const createdAt = new Date(conversationMeta.created_at);
         const timeAgo = formatDistanceToNow(createdAt, { addSuffix: true });
         const assistantName = conversationMeta.assistant_name || 'Assistant';

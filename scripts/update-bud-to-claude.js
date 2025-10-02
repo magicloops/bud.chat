@@ -30,7 +30,7 @@ const updateBudToClaude = async () => {
         default_json: {
           name: 'Claude Research Assistant',
           avatar: '🔍',
-          model: 'claude-3-5-sonnet', // Use friendly model name, will be mapped to claude-3-5-sonnet-20241022
+          model: 'claude-sonnet-4-0', // Use friendly model name, will be mapped to claude-sonnet-4-20250514
           temperature: 0.7,
           max_tokens: 4000,
           instructions: 'You are a helpful Claude assistant with access to research tools. Use the available tools to provide comprehensive, well-researched answers.',

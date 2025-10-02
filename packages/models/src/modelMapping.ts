@@ -54,11 +54,20 @@ export const MODEL_MAPPING: Record<string, ModelInfo> = {
   'gpt-4-turbo': { apiName: 'gpt-4-turbo', provider: 'openai', displayName: 'GPT-4 Turbo' },
   'gpt-4': { apiName: 'gpt-4', provider: 'openai', displayName: 'GPT-4' },
   'gpt-3.5-turbo': { apiName: 'gpt-3.5-turbo', provider: 'openai', displayName: 'GPT-3.5 Turbo' },
-  'claude-3-5-sonnet': { apiName: 'claude-3-5-sonnet-20241022', provider: 'anthropic', displayName: 'Claude 3.5 Sonnet' },
-  'claude-3-5-haiku': { apiName: 'claude-3-5-haiku-20241022', provider: 'anthropic', displayName: 'Claude 3.5 Haiku' },
-  'claude-3-opus': { apiName: 'claude-3-opus-20240229', provider: 'anthropic', displayName: 'Claude 3 Opus' },
-  'claude-3-sonnet': { apiName: 'claude-3-sonnet-20240229', provider: 'anthropic', displayName: 'Claude 3 Sonnet' },
-  'claude-3-haiku': { apiName: 'claude-3-haiku-20240307', provider: 'anthropic', displayName: 'Claude 3 Haiku' },
+  'claude-opus-4-1': { apiName: 'claude-opus-4-1-20250805', provider: 'anthropic', displayName: 'Claude Opus 4.1' },
+  'claude-opus-4-0': { apiName: 'claude-opus-4-20250514', provider: 'anthropic', displayName: 'Claude Opus 4' },
+  'claude-sonnet-4-5': { apiName: 'claude-sonnet-4-5-20250805', provider: 'anthropic', displayName: 'Claude Sonnet 4.5' },
+  'claude-sonnet-4-0': { apiName: 'claude-sonnet-4-20250514', provider: 'anthropic', displayName: 'Claude Sonnet 4' },
+  'claude-3-7-sonnet-latest': { apiName: 'claude-3-7-sonnet-20250219', provider: 'anthropic', displayName: 'Claude Sonnet 3.7' },
+  'claude-3-5-haiku-latest': { apiName: 'claude-3-5-haiku-20241022', provider: 'anthropic', displayName: 'Claude Haiku 3.5' },
+};
+
+const ANTHROPIC_LEGACY_ALIASES: Record<string, string> = {
+  'claude-3-5-sonnet': 'claude-sonnet-4-0',
+  'claude-3-5-haiku': 'claude-sonnet-4-0',
+  'claude-3-opus': 'claude-sonnet-4-0',
+  'claude-3-sonnet': 'claude-sonnet-4-0',
+  'claude-3-haiku': 'claude-sonnet-4-0',
 };
 
 export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
@@ -75,19 +84,36 @@ export const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
   'gpt-4-turbo': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
   'gpt-4': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
   'gpt-3.5-turbo': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
-  'claude-3-5-sonnet': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
-  'claude-3-5-haiku': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
-  'claude-3-opus': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
-  'claude-3-sonnet': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
-  'claude-3-haiku': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-opus-4-1': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-opus-4-0': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-sonnet-4-5': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-sonnet-4-0': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-3-7-sonnet-latest': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
+  'claude-3-5-haiku-latest': { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false },
 };
 
+function normalizeModelAlias(friendlyName: string): string {
+  let current = friendlyName;
+  const visited = new Set<string>();
+
+  while (ANTHROPIC_LEGACY_ALIASES[current] && !visited.has(current)) {
+    visited.add(current);
+    current = ANTHROPIC_LEGACY_ALIASES[current];
+  }
+
+  return current;
+}
+
 export function getModelProvider(friendlyName: string): 'openai' | 'anthropic' {
-  const info = MODEL_MAPPING[friendlyName];
+  const resolved = normalizeModelAlias(friendlyName);
+  const info = MODEL_MAPPING[resolved];
   if (!info) throw new Error(`Unknown model: ${friendlyName}`);
   return info.provider;
 }
-export function getApiModelName(friendlyName: string): string { return MODEL_MAPPING[friendlyName]?.apiName || friendlyName; }
+export function getApiModelName(friendlyName: string): string {
+  const resolved = normalizeModelAlias(friendlyName);
+  return MODEL_MAPPING[resolved]?.apiName || resolved;
+}
 export function isReasoningModel(friendlyName: string): boolean { return ['o1','o1-mini','o3','o3-mini','o4-mini','gpt-5','gpt-5-mini','gpt-5-nano'].includes(friendlyName); }
 
 export function getModelsForUI(): Array<{value: string, label: string, provider: string}> {
@@ -101,7 +127,8 @@ export function getDefaultModel(): string {
 }
 
 export function getModelCapabilities(friendlyName: string): ModelCapabilities {
-  const capabilities = MODEL_CAPABILITIES[friendlyName];
+  const resolved = normalizeModelAlias(friendlyName);
+  const capabilities = MODEL_CAPABILITIES[resolved];
   if (!capabilities) {
     return { supports_builtin_tools: false, available_builtin_tools: [], uses_responses_api: false };
   }

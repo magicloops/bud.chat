@@ -71,7 +71,7 @@ const createClaudeMCPBud = async () => {
       default_json: {
         name: 'Claude Research Assistant',
         avatar: '🔍',
-        model: 'claude-3-5-sonnet-20241022', // Use Claude 3.5 Sonnet
+        model: 'claude-sonnet-4-20250514', // Use Claude Sonnet 4
         temperature: 0.7,
         max_tokens: 4000,
         customTheme: {

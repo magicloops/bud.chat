@@ -8,6 +8,7 @@ import { Loader2 } from 'lucide-react';
 import { 
   useConversation, 
   useSetConversation, 
+  useSetSelectedConversation,
   useSelectedWorkspace,
   useSetSelectedWorkspace,
   useAddConversationToWorkspace,
@@ -23,7 +24,8 @@ import {
 } from '@/lib/eventMessageHelpers';
 import { 
   createBudInitialEvents,
-  budManager
+  budManager,
+  getBudConfig
 } from '@/lib/budHelpers';
 import { Bud } from '@/lib/types';
 import { FrontendEventHandler } from '@budchat/streaming';
@@ -86,7 +88,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const conversationId = currentConversationId;
   const isNewConversation = conversationId === 'new';
   const isTempConversation = conversationId.startsWith('temp-branch-');
-  
+
   // State for new conversations only
   const budId = searchParams.get('bud');
   const [bud, setBud] = useState<Bud | null>(null);
@@ -101,8 +103,14 @@ export default function ChatPage({ params }: ChatPageProps) {
   const selectedWorkspace = useSelectedWorkspace();
   const setSelectedWorkspace = useSetSelectedWorkspace();
   const setConversation = useSetConversation();
+  const setSelectedConversation = useSetSelectedConversation();
   const addConversationToWorkspace = useAddConversationToWorkspace();
   
+  useEffect(() => {
+    if (isNewConversation || isTempConversation) return;
+    setSelectedConversation(conversationId);
+  }, [conversationId, isNewConversation, isTempConversation, setSelectedConversation]);
+
   // Use temp ID for new conversations, real ID for existing
   const workingConversationId = isNewConversation ? tempConversationId : conversationId;
   
@@ -201,6 +209,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         };
         
         setConversation(tempConversationId, defaultConversation);
+        setSelectedConversation(tempConversationId);
         setBudLoading(false);
         return;
       }
@@ -213,7 +222,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         setBud(loadedBud);
         
         const budEvents = createBudInitialEvents(loadedBud);
-        const budConfig = loadedBud.default_json;
+        const budConfig = getBudConfig(loadedBud);
         
         const budConversation = {
           id: tempConversationId,
@@ -224,12 +233,14 @@ export default function ChatPage({ params }: ChatPageProps) {
             title: 'New Chat',
             workspace_id: selectedWorkspace || '',
             source_bud_id: loadedBud.id,
-            // Don't set assistant name/avatar - let the UI derive from bud config
+            assistant_name: budConfig.name || loadedBud.name || 'Assistant',
+            assistant_avatar: budConfig.avatar || '🤖',
             created_at: new Date().toISOString()
           }
         };
         
         setConversation(tempConversationId, budConversation);
+        setSelectedConversation(tempConversationId);
         
         // Apply theme
         if (budConfig?.customTheme) {
@@ -261,13 +272,14 @@ export default function ChatPage({ params }: ChatPageProps) {
         };
         
         setConversation(tempConversationId, fallbackConversation);
+        setSelectedConversation(tempConversationId);
       } finally {
         setBudLoading(false);
       }
     };
 
     loadBud();
-  }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation]);
+  }, [budId, isNewConversation, tempConversationId, selectedWorkspace, setConversation, setSelectedConversation]);
   
   // Local streaming flag for new conversations (leaf components handle rendering)
   const [isLocalStreaming, setIsLocalStreaming] = useState(false);
@@ -299,6 +311,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (selectedWorkspace) {
       addConversationToWorkspace(selectedWorkspace, tempConversationId);
     }
+    setSelectedConversation(tempConversationId);
 
     try {
       const response = await fetch('/api/chat', {
@@ -378,9 +391,6 @@ export default function ChatPage({ params }: ChatPageProps) {
               
               if (data.type === 'conversationCreated') {
                 realConversationId = data.conversationId;
-                if (selectedWorkspace && realConversationId) {
-                  addConversationToWorkspace(selectedWorkspace, realConversationId);
-                }
                 // debug logs removed
               } else if (data.type === 'message_final') {
                 // debug log intentionally removed
@@ -423,17 +433,24 @@ export default function ChatPage({ params }: ChatPageProps) {
                     // debug logs removed
                     // Set real conversation first so EventStream can immediately render it
                     latestStore.setConversation(realConversationId, realConv);
-                    // Clear of legacy streaming buffers not needed
-                    
-                    // Defer removal of the temp conversation until after route swap
-                    // to avoid a brief empty render between temp -> real
-                    setTimeout(() => {
-                      const s = useEventChatStore.getState();
-                      s.removeConversation(tempConversationId);
-                      if (selectedWorkspace) {
-                        s.removeConversationFromWorkspace(selectedWorkspace, tempConversationId);
-                      }
-                    }, 0);
+
+                    if (selectedWorkspace) {
+                      const storeState = useEventChatStore.getState();
+                      const currentIds = storeState.workspaceConversations[selectedWorkspace] || [];
+                      const updatedIds = currentIds.map((id) => (id === tempConversationId ? realConversationId : id));
+                      storeState.setWorkspaceConversations(selectedWorkspace, Array.from(new Set(updatedIds)));
+                    }
+
+                    const summary = latestStore.conversationSummaries[tempConversationId];
+                    if (summary) {
+                      latestStore.setConversationSummary(realConversationId, {
+                        ...summary,
+                        id: realConversationId,
+                        workspace_id: summary.workspace_id,
+                      });
+                    }
+                    latestStore.removeConversationSummary(tempConversationId);
+                    latestStore.removeConversation(tempConversationId);
 
                     // Update URL using Next.js router - this will trigger pathname updates
                     // debug logs removed
@@ -441,7 +458,8 @@ export default function ChatPage({ params }: ChatPageProps) {
                     
                     // Update the current conversation ID for this component
                     setCurrentConversationId(realConversationId);
-                    
+                    setSelectedConversation(realConversationId);
+
                     // Clear local streaming state since store now has the data
                     setIsLocalStreaming(false);
                   } else {
@@ -463,7 +481,7 @@ export default function ChatPage({ params }: ChatPageProps) {
       console.error('Failed to start streaming:', error);
       setIsLocalStreaming(false);
     }
-  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router]);
+  }, [selectedWorkspace, isNewConversation, tempConversationId, addConversationToWorkspace, bud, bud?.id, router, setSelectedConversation]);
 
   // No periodic flush; leaf components subscribe to streaming bus
 

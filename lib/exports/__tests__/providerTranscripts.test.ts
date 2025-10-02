@@ -50,7 +50,7 @@ describe('buildProviderTranscript', () => {
     const transcript = buildProviderTranscript({
       targetProvider: 'anthropic-messages',
       context: {
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-sonnet-4-20250514',
         events: anthropicConversation,
         ...baseContext,
       },
@@ -59,7 +59,7 @@ describe('buildProviderTranscript', () => {
     expect(transcript.provider).toBe('anthropic-messages');
     expect(transcript.steps.length).toBeGreaterThan(0);
     const step = transcript.steps[0];
-    expect(step.request).toMatchObject({ model: 'claude-3-5-sonnet-20241022' });
+    expect(step.request).toMatchObject({ model: 'claude-sonnet-4-20250514' });
     expect(step.response).toMatchObject({ role: 'assistant', type: 'message' });
   });
 });
