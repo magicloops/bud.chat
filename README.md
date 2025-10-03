@@ -1,3 +1,6 @@
+*🚨Warning: no human has read the code in this repo*
+
+
 bud.chat
 
 Branch-first LLM chat for the web with a unified, provider‑agnostic event model, streaming‑first UX, and Supabase persistence. The app is now modularized into internal packages for events, models, providers, streaming, and data access.
