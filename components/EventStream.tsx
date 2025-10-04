@@ -188,11 +188,16 @@ const EventStreamComponent = function EventStream({
     : conversation?.meta?.title || 'Chat';
   
   // Get model from conversation -> current bud -> default (same hierarchy as backend)
-  const model = conversation?.meta.model_config_overrides?.model ||
-                (budData?.default_json && typeof budData.default_json === 'object' && 'model' in budData.default_json ? (budData.default_json as { model?: string }).model : null) ||
-                // For existing conversations, use current bud data from store
-                (currentBudData?.default_json && typeof currentBudData.default_json === 'object' && 'model' in currentBudData.default_json ? (currentBudData.default_json as { model?: string }).model : null) ||
-                getDefaultModel();
+  const rawModel =
+    conversation?.meta.model_config_overrides?.model ??
+    (budData?.default_json && typeof budData.default_json === 'object' && 'model' in budData.default_json
+      ? (budData.default_json as { model?: unknown }).model
+      : undefined) ??
+    (currentBudData?.default_json && typeof currentBudData.default_json === 'object' && 'model' in currentBudData.default_json
+      ? (currentBudData.default_json as { model?: unknown }).model
+      : undefined);
+
+  const model = typeof rawModel === 'string' && rawModel.length > 0 ? rawModel : getDefaultModel();
 
   const [jsonMode, setJsonMode] = useState(false);
 
