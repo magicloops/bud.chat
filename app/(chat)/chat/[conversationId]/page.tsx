@@ -438,7 +438,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                       const storeState = useEventChatStore.getState();
                       const currentIds = storeState.workspaceConversations[selectedWorkspace] || [];
                       const updatedIds = currentIds.map((id) => (id === tempConversationId ? realConversationId : id));
-                      storeState.setWorkspaceConversations(selectedWorkspace, Array.from(new Set(updatedIds)));
+                      storeState.setWorkspaceConversations(selectedWorkspace, Array.from(new Set(updatedIds.filter((id): id is string => !!id))));
                     }
 
                     const summary = latestStore.conversationSummaries[tempConversationId];

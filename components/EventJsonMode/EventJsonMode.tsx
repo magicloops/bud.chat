@@ -61,29 +61,32 @@ export function EventJsonMode({ conversation, model, targetProvider }: EventJson
   );
 
   const providerPayload = useMemo<JsonValue>(() => {
+    const toJsonValue = (value: unknown): JsonValue =>
+      JSON.parse(JSON.stringify(value ?? null)) as JsonValue;
+
     const mcpOverrides = conversation.meta.mcp_config_overrides as
       | { remote_servers?: Array<{ server_label: string }> }
       | undefined;
     switch (targetProvider) {
       case 'openai-chat':
-        return {
+        return toJsonValue({
           model,
           messages: eventsToOpenAIChatMessages(conversation.events),
-        };
+        });
       case 'openai-responses':
-        return {
+        return toJsonValue({
           model,
           input: eventsToResponsesInputItems(conversation.events, {
             remoteServers: mcpOverrides?.remote_servers,
           }),
-        };
+        });
       case 'anthropic-messages':
-        return {
+        return toJsonValue({
           model,
           messages: eventsToAnthropicMessages(conversation.events),
-        };
+        });
       default:
-        return conversation.events as unknown as JsonValue;
+        return toJsonValue(conversation.events);
     }
   }, [conversation.events, conversation.meta.mcp_config_overrides, model, targetProvider]);
 
