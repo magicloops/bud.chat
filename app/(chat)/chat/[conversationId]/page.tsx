@@ -338,22 +338,38 @@ export default function ChatPage({ params }: ChatPageProps) {
       let resolveFinal: (() => void) | null = null;
       const waitForFinal = new Promise<void>((resolve) => { resolveFinal = resolve; });
 
+      // Declare realConversationId before eventHandler so the closure can access it
+      let realConversationId: string | null = null;
+
       const eventHandler = new FrontendEventHandler(
         tempConversationId,
         useEventChatStore,
-        { 
+        {
           debug: false,
           onMessageFinal: (finalEvent) => {
             // Guard: ensure assistant role on finalize (streaming is always assistant)
             const safeFinal = finalEvent.role === 'assistant' ? finalEvent : { ...finalEvent, role: 'assistant' as const };
             // Insert canonical final event by id and remove placeholder to avoid duplicates
             const store = useEventChatStore.getState();
-            const tempConv = store.conversations[tempConversationId];
-            if (!tempConv) return;
-            const filtered = tempConv.events.filter(e => e.id !== safeFinal.id && e.id !== assistantPlaceholder.id);
+
+            // Try temp conversation first, then fall back to real conversation
+            // This handles the race condition where 'complete' arrives before 'message_final'
+            // and the temp conversation has already been deleted
+            let targetConv = store.conversations[tempConversationId];
+            let targetId = tempConversationId;
+
+            if (!targetConv && realConversationId) {
+              // Temp was deleted, update the real conversation instead
+              targetConv = store.conversations[realConversationId];
+              targetId = realConversationId;
+            }
+
+            if (!targetConv) return;
+
+            const filtered = targetConv.events.filter(e => e.id !== safeFinal.id && e.id !== assistantPlaceholder.id);
             const events = [...filtered, safeFinal];
-            store.setConversation(tempConversationId, {
-              ...tempConv,
+            store.setConversation(targetId, {
+              ...targetConv,
               events,
               // keep streaming true until 'complete', but event content is now canonical
             });
@@ -375,7 +391,6 @@ export default function ChatPage({ params }: ChatPageProps) {
       // debug logs removed
 
       const decoder = new TextDecoder();
-      let realConversationId: string | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
